@@ -168,6 +168,13 @@ public:
 		}
 	}
 
+	virtual void* GetNativeContextHandle() const override
+	{
+		// The live JSContext as an opaque void* for the JS Binding layer (sprint 007). The binding casts it
+		// back to JSContext* and derives the runtime via JS_GetRuntime; 002's public header stays JS_*-free.
+		return Context;
+	}
+
 private:
 	// C thunk for JS_SetInterruptHandler (signature: int(JSRuntime*, void* opaque)); opaque is `this`.
 	// Adapts the engine's call to our stored policy closure — thin vendor glue, returns nonzero to abort.

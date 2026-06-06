@@ -90,6 +90,13 @@ public:
 
 	/** Per-runtime stack ceiling, in bytes. */
 	virtual void SetMaxStackSize(SIZE_T StackBytes) = 0;
+
+	/** The live JS context as an OPAQUE handle, for the JS Binding layer (sprint 007). Returns the engine's
+	 *  context cast to void* so this header stays JS_*-free; CathodeBinding casts it back internally and
+	 *  derives the runtime from it. Worker-thread-only (the runtime's thread-affinity invariant). Defaults to
+	 *  null — a mock/non-engine runtime has no context; the engine-backed runtime overrides this to return
+	 *  its real context. (Non-pure so existing mock implementers stay unchanged.) */
+	virtual void* GetNativeContextHandle() const { return nullptr; }
 };
 
 /**

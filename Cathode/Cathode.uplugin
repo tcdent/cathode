@@ -36,6 +36,11 @@
 			"Name": "CathodeSurfaces",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeBinding",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
