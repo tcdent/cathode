@@ -21,6 +21,11 @@
 			"Name": "CathodeRasterizer",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeText",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
