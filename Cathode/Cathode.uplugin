@@ -26,6 +26,11 @@
 			"Name": "CathodeText",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeLayout",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
