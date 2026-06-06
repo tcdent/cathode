@@ -198,3 +198,95 @@ testability honesty**, proven by reading source:
 3. **Knob-storage shape** — a documented C++ config struct (runtime rendering config, not
    author-facing) read at context creation, with TBD defaults. Confirm vs any other store the human
    prefers for tunables.
+
+---
+
+# Postmortem (sprint close)
+
+Sprint 003 **closed ACCEPTED** — all five slices plus a human-imposed accountability gate
+independently accepted by `uptime.browse-review`. The **whole Rasterizer** is authored as
+no-build/no-run/no-pixel scaffold: the Blend2D swap boundary (`IRasterBackend`/`IRasterBitmap`/
+`IRasterContext`, Blend2D + AsmJit confined to one `.cpp`), the CPU bitmap + pixel format +
+double-buffering, dirty-region tracking, the paint backend + one `DispatchPaintOps`, the
+generalizable input/output seams, and the live `RasterizeFrame` producer with dirty-region rendering
+**wired** into the paint path. All bespoke logic is tested via a recording backend, **never pixels**.
+Behavioral proof, build/log coherence, and **all visual fidelity** are inherited by the
+execution-approval sprint. The durable accountability of record is
+`game/Plugins/Cathode/Source/CathodeRasterizer/COVERAGE.md`.
+
+## Accountability gate (the human's close requirement)
+
+The human required that **nothing in `components-rasterizer.md` be deferred without accountability** —
+"deferring without accountability means this thing breaks when we execute it for the first time."
+This forced two things: (1) the Slice-3 dirty-region tracker had to be **wired into the live render
+path** (per-rect `ClipToRect` → `DispatchPaintOps` → `ResetClip`), because a built-but-unwired
+tracker does not satisfy "rasterize dirty regions only"; (2) a **doc-coverage audit** mapping every
+responsibility to covered-or-deferred(reason + dependency + unblocker + first-execution-risk). The
+reviewer's independent re-derivation caught that the audit first existed **only in coordination, not
+in the tree** (with the committed code dangling a "see the doc-coverage audit" reference) — a split
+verdict (code accepted, close blocked) until `COVERAGE.md` was committed durably and the reference
+resolved. **Lesson: an accountability record that lives only in a transcript is not accountability.**
+
+## Lead retrospective — uptime.browse-lead
+
+Corrections I own this sprint:
+- **I got ahead of the human on the tuning config.** I framed the Rasterizer tuning as
+  "TBD, defer to later research" and kept releasing slices while the human was actively researching
+  the decisions I had asked for. The tuning is integral sprint scope; when I ask the human for
+  sprint-scoped input I **hold the affected work and wait**, I do not advance in parallel.
+- **Shared-memory footprint.** Unscoped feedback/process memories steer devs on subsystems I have no
+  purview over; I rescoped mine to browse and keep my footprint there.
+- **I caused the crossed-message hold/proceed.** My hold (after getting ahead) and my lift (once the
+  human gave the tuning) crossed at the dev; the dev correctly stopped and asked rather than guessing
+  or reverting. Confirm-before-revert is the fast path.
+
+Patterns that worked and stay: relaying the hardest acceptance criterion **up front** (the
+one-dispatch-entry + shared-effect-log, like 002's no-forked-tick) so the high-risk slice is built
+right, not re-cycled; and keeping the reviewer's coverage map **independent** (I did not forward the
+dev's audit to the reviewer) so the completeness re-derivation was genuinely independent.
+
+## Developer retrospective — uptime.browse-dev
+
+Authored the whole Rasterizer as no-build scaffold across five slices, carrying the 002 patterns
+verbatim: swap boundary at moderate altitude with vendor confined to one `.cpp` (grep-proven each
+slice); bespoke logic on top of the boundary tested via a recording backend, never pixels; the
+no-forked-dispatch single-entry discipline; design-invariant-vs-engine-value test calls (color as a
+forwarded dispatch-arg, never a readback pixel). Reading the staged Blend2D API grounded every
+decision (incl. `BLRenderingQuality` having only `ANTIALIAS` → the retro-CRT aliased look needs a
+different mechanism, surfaced not invented). The human's tuning set closed the knob inventory to zero
+TBD, all top-level for re-tuning. Strongest lesson: **a built-but-unwired mechanism does not satisfy
+a doc responsibility** — the gate forced dirty-region clipping into the live path + the explicit
+audit. Friction: a genuine crossed-message HOLD/PROCEED — stopped mid-step, surfaced the exact state
++ the A/B question, moved only on the ruling (and the reminder to send blockers over the channel, not
+just print them locally).
+
+## Reviewer retrospective — uptime.browse-review
+
+Re-derived every slice from source. Rulings: BL\* confinement held every slice (vendor only ever in
+`CathodeRasterBlend2D.cpp`); the **literal-geometry-vs-pixel** distinction (a union/clamp result is a
+design invariant — assert the rect directly; the no-readback rule targets vendor pixel output); the
+**dispatch-arg color** distinction (a forwarded `FColor` is our bookkeeping, only a rendered/readback
+pixel is prohibited); the input-seam invocation-trace (closed S4 input-consumption, no-fork producer
+carried to S5); **dirty-only wired-not-built** (the hardest functional flag — confirmed the tracker
+is wired, the doc satisfied); knobs decided-not-stale + the real-vs-minimum stride catch; and the
+**reject-on-completeness** close-gate catch (the audit was coordination-only with a dangling code
+reference → split verdict until a durable `COVERAGE.md` landed, then re-derived against an independent
+coverage map). Everything behavioral + visual stayed **deferred** and stated as such in every verdict.
+
+## Execution-approval sprint (and future component sprints) inherit
+
+**The durable record is `CathodeRasterizer/COVERAGE.md`** — its DEFERRED list is the execution inbox:
+- **#1 vendor glyph fill** — Text & Fonts supplies `BLFont`/`BLGlyphRun`.
+- **#2 glyph-only-no-dirty** — glyph ops carry no bounds, so a glyph-only frame has empty dirty and
+  does not render until Text supplies glyph **extents**.
+- **#3 styled/rounded borders** — add a stroke/rounded-rect/path op to `IRasterContext`; only solid
+  fill-composed borders are covered now.
+- **#4 4K AA fidelity proof** — execution render + human eyes + the human's mitigation plan; the
+  `FRasterConfig` defaults are decided starting points, not proven values.
+- **#5 cross-module producer wiring** — the 002 phase-5 relayout seam → `RasterizeFrame`; Layout →
+  `FPaintOp`; Surfaces/Texture-Egress ← `FFrameReadySeam`; an integration sprint (Core-only by
+  directive this sprint).
+
+Then: un-stub `CathodeRasterizer.Build.cs`'s Blend2D/AsmJit `ThirdParty` block (SDL2 pattern; AsmJit
+relocates to `blend2d/3rdparty`, ship-with-JIT), build from source, activate the plugin — the first
+owned build event, where build/log coherence applies and the recording-backend specs finally run.
