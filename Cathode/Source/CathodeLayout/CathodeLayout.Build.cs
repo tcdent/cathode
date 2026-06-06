@@ -14,6 +14,7 @@ public class CathodeLayout : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
+			"CathodeResolver", // sprint 009: the document_container's resource callbacks route to IResourceResolver
 		});
 
 		// --- Bundled ThirdParty: litehtml (the layout/CSS engine) ---

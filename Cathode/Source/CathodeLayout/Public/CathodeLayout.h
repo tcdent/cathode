@@ -175,6 +175,10 @@ public:
 	virtual void GetFontMetrics(FLayoutFontRef Font, float& OutAscent, float& OutDescent, float& OutHeight) = 0;
 };
 
+// Sprint 009: the Resource Resolver the document_container's image/CSS/font callbacks route to. Defined by
+// CathodeResolver; referenced here by pointer only (forward-declared — the engine impl includes its header).
+class IResourceResolver;
+
 // The layout engine — the swap boundary. SetDocument (the retained-DOM source), MarkNodeDirty (drives
 // the affected-subtree selection), Relayout (re-feed baseline behind the seam: complete when nothing
 // localizes, the affected subtree when dirty marks do) -> positioned geometry + the neutral paint ops.
@@ -186,6 +190,11 @@ public:
 	virtual void SetDocument(const ILayoutDocumentSource& Source) = 0;
 	virtual void MarkNodeDirty(int32 NodeId, EDirtyKind Kind) = 0;
 	virtual FLayoutResult Relayout(int32 AvailableWidth) = 0;
+
+	// Sprint 009: inject the Resource Resolver the document_container's load_image/get_image_size/import_css
+	// route to. Non-pure default no-op (a null/unset resolver == the pre-hook stub behavior; keeps existing
+	// mock implementers byte-identical). Call before SetDocument. The litehtml-backed engine overrides it.
+	virtual void SetResourceResolver(IResourceResolver* Resolver) {}
 };
 
 // Construct the litehtml-backed layout engine over a text measurer. The single place litehtml is bound;

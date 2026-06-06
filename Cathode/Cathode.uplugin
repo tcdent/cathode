@@ -46,6 +46,11 @@
 			"Name": "CathodeDom",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeResolver",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

@@ -4,6 +4,8 @@
 #include "CathodeObservationRead.h"
 #include "CathodePaintRouting.h"
 #include "CathodeRelayout.h"
+#include "CathodeResolver.h"        // sprint 009: IResourceResolver
+#include "CathodeResourceRouting.h" // sprint 009: the litehtml-free container->resolver routing helpers
 
 #include "Containers/StringConv.h"
 
@@ -76,7 +78,8 @@ public:
 	// across versions (create_font, draw_background, set_clip, get_image_size, create_element, ...).
 	// Verify the full interface against the vendored litehtml; any mismatch is a hard compile error.
 	FCathodeDocumentContainer(FLayoutFontCache& InFontCache, TArray<FLayoutPaintOp>& InSink,
-		int32 InClientWidth, int32 InClientHeight, int32 InDpi, const FString& InDefaultFont, int32 InDefaultFontSize)
+		int32 InClientWidth, int32 InClientHeight, int32 InDpi, const FString& InDefaultFont, int32 InDefaultFontSize,
+		IResourceResolver* InResolver) // sprint 009: the resource resolver (nullable; null == pre-hook stub behavior)
 		: FontCache(InFontCache)
 		, Sink(InSink)
 		, ClientWidth(InClientWidth)
@@ -84,6 +87,7 @@ public:
 		, Dpi(InDpi)
 		, DefaultFontSize(InDefaultFontSize)
 		, DefaultFontUtf8(*InDefaultFont) // stable UTF-8 copy for get_default_font_name()
+		, Resolver(InResolver)
 	{
 	}
 
@@ -171,16 +175,23 @@ public:
 		}
 	}
 
-	void get_image_size(const char* /*src*/, const char* /*baseurl*/, litehtml::size& sz) override
+	void get_image_size(const char* src, const char* baseurl, litehtml::size& sz) override
 	{
-		// TODO(Resource Resolver): image byte loading + size resolution via a neutral image-info seam.
-		sz.width = 0;
-		sz.height = 0;
+		// sprint 009: route to the resolver (litehtml::string -> FString at the edge); dimensions need a 003
+		// decode (RQ1) -> 0x0 this sprint (RouteImageSize), now via the routing layer not a hardcoded stub.
+		int32 Width = 0, Height = 0;
+		RouteImageSize(Resolver, src ? FString(UTF8_TO_TCHAR(src)) : FString(),
+			baseurl ? FString(UTF8_TO_TCHAR(baseurl)) : FString(), Width, Height);
+		sz.width = Width;
+		sz.height = Height;
 	}
 
-	void load_image(const char* /*src*/, const char* /*baseurl*/, bool /*redraw_on_ready*/) override
+	void load_image(const char* src, const char* baseurl, bool /*redraw_on_ready*/) override
 	{
-		// TODO(Resource Resolver): image loading is the Resolver's; no-op here.
+		// sprint 009: resolve the image bytes via the resolver (available for the 003 draw at integration).
+		TArray<uint8> Bytes;
+		RouteImageBytes(Resolver, src ? FString(UTF8_TO_TCHAR(src)) : FString(),
+			baseurl ? FString(UTF8_TO_TCHAR(baseurl)) : FString(), Bytes);
 	}
 
 	// --- Config / inputs ---
@@ -218,7 +229,15 @@ public:
 	void on_anchor_click(const char* /*url*/, const litehtml::element::ptr& /*el*/) override {}
 	void set_cursor(const char* /*cursor*/) override {}
 	void transform_text(litehtml::string& /*text*/, litehtml::text_transform /*tt*/) override {}
-	void import_css(litehtml::string& /*text*/, const litehtml::string& /*url*/, litehtml::string& /*baseurl*/) override {}
+	void import_css(litehtml::string& text, const litehtml::string& url, litehtml::string& baseurl) override
+	{
+		// sprint 009: resolve the linked stylesheet via the resolver; on a hit, hand the CSS text to litehtml.
+		FString Css;
+		if (RouteLinkedCss(Resolver, FString(UTF8_TO_TCHAR(url.c_str())), FString(UTF8_TO_TCHAR(baseurl.c_str())), Css))
+		{
+			text = TCHAR_TO_UTF8(*Css);
+		}
+	}
 	void get_language(litehtml::string& /*language*/, litehtml::string& /*culture*/) const override {}
 
 	litehtml::element::ptr create_element(const char* /*tag_name*/, const litehtml::string_map& /*attributes*/,
@@ -235,6 +254,7 @@ private:
 	int32 Dpi;
 	int32 DefaultFontSize;
 	FTCHARToUTF8 DefaultFontUtf8; // stable UTF-8 default font name (init from the ctor's InDefaultFont)
+	IResourceResolver* Resolver;  // sprint 009: nullable; the image/CSS resource callbacks route to it
 };
 
 // The litehtml-backed relayout backend — the vendor edge of the IRelayoutBackend seam. Re-feeds markup
@@ -245,11 +265,11 @@ class FLiteHtmlRelayoutBackend final : public IRelayoutBackend
 {
 public:
 	FLiteHtmlRelayoutBackend(const ILayoutDocumentSource& InSource, FLayoutFontCache& InFontCache,
-		TArray<FLayoutPaintOp>& InSink)
+		TArray<FLayoutPaintOp>& InSink, IResourceResolver* InResolver) // sprint 009: pass the resolver to the container
 		: Source(InSource)
 		, Sink(InSink)
 		, Container(InFontCache, InSink, DefaultViewportWidth, DefaultViewportHeight, DefaultDpi,
-			TEXT("sans-serif"), DefaultFontSize)
+			TEXT("sans-serif"), DefaultFontSize, InResolver)
 	{
 	}
 
@@ -318,12 +338,18 @@ public:
 	{
 		Source = &InSource;
 		Controller.SetDocument(InSource);
-		Backend = MakeUnique<FLiteHtmlRelayoutBackend>(InSource, FontCache, Sink);
+		Backend = MakeUnique<FLiteHtmlRelayoutBackend>(InSource, FontCache, Sink, Resolver);
 	}
 
 	void MarkNodeDirty(int32 NodeId, EDirtyKind Kind) override
 	{
 		Controller.MarkNodeDirty(NodeId, Kind);
+	}
+
+	void SetResourceResolver(IResourceResolver* InResolver) override
+	{
+		// sprint 009: store the resolver; SetDocument passes it to the backend/container. Call before SetDocument.
+		Resolver = InResolver;
 	}
 
 	FLayoutResult Relayout(int32 AvailableWidth) override
@@ -356,6 +382,7 @@ private:
 	FRelayoutController Controller;
 	TUniquePtr<FLiteHtmlRelayoutBackend> Backend;
 	const ILayoutDocumentSource* Source = nullptr;
+	IResourceResolver* Resolver = nullptr; // sprint 009: passed to the backend/container at SetDocument
 
 	// --- Vendor edges: map our NodeId onto litehtml's laid-out element + read its box / computed value.
 	//     Stubbed this sprint (no render runs); the validation pass binds them to the rendered document.
