@@ -1,0 +1,53 @@
+# Cathode capability manifest — THE SINGLE SOURCE OF TRUTH
+#
+# 001 SKELETON: structure only. The real supported surface is authored in the
+# authoring-contract sprint (003). Empty sections below are NOT final — they show
+# the manifest's shape, nothing more.
+#
+# This one file is the source from which the build GENERATES:
+#   - lib.cathode.d.ts   — the DOM + JS type surface authors compile against
+#   - css-allow-list.toml — the properties the CSS linter accepts
+# and which is ASSERTED at engine build against the actually-registered quickjs-ng
+# bindings and the litehtml configuration, so the author gate provably matches the
+# engine and the two cannot drift.
+
+[manifest]
+version = 0            # schema version of this manifest (placeholder)
+
+# --- DOM surface -----------------------------------------------------------
+# The deliberately bounded DOM the runtime exposes: element creation/insertion/
+# removal, attribute & property access, a minimal Event with bubbling + hit-testing,
+# tree reads, and a document/mount root. This bound is the firewall against
+# accidentally rebuilding a browser. (003) enumerates the exact members.
+[dom]
+# elements = []        # (003) supported element interfaces
+# events   = []        # (003) Event surface + which event types bubble
+
+# --- Scheduler -------------------------------------------------------------
+# Promise (core quickjs-ng), timers, and requestAnimationFrame ticked against the
+# worker's own clock.
+[scheduler]
+# globals = []         # (003) setTimeout / setInterval / requestAnimationFrame / ...
+
+# --- JS environment --------------------------------------------------------
+# ECMA-262 core at the pinned quickjs-ng baseline plus the globals Cathode provides
+# (console, the scheduler, the game.* host API). Nothing else exists — no fetch, no
+# Intl, no localStorage.
+[js]
+# ecma_baseline = ""   # (003) pinned ECMA level, matched to the bundler target
+# globals = []         # (003) provided globals
+
+# --- CSS -------------------------------------------------------------------
+# litehtml's coverage (CSS 2/3, flexbox; NO grid; partial CSS3), extended only where
+# Cathode forks litehtml for a specific need. Generates css-allow-list.toml; the
+# linter validates author CSS against it.
+[css]
+# properties = []      # (003) the supported-property set
+
+# --- Host API (game.*) -----------------------------------------------------
+# INTENTIONALLY UNSPECIFIED per the architecture doc: the organization and shape of
+# the game.* surface resolves only once the simulation's shape is known. It is
+# generated from Unreal reflection (runtime bindings + author types from one source).
+# No entries here in any near-term Cathode sprint.
+[host]
+# (intentionally empty — see architecture doc, "Intentionally unspecified")

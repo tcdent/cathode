@@ -1,0 +1,19 @@
+# Cathode CSS allow-list — the supported-property manifest the CSS linter validates against.
+#
+# 001 SKELETON: structure only. This file is GENERATED from capability-manifest.toml [css]
+# at build time; the real property set is NOT hand-authored here — the capability manifest
+# is the single source. The actual properties are enumerated in the authoring-contract
+# sprint (003). Categories below show the shape, not the final set.
+#
+# Coverage tracks litehtml (CSS 2/3, flexbox; NO grid; partial CSS3), extended only where
+# Cathode forks litehtml for a specific need. The linter rejects any author CSS property
+# outside this list with a file + line, matching the DOM/JS gate's behaviour.
+
+[properties]
+# Structure-only category placeholders — (003) fills the actual property names:
+# box_model   = []   # display, margin, padding, border, width, height, box-sizing, ...
+# flexbox     = []   # flex, flex-direction, flex-wrap, justify-content, align-items, ...
+# typography  = []   # font-family, font-size, font-weight, line-height, font-feature-settings, ...
+# color       = []   # color, background, background-color, opacity, ...
+# positioning = []   # position, top, right, bottom, left, z-index, ...
+# (CSS grid is intentionally ABSENT — outside litehtml's coverage.)

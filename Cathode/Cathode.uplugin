@@ -1,0 +1,21 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Cathode",
+	"Description": "Runs first-party HTML/CSS/JS screens and renders them as textures onto in-world devices. Assembled from quickjs-ng, litehtml, HarfBuzz and Blend2D; authors no browser apparatus of its own.",
+	"Category": "Rendering",
+	"CreatedBy": "Uptime",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": true,
+	"Installed": false,
+	"EnabledByDefault": false,
+	"Modules": [
+		{
+			"Name": "CathodeRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
