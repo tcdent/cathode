@@ -41,6 +41,11 @@
 			"Name": "CathodeBinding",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeDom",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
