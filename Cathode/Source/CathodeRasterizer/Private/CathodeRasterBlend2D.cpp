@@ -8,6 +8,12 @@ THIRD_PARTY_INCLUDES_START
 #include "blend2d.h"
 THIRD_PARTY_INCLUDES_END
 
+// TODO-PREBUILD(naming): every BLImage/BLContext method in this file uses the snake_case API
+// (create / is_empty / make_mutable / begin / set_hint / clip_to_rect / restore_clipping / fill_rect /
+// fill_box / blit_image / clear_rect / end). Verify against the VENDORED Blend2D — older releases expose
+// camelCase (isEmpty/makeMutable/fillRect/clipToRect/blitImage/clearRect/setHint). If the vendored API is
+// camelCase, every call site here needs the rename.
+
 namespace Cathode
 {
 
@@ -49,6 +55,8 @@ BLBox ToBLBox(const FBox2f& Box)
 
 BLRgba32 ToBLRgba32(const FColor& Color)
 {
+	// TODO-PREBUILD(arg-order): confirm the BLRgba32(r, g, b, a) byte-component constructor exists and
+	// takes that argument order (vs a single packed 0xAARRGGBB value) in the vendored Blend2D.
 	return BLRgba32(Color.R, Color.G, Color.B, Color.A);
 }
 
@@ -69,6 +77,9 @@ public:
 
 	virtual bool GetData(FBitmapData& OutData) override
 	{
+		// TODO-PREBUILD(signature): confirm BLImage::make_mutable(BLImageData*) is the right call for
+		// read/write pixel access (vs get_data for read-only) and the BLImageData field names
+		// (pixel_data / stride / size.w / size.h / format) against the vendored Blend2D.
 		BLImageData Data;
 		if (Image.make_mutable(&Data) != BL_SUCCESS)
 		{
@@ -99,6 +110,8 @@ public:
 	bool Begin(FBlend2DBitmap& Target, const FRasterConfig& Config)
 	{
 		BLContextCreateInfo CreateInfo{};
+		// TODO-PREBUILD(struct-field): verify BLContextCreateInfo.thread_count field name (vs threadCount)
+		// against the vendored Blend2D.
 		CreateInfo.thread_count = Config.BackendThreadCount; // 0 = synchronous on our worker (decided)
 		if (Context.begin(Target.GetBLImage(), CreateInfo) != BL_SUCCESS)
 		{
@@ -106,6 +119,8 @@ public:
 		}
 		// Rendering config applied once here, not per op. Grayscale analytic AA is the only
 		// BLRenderingQuality; sRGB blending is the Blend2D default (config does not force linear).
+		// TODO-PREBUILD(enum): verify set_hint takes (BLContextHint, uint32) and the enum names
+		// BL_CONTEXT_HINT_RENDERING_QUALITY / BL_RENDERING_QUALITY_ANTIALIAS against the vendored Blend2D.
 		Context.set_hint(BL_CONTEXT_HINT_RENDERING_QUALITY, BL_RENDERING_QUALITY_ANTIALIAS);
 		return true;
 	}

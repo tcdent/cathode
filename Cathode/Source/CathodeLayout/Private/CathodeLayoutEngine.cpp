@@ -53,6 +53,8 @@ FBorderSide ToSide(const litehtml::border& Side)
 
 FCornerRadii ToRadii(const litehtml::border_radiuses& R)
 {
+	// TODO-PREBUILD(struct-field): verify litehtml::border_radiuses field names (top_left_x, top_right_x,
+	// bottom_right_x, bottom_left_x) vs the vendored header.
 	FCornerRadii Out;
 	Out.TopLeft = static_cast<float>(R.top_left_x);
 	Out.TopRight = static_cast<float>(R.top_right_x);
@@ -69,6 +71,10 @@ FCornerRadii ToRadii(const litehtml::border_radiuses& R)
 class FCathodeDocumentContainer final : public litehtml::document_container
 {
 public:
+	// TODO-PREBUILD(override): every document_container method below must EXACTLY match litehtml's
+	// pure-virtual signatures (these are overrides, not new functions) — litehtml has changed several
+	// across versions (create_font, draw_background, set_clip, get_image_size, create_element, ...).
+	// Verify the full interface against the vendored litehtml; any mismatch is a hard compile error.
 	FCathodeDocumentContainer(FLayoutFontCache& InFontCache, TArray<FLayoutPaintOp>& InSink,
 		int32 InClientWidth, int32 InClientHeight, int32 InDpi, const FString& InDefaultFont, int32 InDefaultFontSize)
 		: FontCache(InFontCache)
@@ -83,6 +89,8 @@ public:
 
 	// --- Text: route to the font cache + the neutral measurement seam ---
 
+	// TODO-PREBUILD(signature): create_font has varied most across litehtml — the param list (decoration,
+	// the font_metrics* out-param) and the uint_ptr return. Verify exactly vs the vendored header.
 	litehtml::uint_ptr create_font(const char* faceName, int size, int weight, litehtml::font_style italic,
 		unsigned int /*decoration*/, litehtml::font_metrics* fm) override
 	{
@@ -119,6 +127,8 @@ public:
 
 	// --- Paint: full translation to the neutral paint-op stream ---
 
+	// TODO-PREBUILD(signature): draw_background takes a std::vector<background_paint> in newer litehtml;
+	// older versions passed a single background_paint. Verify vs the vendored header.
 	void draw_background(litehtml::uint_ptr /*hdc*/, const std::vector<litehtml::background_paint>& bg) override
 	{
 		for (const litehtml::background_paint& Layer : bg)
@@ -198,6 +208,8 @@ public:
 
 	// --- Remaining callbacks: not used by the rendering surface (no-op / default) ---
 
+	// TODO-PREBUILD(signature): set_clip changed across litehtml (older took extra bool valid_x/valid_y
+	// params). Verify the (position, border_radiuses) form vs the vendored header.
 	void set_clip(const litehtml::position& Pos, const litehtml::border_radiuses& /*r*/) override { EmitClipPush(Sink, ToBox(Pos)); }
 	void del_clip() override { EmitClipPop(Sink); }
 	void set_caption(const char* /*caption*/) override {}
@@ -265,6 +277,9 @@ private:
 
 	void Render(const FString& Html, const FString& Css, int32 Width)
 	{
+		// TODO-PREBUILD(signature): verify litehtml::document::createFromString overload — arg types
+		// (const char* vs std::string), the master/user stylesheet params (litehtml::master_css), and that
+		// older litehtml took a litehtml::context instead. High variance across litehtml versions.
 		litehtml::document::ptr Doc = litehtml::document::createFromString(
 			TCHAR_TO_UTF8(*Html), &Container, litehtml::master_css, TCHAR_TO_UTF8(*Css));
 		if (Doc)

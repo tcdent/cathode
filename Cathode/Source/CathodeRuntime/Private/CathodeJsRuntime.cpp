@@ -143,6 +143,9 @@ public:
 		InterruptHandler = MoveTemp(Handler);
 		if (Runtime != nullptr)
 		{
+			// TODO-PREBUILD(signature): verify JS_SetInterruptHandler + the JSInterruptHandler typedef
+			// against quickjs-ng — the thunk shape int(JSRuntime*, void*), the opaque arg passed as `this`,
+			// and the return != 0 == abort convention vary between QuickJS forks.
 			JS_SetInterruptHandler(Runtime, &FQuickJsRuntime::InterruptThunk, this);
 		}
 	}
