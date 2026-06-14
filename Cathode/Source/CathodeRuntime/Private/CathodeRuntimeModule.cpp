@@ -1,5 +1,6 @@
 #include "CathodeRuntimeModule.h"
 
+#include "CathodeBuildId.h"
 #include "CathodeRuntimeWorker.h"
 
 #include "CoreMinimal.h"
@@ -21,13 +22,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogCathodeBuild, Log, All);
 #include <Windows.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
-namespace
-{
-FString CathodeLinkTimeBuildId()
+FString Cathode::CathodeLinkTimeBuildId()
 {
 	HMODULE Self = nullptr;
 	if (!::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-			reinterpret_cast<LPCWSTR>(&CathodeLinkTimeBuildId), &Self) || Self == nullptr)
+			reinterpret_cast<LPCWSTR>(&Cathode::CathodeLinkTimeBuildId), &Self) || Self == nullptr)
 	{
 		return TEXT("unavailable");
 	}
@@ -76,9 +75,8 @@ FString CathodeLinkTimeBuildId()
 
 	return FString::Printf(TEXT("link:%08X pdb:%s"), TimeDateStamp, *PdbGuid);
 }
-} // namespace
 #else
-namespace { FString CathodeLinkTimeBuildId() { return TEXT("link-id-unavailable(non-Windows)"); } }
+FString Cathode::CathodeLinkTimeBuildId() { return TEXT("link-id-unavailable(non-Windows)"); }
 #endif
 
 FCathodeRuntimeModule::~FCathodeRuntimeModule() = default;
@@ -92,7 +90,7 @@ void FCathodeRuntimeModule::StartupModule()
 	// current binary. The "(module-TU compiled ...)" suffix is the compile time of THIS TU only —
 	// supplementary context, NOT the anchor (it is exactly the per-TU value the link-time build-id supersedes).
 	UE_LOG(LogCathodeBuild, Display, TEXT("[CATHODE-BUILD-SIGNATURE] Cathode plugin loaded; build-id %s (module-TU compiled %s %s)"),
-		*CathodeLinkTimeBuildId(), ANSI_TO_TCHAR(__DATE__), ANSI_TO_TCHAR(__TIME__));
+		*Cathode::CathodeLinkTimeBuildId(), ANSI_TO_TCHAR(__DATE__), ANSI_TO_TCHAR(__TIME__));
 
 	// Auto-start on module load (human-ruled): create the worker AND start its thread, which runs the
 	// ordered Startup() sequence (create -> budgets -> assemble globals -> load author JS -> begin

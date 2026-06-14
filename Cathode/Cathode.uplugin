@@ -51,6 +51,11 @@
 			"Name": "CathodeResolver",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeVerify",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
