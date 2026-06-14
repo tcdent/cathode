@@ -17,27 +17,19 @@ public class CathodeText : ModuleRules
 
 		// --- Bundled ThirdParty: HarfBuzz (the text shaper) ---
 		//
-		// SCAFFOLD ONLY (sprint 004): the structure below mirrors the project's native-library convention
-		// and the CathodeRasterizer honest-stub. The lib-linking lines are intentionally STUBBED/COMMENTED:
-		// nothing here pretends a binary exists. HarfBuzz is vendored as SOURCE under
-		// vendor/lib/cathode/harfbuzz/ (via the plugin's install.sh) and is BUILT FROM SOURCE into
-		// Source/ThirdParty/harfbuzz/ at the execution-approval sprint. The shaper (Slice 3) #includes the
-		// HarfBuzz headers; only when the execution sprint produces headers + platform binaries do the
-		// lines below get uncommented.
-		//
-		// string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
-		//
-		// // Headers (populated at the execution sprint from the built library):
-		// PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "harfbuzz", "include"));
-		//
-		// if (Target.Platform == UnrealTargetPlatform.Win64)
-		// {
-		//     // Static/import library (execution-sprint build output):
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "harfbuzz", "Win64", "harfbuzz.lib"));
-		// }
-		// else if (Target.Platform == UnrealTargetPlatform.Linux)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "harfbuzz", "Linux", "libharfbuzz.a"));
-		// }
+		// ACTIVATED (sprint 010 bring-up): the shaper impl #includes the HarfBuzz headers (hb.h) and calls
+		// the hb_* C API, so this module links HarfBuzz. Wired to the conventional ThirdParty layout —
+		// Source/ThirdParty/harfbuzz/{include, Win64/harfbuzz.lib} — populated by the vendor-lib tooling
+		// build from vendor/lib/cathode/harfbuzz/.
+		// NOTE (tooling-gap recipe): build HarfBuzz static; copy the hb*.h public headers into include/.
+		// HarfBuzz needs no ICU/FreeType for our use (built standalone with its own UCD tables).
+		string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
+
+		PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "harfbuzz", "include"));
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "harfbuzz", "Win64", "harfbuzz.lib"));
+		}
 	}
 }

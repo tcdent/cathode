@@ -9,6 +9,18 @@ THIRD_PARTY_INCLUDES_END
 namespace Cathode
 {
 
+namespace
+{
+// JSValue identity for objects (incl. functions) = the same boxed pointer + tag. Used wherever we match a
+// held wrapper against another JS value by identity (reparent reference, child removal, listener removal).
+// JS_VALUE_GET_PTR/TAG verified against the real quickjs.h at first compile (was TODO-PREBUILD(signature)).
+bool SameJsObject(const FJsValue& Held, JSValueConst Other)
+{
+	return JS_VALUE_GET_PTR(Held.GetValue()) == JS_VALUE_GET_PTR(Other)
+		&& JS_VALUE_GET_TAG(Held.GetValue()) == JS_VALUE_GET_TAG(Other);
+}
+} // namespace
+
 FDomNode::FDomNode(FDomDocument& InDocument, FDomNodeId InNodeId, EDomNodeType InType)
 	: NodeId(InNodeId)
 	, Type(InType)
@@ -116,7 +128,7 @@ void FDomNode::InsertBefore(const FJsValue& ChildWrapper, const FJsValue& Refere
 		}
 	}
 	const int32 InsertAt = ReferenceWrapper.IsValid()
-		? Children.IndexOfByPredicate([&ReferenceWrapper](const FJsValue& Held) { return Held == ReferenceWrapper; })
+		? Children.IndexOfByPredicate([&ReferenceWrapper](const FJsValue& Held) { return SameJsObject(Held, ReferenceWrapper.GetValue()); })
 		: INDEX_NONE;
 	if (InsertAt == INDEX_NONE)
 	{
@@ -137,7 +149,7 @@ void FDomNode::RemoveChild(const FJsValue& ChildWrapper)
 	// the parent on a real removal (S3).
 	FDomNode* ChildNode = Document ? Document->NodeFromWrapper(ChildWrapper) : nullptr;
 	const int32 Removed = Children.RemoveAll(
-		[&ChildWrapper](const FJsValue& Held) { return Held == ChildWrapper; });
+		[&ChildWrapper](const FJsValue& Held) { return SameJsObject(Held, ChildWrapper.GetValue()); });
 	if (Removed > 0)
 	{
 		if (ChildNode != nullptr)
@@ -293,31 +305,20 @@ void FDomNode::SetTextContent(const FString& Text)
 
 // --- Event system (S6) — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
 
-namespace
-{
-// JSValue identity for objects (functions) = the same boxed pointer + tag.
-bool SameJsFunction(const FJsValue& Held, JSValueConst Other)
-{
-	// TODO-PREBUILD(signature): JS_VALUE_GET_PTR / JS_VALUE_GET_TAG (object identity in -ng).
-	return JS_VALUE_GET_PTR(Held.GetValue()) == JS_VALUE_GET_PTR(Other)
-		&& JS_VALUE_GET_TAG(Held.GetValue()) == JS_VALUE_GET_TAG(Other);
-}
-} // namespace
-
-void FDomNode::AddEventListener(const FString& Type, FJsValue Listener)
+void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener)
 {
 	// Hold the listener function (a JS ref) keyed by type. gc_mark marks it (cycle visibility); the finalizer
 	// FreeRTs it; removeEventListener drops it.
-	Listeners.Add(TPair<FString, FJsValue>(Type, MoveTemp(Listener)));
+	Listeners.Add(TPair<FString, FJsValue>(EventType, MoveTemp(Listener)));
 }
 
-void FDomNode::RemoveEventListener(const FString& Type, JSValueConst ListenerFn)
+void FDomNode::RemoveEventListener(const FString& EventType, JSValueConst ListenerFn)
 {
 	// Reference-DROP: remove the (type, fn-by-identity) listener; the removed FJsValue's destructor frees the
 	// held ref (ctx-based — removeEventListener is a normal-op call, runtime alive).
-	Listeners.RemoveAll([&Type, ListenerFn](const TPair<FString, FJsValue>& Listener)
+	Listeners.RemoveAll([&EventType, ListenerFn](const TPair<FString, FJsValue>& Listener)
 	{
-		return Listener.Key == Type && SameJsFunction(Listener.Value, ListenerFn);
+		return Listener.Key == EventType && SameJsObject(Listener.Value, ListenerFn);
 	});
 }
 

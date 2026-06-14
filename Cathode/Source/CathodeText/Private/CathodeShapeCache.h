@@ -25,7 +25,9 @@ struct FShapeKey
 
 inline uint32 GetTypeHash(const FShapeKey& Key)
 {
-	uint32 Hash = ::GetTypeHash(Key.Text);
+	// Unqualified so ADL finds FString's GetTypeHash (a hidden friend in modern UE — invisible to
+	// qualified ::GetTypeHash lookup). The FShapeKey overload can't match an FString arg, so no recursion.
+	uint32 Hash = GetTypeHash(Key.Text);
 	Hash = HashCombine(Hash, ::GetTypeHash(Key.FontId));
 	Hash = HashCombine(Hash, ::GetTypeHash(Key.Size));
 	Hash = HashCombine(Hash, ::GetTypeHash(Key.FeatureBits));

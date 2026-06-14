@@ -42,7 +42,7 @@ bool FCathodeTextSeamsTest::RunTest(const FString& Parameters)
 	Inner->Scripted.Extents = FBox2f(FVector2f(0.f, -8.f), FVector2f(50.f, 2.f));
 	Inner->Scripted.Font = FFontHandle{ 7 };
 
-	FCachingShaper Cache(TUniquePtr<ITextShaper>(Inner));
+	FCachingShaper Cache{ TUniquePtr<ITextShaper>(Inner) }; // brace-init: parens here are the most-vexing-parse (reads as a function decl)
 
 	FShapeRequest Request;
 	Request.Text = TEXT("text");

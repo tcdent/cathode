@@ -14,7 +14,17 @@
 // wired by the execution-approval sprint's build (the headers are vendored under
 // vendor/lib/cathode/litehtml/include, built from source then); no build runs this sprint.
 THIRD_PARTY_INCLUDES_START
+// UE's check()/verify() assertion macros (from CoreMinimal) are function-like and collide with litehtml
+// METHOD names (e.g. litehtml::media_query::check(...)) — the preprocessor expands the macro over the
+// declaration and mangles it (C2062/C2334/C2208). THIRD_PARTY_INCLUDES_START only quiets warnings, not
+// this. Push + undef the pair across the litehtml include, then restore them so our own code keeps check().
+#pragma push_macro("check")
+#pragma push_macro("verify")
+#undef check
+#undef verify
 #include "litehtml.h"
+#pragma pop_macro("verify")
+#pragma pop_macro("check")
 THIRD_PARTY_INCLUDES_END
 
 namespace Cathode

@@ -49,7 +49,7 @@ bool FCathodeTextShapeCacheTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 	FRecordingShaper* Inner = new FRecordingShaper();
-	FCachingShaper Cache(TUniquePtr<ITextShaper>(Inner));
+	FCachingShaper Cache{ TUniquePtr<ITextShaper>(Inner) }; // brace-init: parens here are the most-vexing-parse (reads as a function decl)
 
 	const FShapeRequest ReqA = MakeRequest(TEXT("hello"), 0, 16.0f);
 	const FShapeRequest ReqB = MakeRequest(TEXT("world"), 0, 16.0f);
@@ -91,7 +91,7 @@ bool FCathodeTextDualConsumerTest::RunTest(const FString& Parameters)
 	Inner->Scripted.Glyphs.Add(FShapedGlyph{});
 	Inner->Scripted.Font = FFontHandle{ 3 };
 
-	FCachingShaper Cache(TUniquePtr<ITextShaper>(Inner));
+	FCachingShaper Cache{ TUniquePtr<ITextShaper>(Inner) }; // brace-init: parens here are the most-vexing-parse (reads as a function decl)
 
 	const FShapeRequest Req = MakeRequest(TEXT("AB"), 3, 16.0f);
 

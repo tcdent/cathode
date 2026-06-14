@@ -69,7 +69,7 @@ bool FCathodeRuntimeAffinityTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	FThreadAffinity Affinity;
+	Cathode::FThreadAffinity Affinity; // qualified: disambiguates from the engine's ::FThreadAffinity (HAL/PlatformAffinity.h, transitively visible in this test TU)
 	TestFalse(TEXT("an unbound affinity reports off-thread"), Affinity.IsOnBoundThread());
 
 	// Bound to THIS thread -> on-thread.

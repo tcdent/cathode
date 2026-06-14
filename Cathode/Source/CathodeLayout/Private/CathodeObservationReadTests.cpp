@@ -92,7 +92,7 @@ bool FCathodeLayoutGeometryWalkTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("every node visited"), Visited.Contains(0) && Visited.Contains(1) && Visited.Contains(2) && Visited.Contains(3));
 
 	// Pre-order: a parent precedes its descendants.
-	auto IndexOf = [&Out](int32 NodeId)
+	auto IndexOf = [&Out](int32 NodeId) -> int32 // explicit: the `return i` (int32) and `return INDEX_NONE` (unnamed enum) must deduce to one type
 	{
 		for (int32 i = 0; i < Out.Num(); ++i) { if (Out[i].NodeId == NodeId) { return i; } }
 		return INDEX_NONE;

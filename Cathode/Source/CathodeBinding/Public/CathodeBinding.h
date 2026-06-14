@@ -35,7 +35,7 @@ namespace Cathode
 // copy / move / destruction — manual refcounting is the classic embedding leak; RAII makes it safe. It
 // EXPOSES the held JSValue (GetValue) — RAII over the refcount, not an abstraction that hides the value.
 // (Special members + accessors that touch the vendor are declared here; bodies land in Slice 2.)
-class FJsValue
+class CATHODEBINDING_API FJsValue
 {
 public:
 	FJsValue() = default;                              // an empty holder (no owned ref)
@@ -118,7 +118,7 @@ private:
 
 // A held-callable handle: owns a JS function value native-side (e.g. a listener held by a native object)
 // and invokes it; RAII-manages the function's refcount via FJsValue. Generic.
-class FCallableHandle
+class CATHODEBINDING_API FCallableHandle
 {
 public:
 	FCallableHandle() = default;
@@ -157,16 +157,16 @@ enum class EJsValueKind : uint8
 // distinguish a wrapped NativeObject (a registered class) from a plain Record; without it, a custom-class
 // object cannot be confirmed as ours and reads as Record (best-effort). (Body Slice 3 — uses JS_IsNumber/
 // String/Bool/Null/Undefined/Array/Function + JS_IsSymbol/BigInt/Date/Proxy/GetTypedArrayType for rejection.)
-EJsValueKind ClassifyJsValue(JSContext* Context, JSValueConst Value, const INativeClassRegistry* Registry = nullptr);
+CATHODEBINDING_API EJsValueKind ClassifyJsValue(JSContext* Context, JSValueConst Value, const INativeClassRegistry* Registry = nullptr);
 
 // Typed converters (vocabulary expressed in C++ <-> -ng terms). Reading returns false on a kind mismatch
 // (the reject path). Bodies Slice 3.
-FJsValue MarshalNumber(JSContext* Context, double Number);
-FJsValue MarshalString(JSContext* Context, const FString& String);
-FJsValue MarshalBool(JSContext* Context, bool bValue);
-bool UnmarshalNumber(JSContext* Context, JSValueConst Value, double& OutNumber);
-bool UnmarshalString(JSContext* Context, JSValueConst Value, FString& OutString);
-bool UnmarshalBool(JSContext* Context, JSValueConst Value, bool& OutBool);
+CATHODEBINDING_API FJsValue MarshalNumber(JSContext* Context, double Number);
+CATHODEBINDING_API FJsValue MarshalString(JSContext* Context, const FString& String);
+CATHODEBINDING_API FJsValue MarshalBool(JSContext* Context, bool bValue);
+CATHODEBINDING_API bool UnmarshalNumber(JSContext* Context, JSValueConst Value, double& OutNumber);
+CATHODEBINDING_API bool UnmarshalString(JSContext* Context, JSValueConst Value, FString& OutString);
+CATHODEBINDING_API bool UnmarshalBool(JSContext* Context, JSValueConst Value, bool& OutBool);
 
 // === Teardown policy (the heart — Model A: JS-refcount-governed lifetime) ===
 //

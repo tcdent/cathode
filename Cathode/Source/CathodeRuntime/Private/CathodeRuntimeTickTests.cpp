@@ -78,7 +78,7 @@ bool FCathodeRuntimeTickPhaseOrderTest::RunTest(const FString& Parameters)
 	FFakeClock Clock;
 	Clock.Now = 100.0;
 
-	FThreadAffinity Affinity;
+	Cathode::FThreadAffinity Affinity; // qualified: disambiguates from the engine's ::FThreadAffinity (HAL/PlatformAffinity.h, transitively visible in this test TU)
 	Affinity.BindToCurrentThread(); // so the real tick proceeds on this (test) thread
 
 	TCathodeMessageQueue<FHostInboundMessage> Inbound;
@@ -139,7 +139,7 @@ bool FCathodeRuntimeTickMicrotaskDrainTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 	FFakeClock Clock;
-	FThreadAffinity Affinity;
+	Cathode::FThreadAffinity Affinity; // qualified: disambiguates from the engine's ::FThreadAffinity (HAL/PlatformAffinity.h, transitively visible in this test TU)
 	Affinity.BindToCurrentThread();
 	TCathodeMessageQueue<FHostInboundMessage> Inbound;
 	TCathodeMessageQueue<FHostOutboundMessage> Outbound;
@@ -169,7 +169,7 @@ bool FCathodeRuntimeTickTimerRafSelectionTest::RunTest(const FString& Parameters
 
 	FFakeClock Clock;
 	Clock.Now = 0.0;
-	FThreadAffinity Affinity;
+	Cathode::FThreadAffinity Affinity; // qualified: disambiguates from the engine's ::FThreadAffinity (HAL/PlatformAffinity.h, transitively visible in this test TU)
 	Affinity.BindToCurrentThread();
 	TCathodeMessageQueue<FHostInboundMessage> Inbound;
 	TCathodeMessageQueue<FHostOutboundMessage> Outbound;

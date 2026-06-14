@@ -117,7 +117,7 @@ bool FCathodeRuntimeErrorRoutingTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 	FFakeClock Clock;
-	FThreadAffinity Affinity;
+	Cathode::FThreadAffinity Affinity; // qualified: disambiguates from the engine's ::FThreadAffinity (HAL/PlatformAffinity.h, transitively visible in this test TU)
 	Affinity.BindToCurrentThread();
 	TCathodeMessageQueue<FHostInboundMessage> Inbound;
 	TCathodeMessageQueue<FHostOutboundMessage> Outbound;

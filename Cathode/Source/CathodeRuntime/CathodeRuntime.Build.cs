@@ -21,35 +21,29 @@ public class CathodeRuntime : ModuleRules
 			"Slate",
 		});
 
-		// --- Bundled ThirdParty libraries (Pattern-B structure, wired from this module) ---
+		// --- Bundled ThirdParty: quickjs-ng (the JS engine — a SHARED DLL) ---
 		//
-		// SCAFFOLD ONLY (sprint 001): the structure below mirrors the project's native-library
-		// convention (JoystickPlugin/SDL2 — include path + additional library + runtime dep +
-		// delay-load, wired from the consuming module's Build.cs). The lib-linking lines are
-		// intentionally STUBBED/COMMENTED: nothing here pretends a binary exists. The five
-		// libraries are vendored as SOURCE under vendor/lib/cathode/<lib>/ (via the plugin's
-		// install.sh) and are BUILT FROM SOURCE into Source/ThirdParty/<lib>/ at 002. Only when
-		// 002 produces headers + platform binaries do the lines below get uncommented and filled.
-		//
-		// string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
-		//
-		// foreach (string lib in new[] { "quickjs-ng", "litehtml", "harfbuzz", "blend2d", "asmjit" })
-		// {
-		//     // Headers (populated at 002 from the built library):
-		//     PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, lib, "include"));
-		// }
-		//
-		// if (Target.Platform == UnrealTargetPlatform.Win64)
-		// {
-		//     // Static/import libraries (002 build output):
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "<lib>", "Win64", "<lib>.lib"));
-		//     // Runtime DLLs + delay-load, staged via Git LFS (002):
-		//     // RuntimeDependencies.Add(Path.Combine(ThirdParty, "<lib>", "Win64", "<lib>.dll"), StagedFileType.NonUFS);
-		//     // PublicDelayLoadDLLs.Add("<lib>.dll");
-		// }
-		// else if (Target.Platform == UnrealTargetPlatform.Linux)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "<lib>", "Linux", "lib<lib>.a"));
-		// }
+		// quickjs-ng is the ONE shared vendor lib: a STATEFUL JS runtime linked by THREE modules
+		// (CathodeRuntime/Binding/Dom) that call its C API on ONE shared JSRuntime, so it is built as a DLL and
+		// all three link the ONE import lib -> a single shared runtime (NOT static-per-module — see
+		// docs/browse/vendor-lib-build.md addendum + the human's "should never have been linked twice"). Here
+		// `quickjs.lib` is the IMPORT lib backing `quickjs.dll`. This (base) module STAGES the DLL next to the
+		// binaries — standard import-lib linkage, no delay-load; the loader resolves quickjs.dll from
+		// Binaries/Win64, where every dependent Cathode module also loads. The other 3 vendor libs stay static.
+		string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
+
+		PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "quickjs-ng", "include"));
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "quickjs-ng", "Win64", "quickjs.lib"));
+			// The runtime DLL's embedded import name (soname, carried by quickjs.lib) is `qjs.dll` — quickjs-ng's
+			// native `qjs` target output. The vendored file on disk is quickjs.dll (the tooling renamed the FILE
+			// but not the soname), so the linked binaries import `qjs.dll` (GetLastError=126 otherwise). Stage the
+			// runtime DLL UNDER THE IMPORTED NAME `qjs.dll` so the loader resolves it. (If the tooling later
+			// rebuilds quickjs with OUTPUT_NAME=quickjs so the soname is quickjs.dll, change this target back to
+			// quickjs.dll — see the vendor-lib-build.md addendum's naming note.)
+			RuntimeDependencies.Add("$(BinaryOutputDir)/qjs.dll", Path.Combine(ThirdParty, "quickjs-ng", "Win64", "quickjs.dll"));
+		}
 	}
 }

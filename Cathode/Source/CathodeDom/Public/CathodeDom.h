@@ -128,8 +128,8 @@ public:
 	// directly gc_mark-markable (the node<->listener cycle is THE Model-A hazard) and identity-matchable for
 	// removal — 007's FCallableHandle hides its function and 007 is frozen, so the listener is held as FJsValue
 	// and FCallableHandle is used transiently for INVOCATION. removeEventListener = the reference-DROP.
-	void AddEventListener(const FString& Type, FJsValue Listener);
-	void RemoveEventListener(const FString& Type, JSValueConst ListenerFn); // match by JS fn identity; reference-drop
+	void AddEventListener(const FString& EventType, FJsValue Listener);
+	void RemoveEventListener(const FString& EventType, JSValueConst ListenerFn); // match by JS fn identity; reference-drop
 	void DispatchEvent(FDomEvent& Event);             // production: invoke via 007 FCallableHandle (event arg deferred)
 	void DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker); // the testable dispatch algorithm
 

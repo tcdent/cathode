@@ -19,24 +19,20 @@ public class CathodeBinding : ModuleRules
 			"CathodeRuntime",
 		});
 
-		// --- Bundled ThirdParty: quickjs-ng (the JS engine) ---
+		// --- Bundled ThirdParty: quickjs-ng (the JS engine — a SHARED DLL) ---
 		//
-		// SCAFFOLD ONLY (sprint 007): mirrors the 002/003/004/005 honest-stub. quickjs-ng is vendored as
-		// SOURCE under vendor/lib/cathode/quickjs-ng/ and BUILT FROM SOURCE into Source/ThirdParty/quickjs-ng/
-		// at the execution-approval sprint; the include/link lines stay COMMENTED until then (no build this
-		// sprint). The include path is PUBLIC by the RQ2 decision (the public header includes quickjs.h).
-		// Note: 002 (CathodeRuntime) also includes quickjs.h in its impl — both modules confine the vendor.
-		//
-		// string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
-		// PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "quickjs-ng", "include"));
-		//
-		// if (Target.Platform == UnrealTargetPlatform.Win64)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "quickjs-ng", "Win64", "quickjs.lib"));
-		// }
-		// else if (Target.Platform == UnrealTargetPlatform.Linux)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "quickjs-ng", "Linux", "libquickjs.a"));
-		// }
+		// CathodeBinding's PUBLIC header includes quickjs.h (RQ2 "expose the spec") and 6 TUs call JS_*
+		// directly, so it LINKS the quickjs import lib itself. quickjs is a SHARED DLL (one stateful runtime
+		// across Runtime/Binding/Dom), so all three link the ONE import lib -> one shared quickjs.dll. Importing
+		// the same DLL from N modules is correct (each gets dllimport stubs to the single runtime), NOT a static
+		// double-link. The DLL is staged by CathodeRuntime (the base module). See the vendor-lib-build addendum.
+		string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
+
+		PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "quickjs-ng", "include"));
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "quickjs-ng", "Win64", "quickjs.lib"));
+		}
 	}
 }

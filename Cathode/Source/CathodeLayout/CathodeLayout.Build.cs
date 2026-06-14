@@ -19,23 +19,21 @@ public class CathodeLayout : ModuleRules
 
 		// --- Bundled ThirdParty: litehtml (the layout/CSS engine) ---
 		//
-		// SCAFFOLD ONLY (sprint 005): the structure mirrors the project's native-library convention and the
-		// 003/004 honest-stub. The lib-linking lines are intentionally STUBBED/COMMENTED: nothing pretends a
-		// binary exists. litehtml is vendored as SOURCE under vendor/lib/cathode/litehtml/ (via install.sh)
-		// and is BUILT FROM SOURCE into Source/ThirdParty/litehtml/ at the execution-approval sprint. The
-		// document_container impl #includes litehtml; only when the execution sprint produces headers +
-		// platform binaries do the lines below get uncommented.
-		//
-		// string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
-		// PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "litehtml", "include"));
-		//
-		// if (Target.Platform == UnrealTargetPlatform.Win64)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "litehtml", "Win64", "litehtml.lib"));
-		// }
-		// else if (Target.Platform == UnrealTargetPlatform.Linux)
-		// {
-		//     // PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "litehtml", "Linux", "liblitehtml.a"));
-		// }
+		// ACTIVATED (sprint 010 bring-up): the document_container impl #includes litehtml and drives its
+		// layout API, so this module links litehtml. Wired to the conventional ThirdParty layout —
+		// Source/ThirdParty/litehtml/{include, Win64/<lib>.lib} — populated by the vendor-lib tooling build
+		// from vendor/lib/cathode/litehtml/. litehtml statically embeds its HTML parser (gumbo) as a separate
+		// CMake target, so the tooling emits BOTH litehtml.lib and gumbo.lib; both are linked here.
+		// NOTE (tooling-gap recipe): build litehtml static (its CMake produces litehtml + gumbo); copy the
+		// litehtml public headers (litehtml.h + litehtml/) into include/.
+		string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
+
+		PublicSystemIncludePaths.Add(Path.Combine(ThirdParty, "litehtml", "include"));
+
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "litehtml", "Win64", "litehtml.lib"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdParty, "litehtml", "Win64", "gumbo.lib"));
+		}
 	}
 }
