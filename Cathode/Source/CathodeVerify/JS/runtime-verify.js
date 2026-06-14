@@ -31,7 +31,7 @@
   // that the runtime's globals-additions == exactly this set, so the list cannot silently drift.
   var HARNESS_INJECTIONS = {
     "__cathodeEmitReport": "native emit-sink the driver installs to capture this report (capture channel, not surface)",
-    "__CATHODE_BUILD_ID__": "link-id the driver injects for the coherence anchor (harness input, not surface)",
+    "__CATHODE_BUILD_ID__": "cross-module aggregate link-id the driver injects as the coherence anchor (harness input, not surface)",
     "__CATHODE_CSS_SUBSET__": "declared CSS contract the driver injects for the CSS reconcile (harness input, not surface)",
     "CathodeSurfaceWalk": "the shared walk the driver injects (the introspection mechanism, not surface-under-test)",
     "__CATHODE_DECLARED__": "the declared-interface descriptor the 012 Host Bridge projection injects for the DOM/globals reconcile (faculty input, not surface; dormant until 012)",

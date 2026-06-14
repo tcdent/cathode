@@ -23,7 +23,8 @@ the native sink is the capture path). Shape:
 ```
 {
   schema: "cathode.runtime-verification/1",
-  coherence: { buildId: string },          // the link-time build-id (coherence anchor), or "unavailable"
+  coherence: { buildId: string },          // cross-module aggregate link-id — every loaded Cathode module's PE
+                                           //   link-id folded LIVE; advances on ANY Cathode-module relink
   surface: {
     exposed: {
       globalNames:     string[],           // production globals, harness injections filtered out (see below)

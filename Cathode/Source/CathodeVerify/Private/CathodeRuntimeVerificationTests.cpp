@@ -9,12 +9,17 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
+#include "Modules/ModuleManager.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
+
+// Greppable coherence line: carries the cross-module aggregate the faculty verified (the cross-module analog
+// of CathodeRuntime's [CATHODE-BUILD-SIGNATURE]) so a run log witnesses any Cathode-module relink across runs.
+DEFINE_LOG_CATEGORY_STATIC(LogCathodeVerify, Log, All);
 
 // Sprint 011 [b] gate: drive the runtime-verification faculty in the REAL production Cathode runtime and assert
 // its structured self-report. The runtime is BARE today (the production OnInstall* assembly seams are unwired —
@@ -146,7 +151,10 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 			JS_NewCFunction(Context, &CathodeVerifyEmitReport, "__cathodeEmitReport", 1));
 		InjectedNames.Add(TEXT("__cathodeEmitReport"));
 
-		const FString BuildId = Cathode::CathodeLinkTimeBuildId();
+		// Cross-module AGGREGATE coherence anchor (read LIVE at faculty time): every loaded Cathode module's PE
+		// link-id, folded. A relink of ANY Cathode module advances it — the single-module build-id couldn't
+		// witness a sibling's relink.
+		const FString BuildId = Cathode::CathodeAggregateBuildId();
 		JS_SetPropertyStr(Context, Global, "__CATHODE_BUILD_ID__", JS_NewString(Context, TCHAR_TO_UTF8(*BuildId)));
 		InjectedNames.Add(TEXT("__CATHODE_BUILD_ID__"));
 
@@ -200,8 +208,37 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 	{
 		FString ReportedBuildId;
 		(*Coherence)->TryGetStringField(TEXT("buildId"), ReportedBuildId);
-		// The faculty's coherence anchor must be the SAME link-id the load marker emits (single-source export).
-		TestEqual(TEXT("coherence buildId == the link-time build-id"), ReportedBuildId, Cathode::CathodeLinkTimeBuildId());
+		// Round-trip: the reported anchor == the live cross-module aggregate.
+		TestEqual(TEXT("coherence buildId == the live cross-module aggregate"), ReportedBuildId, Cathode::CathodeAggregateBuildId());
+		// Completeness (visible in the aggregate string): the coherence-critical modules are folded in —
+		// CathodeRuntime (the superset / negative-control anchor) and CathodeVerify (the faculty itself).
+		TestTrue(TEXT("aggregate folds in CathodeRuntime"), ReportedBuildId.Contains(TEXT("CathodeRuntime=")));
+		TestTrue(TEXT("aggregate folds in CathodeVerify"), ReportedBuildId.Contains(TEXT("CathodeVerify=")));
+
+		// FULL completeness ASSERTED (not just logged): independently re-enumerate the loaded Cathode* modules
+		// (the test's own FModuleManager query — not the mechanism's output) and assert the aggregate folds in
+		// EVERY one. A dropped module fails here, not just in the logged line — closing the cross-module gap for
+		// real (an uncovered module's relink would otherwise be an invisible coherence hole).
+		TArray<FModuleStatus> LoadedModules;
+		FModuleManager::Get().QueryModules(LoadedModules);
+		int32 CathodeModuleCount = 0;
+		for (const FModuleStatus& Mod : LoadedModules)
+		{
+			if (!Mod.bIsLoaded || !Mod.Name.StartsWith(TEXT("Cathode")))
+			{
+				continue;
+			}
+			++CathodeModuleCount;
+			TestTrue(*FString::Printf(TEXT("aggregate folds in loaded module %s"), *Mod.Name),
+				ReportedBuildId.Contains(Mod.Name + TEXT("=")));
+		}
+		TestTrue(TEXT("the loaded Cathode module set is non-trivial (runtime + faculty at least)"), CathodeModuleCount >= 2);
+		// Validity: no folded module degraded to an unreadable PE (that would mask a coherence hole).
+		TestFalse(TEXT("no folded module is unresolved"), ReportedBuildId.Contains(TEXT("=unresolved")));
+		TestFalse(TEXT("no folded module is unavailable"), ReportedBuildId.Contains(TEXT("=unavailable")));
+
+		// Surface the verified aggregate to the run log (greppable) so a relink is witnessable across runs.
+		UE_LOG(LogCathodeVerify, Display, TEXT("[CATHODE-VERIFY-COHERENCE] aggregate buildId: %s"), *ReportedBuildId);
 	}
 
 	// --- surface ---
