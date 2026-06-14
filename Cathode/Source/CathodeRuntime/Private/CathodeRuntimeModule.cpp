@@ -29,12 +29,29 @@ void FCathodeRuntimeModule::StartupModule()
 
 void FCathodeRuntimeModule::ShutdownModule()
 {
-	// Tear down the worker (joins the thread + tears the runtime down on it, if it was started).
+	TeardownWorker();
+}
+
+void FCathodeRuntimeModule::TeardownWorker()
+{
+	// SINGLE-SOURCE teardown (shared by ShutdownModule + the test-only StopRuntimeForTesting): Worker::Shutdown
+	// joins the worker thread and tears the runtime down ON that thread (affinity-correct), then
+	// ~FQuickJsRuntime releases the single-instance claim. Idempotent: no-op if no worker is live.
 	if (Worker.IsValid())
 	{
 		Worker->Shutdown();
 		Worker.Reset();
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void FCathodeRuntimeModule::StopRuntimeForTesting()
+{
+	// Run the EXACT production teardown (the shared helper) — no test-specific path that could diverge.
+	// After this the claim is free + no runtime is live (coherent), so an automation test can
+	// CreateJsRuntime() its own instance on the TEST thread.
+	TeardownWorker();
+}
+#endif
 
 IMPLEMENT_MODULE(FCathodeRuntimeModule, CathodeRuntime)

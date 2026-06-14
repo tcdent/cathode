@@ -3,6 +3,7 @@
 #include "CathodeBinding.h"
 #include "CathodeBindingTestHooks.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -30,7 +31,8 @@ bool FCathodeBindingJsValueRaiiTest::RunTest(const FString& Parameters)
 	GJsValueOnDup = [&Dups]() { ++Dups; };
 	GJsValueOnFree = [&Frees]() { ++Frees; };
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
 
 	// Copy + scope: one owned value, one copy (one dup), both freed at scope exit.

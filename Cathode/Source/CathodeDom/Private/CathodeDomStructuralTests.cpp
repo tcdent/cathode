@@ -2,6 +2,7 @@
 
 #include "CathodeDom.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -44,7 +45,8 @@ bool FCathodeDomStructureTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FRecordingLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
@@ -104,7 +106,8 @@ bool FCathodeDomDirtyMarkTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FRecordingLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
@@ -147,7 +150,8 @@ bool FCathodeDomReparentTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FRecordingLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);

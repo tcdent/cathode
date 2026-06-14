@@ -3,6 +3,7 @@
 #include "CathodeBinding.h"
 #include "CathodeBindingTestHooks.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -37,7 +38,8 @@ bool FCathodeBindingCallableTest::RunTest(const FString& Parameters)
 	int32 Frees = 0;
 	GJsValueOnFree = [&Frees]() { ++Frees; };
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
 
 	// A real invoke returns the expected marshaled value: a held (x)->x+1, called with 41, returns 42.

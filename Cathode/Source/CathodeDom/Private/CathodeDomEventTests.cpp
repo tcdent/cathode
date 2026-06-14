@@ -2,6 +2,7 @@
 
 #include "CathodeDom.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -45,7 +46,8 @@ bool FCathodeDomListenerTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FStubLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
@@ -86,7 +88,8 @@ bool FCathodeDomBubbleTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FStubLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
@@ -131,7 +134,8 @@ bool FCathodeDomPropagationTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FStubLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
@@ -189,7 +193,8 @@ bool FCathodeDomSameNodeStopTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> RuntimePtr = CreateJsRuntime();
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
 	FStubLayoutEngine Layout;
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);

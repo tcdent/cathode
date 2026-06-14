@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 #include "CathodeRuntimeTeardown.h"
 
 #include "Misc/AutomationTest.h"
@@ -19,6 +20,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCathodeRuntimeSingleInstanceTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
+
+	Cathode::Testing::ReleaseAutoStartedRuntime();
+
+	// This test DELIBERATELY creates a second runtime (below) to assert it is refused. The product's correct
+	// graceful-refuse logs an Error ("...refusing a second instance...") that the automation framework would
+	// otherwise capture as a failure. Declare that ONE deliberate error expected — pattern-scoped, so it can
+	// ONLY consume the refuse-Error log, never an assertion failure (those carry different messages). The
+	// three single-instance assertions below remain and still prove the behavior.
+	AddExpectedError(TEXT("refusing a second instance"), EAutomationExpectedErrorFlags::Contains, 1);
 
 	{
 		// One runtime stands up; a second is refused while the first is live.
@@ -44,6 +54,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 bool FCathodeRuntimeTeardownOrderTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
+
+	Cathode::Testing::ReleaseAutoStartedRuntime();
 
 	// Record the steps the REAL destructor performs, via the test-injection seam (no fork of teardown).
 	TArray<ETeardownStep> Recorded;

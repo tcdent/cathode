@@ -2,6 +2,7 @@
 
 #include "CathodeBinding.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -34,7 +35,8 @@ bool FCathodeBindingClassRegistrationTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*Runtime);
 
 	FNativeClassDef Def;

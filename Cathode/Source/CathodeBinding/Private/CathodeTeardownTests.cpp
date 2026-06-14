@@ -3,6 +3,7 @@
 #include "CathodeBinding.h"
 #include "CathodeBindingTestHooks.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -75,7 +76,8 @@ bool FCathodeBindingTeardownTest::RunTest(const FString& Parameters)
 	GJsValueOnFreeRT = [&RtFrees]() { ++RtFrees; };
 	GJsValueOnFree = [&CtxFrees]() { ++CtxFrees; };
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
 	JSRuntime* Rt = JS_GetRuntime(Context);
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*Runtime);

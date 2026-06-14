@@ -2,6 +2,7 @@
 
 #include "CathodeBinding.h"
 #include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
 
 #include "Misc/AutomationTest.h"
 
@@ -34,7 +35,8 @@ bool FCathodeBindingClassifyTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*Runtime);
 
@@ -90,7 +92,8 @@ bool FCathodeBindingPrimitiveRoundTripTest::RunTest(const FString& Parameters)
 {
 	using namespace Cathode;
 
-	TUniquePtr<ICathodeJsRuntime> Runtime = CreateJsRuntime();
+	Cathode::FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
 
 	// Each primitive marshals out and unmarshals back to the SAME value (our converted values).
