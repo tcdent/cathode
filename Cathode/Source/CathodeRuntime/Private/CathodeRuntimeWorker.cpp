@@ -73,41 +73,22 @@ uint32 FCathodeRuntimeWorker::Run()
 	// Ordered startup (the doc lifecycle), as the ONE FRuntimeStartup unit the spec also drives. Each step
 	// performs the real work; Startup() fixes the order: create -> budgets -> assemble globals -> load
 	// author JS -> begin ticking.
-	FRuntimeStartup::FSteps Steps;
-	Steps.CreateRuntimeContext = [this]()
-	{
-		Runtime = RuntimeFactory ? RuntimeFactory() : CreateJsRuntime();
-	};
-	Steps.InstallSafetyBudgets = [this]()
-	{
-		// STABILITY / parent-isolation for trusted code, not a sandbox: the interrupt handler runs our
-		// abort policy; the memory/stack ceilings are vendor passthrough. Defaults are sensible starting
-		// points, configurable via GetInterruptBudget() / future config.
-		if (Runtime.IsValid())
-		{
-			constexpr SIZE_T DefaultMemoryLimitBytes = static_cast<SIZE_T>(64) * 1024 * 1024; // 64 MB
-			constexpr SIZE_T DefaultMaxStackBytes = static_cast<SIZE_T>(256) * 1024;          // 256 KB
-			Runtime->SetInterruptHandler([this]() { return InterruptBudget.ShouldInterrupt(); });
-			Runtime->SetMemoryLimit(DefaultMemoryLimitBytes);
-			Runtime->SetMaxStackSize(DefaultMaxStackBytes);
-		}
-	};
-	Steps.AssembleGlobals = [this]()
-	{
-		// Hand each global-install seam its real target where one exists (console -> diagnostic sink,
-		// timers/rAF -> scheduler); game.* and document remain empty until their components are wired.
-		GlobalEnv.AssembleGlobals(*DiagnosticSink, Scheduler);
-	};
-	Steps.LoadAuthorScript = [this]()
-	{
-		// SEAM: load the pre-bundled author JS. The bundle loader is a future component; nothing to load yet.
-	};
-	Steps.BeginTicking = [this]()
-	{
-		// Startup complete — the tick loop begins immediately after Startup() returns.
-	};
+	// Build the ordered startup steps via the SHARED construction (011 postmortem #3 forward-seam) — the
+	// slice-4 reachability test drives the SAME builder, so its globals proof runs the PRODUCTION install, not a
+	// fork. Step 3 (AssembleGlobals) now SETS the console/timers install seams + assembles on the live context:
+	// the production wiring that makes console / setTimeout / requestAnimationFrame reachable through the real
+	// runtime, routing into this worker's DiagnosticSink + Scheduler against its ONE Clock.
+	FContractStartupDeps Deps;
+	Deps.Runtime = &Runtime;
+	Deps.RuntimeFactory = RuntimeFactory;
+	Deps.InterruptBudget = &InterruptBudget;
+	Deps.Clock = Clock.Get(); // the ONE worker clock — setTimeout's now-source AND the tick's FireDueTimers clock
+	Deps.GlobalEnv = &GlobalEnv;
+	Deps.GlobalsCtx = &GlobalsCtx;
+	Deps.Sink = DiagnosticSink;
+	Deps.Scheduler = &Scheduler;
 
-	FRuntimeStartup Startup(MoveTemp(Steps));
+	FRuntimeStartup Startup(BuildContractStartupSteps(MoveTemp(Deps)));
 	Startup.Startup();
 
 	if (!Runtime.IsValid() || !Runtime->IsValid())
@@ -145,7 +126,11 @@ uint32 FCathodeRuntimeWorker::Run()
 		}
 	}
 
-	// Teardown on the worker thread: the runtime's ordered teardown (Slice 2) runs on Reset().
+	// Teardown on the worker thread. Release any pending scheduler callbacks FIRST (S4: they may hold dup'd JS
+	// callback refs, freed on the context) — BEFORE the runtime/context is torn down, so the held refs release
+	// while the context is still alive (no use-after-free / no unfreed-value at JS_FreeRuntime).
+	Scheduler.Reset();
+	// The runtime's ordered teardown (Slice 2) runs on Reset().
 	Runtime.Reset();
 	return 0;
 }

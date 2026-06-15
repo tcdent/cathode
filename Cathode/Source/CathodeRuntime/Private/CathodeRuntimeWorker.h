@@ -6,6 +6,7 @@
 #include "Templates/UniquePtr.h"
 
 #include "CathodeClock.h"
+#include "CathodeContractGlobals.h"
 #include "CathodeDiagnostics.h"
 #include "CathodeGlobalEnvironment.h"
 #include "CathodeInterruptBudget.h"
@@ -90,7 +91,9 @@ private:
 	FInterruptBudget InterruptBudget; // bespoke abort policy; references *Clock (declared before it)
 	FLogDiagnosticSink DefaultSink;
 	ICathodeDiagnosticSink* DiagnosticSink = &DefaultSink; // injectable error-routing target
-	FGlobalEnvironment GlobalEnv; // contract-global assembly orchestration (seams wired by future components)
+	FGlobalEnvironment GlobalEnv; // contract-global assembly orchestration (console/timers seams set at assembly)
+	FCathodeGlobalsContext GlobalsCtx; // S4: backings the global thunks recover via the context opaque (lives as
+	                                   // long as the worker -> outlives the runtime/context the thunks run on)
 
 	TUniquePtr<ICathodeJsRuntime> Runtime; // worker-thread-only
 	FRunnableThread* Thread = nullptr;

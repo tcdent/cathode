@@ -19,4 +19,23 @@ void FLogDiagnosticSink::ReportError(const FJsError& Error)
 	}
 }
 
+void FLogDiagnosticSink::ReportConsole(EConsoleLevel Level, const FString& Message)
+{
+	// REAL override (sprint 012 S4): route console output to the game log at its level, so production
+	// console.{log,warn,error} are surfaced — never silently dropped into the additive default no-op.
+	switch (Level)
+	{
+	case EConsoleLevel::Error:
+		UE_LOG(LogCathodeScreen, Error, TEXT("console.error: %s"), *Message);
+		break;
+	case EConsoleLevel::Warn:
+		UE_LOG(LogCathodeScreen, Warning, TEXT("console.warn: %s"), *Message);
+		break;
+	case EConsoleLevel::Log:
+	default:
+		UE_LOG(LogCathodeScreen, Log, TEXT("console.log: %s"), *Message);
+		break;
+	}
+}
+
 } // namespace Cathode
