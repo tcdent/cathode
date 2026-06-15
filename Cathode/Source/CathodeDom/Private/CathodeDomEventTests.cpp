@@ -495,4 +495,65 @@ bool FCathodeDomNodeCoreTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Sprint 012 slice 3 — reflected properties id + className (behavioral-contract #1, name-in-dom routing). Each
+// reflects the attribute store live (getter reads / setter writes the attribute, NO backing field) so the JS
+// property can never desync from setAttribute/getAttribute. className reflects the 'class' attribute (the name
+// translation), proven both directions. Reflected-DOMString semantics: an absent attribute reflects as "".
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomReflectedPropTest,
+	"Cathode.Dom.Binding.ReflectedProps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomReflectedPropTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	FJsValue ElW = Doc->CreateElement(TEXT("div"));
+	FDomNode* El = Doc->NodeFromWrapper(ElW);
+
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__el", JS_DupValue(Context, ElW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+	auto NativeAttr = [&](const TCHAR* Name) -> FString { FString V; El->GetAttribute(Name, V); return V; };
+
+	// Reflected-DOMString: an ABSENT attribute reflects as "" (a string, NOT null) — the reflected/getAttribute
+	// distinction. Checked on the fresh element BEFORE any id is set.
+	TestTrue(TEXT("absent id reflects as '' (empty string, not null)"), EvalBool("__el.id === '' && typeof __el.id === 'string'"));
+
+	// Name-in-dom precondition (#1) + the translation is REAL: id/className ARE bound JS properties; 'class' is
+	// NOT (it is the attribute name, reached only via getAttribute/setAttribute).
+	TestTrue(TEXT("'id' in el === true (name-in-dom routing precondition)"), EvalBool("('id' in __el) === true"));
+	TestTrue(TEXT("'className' in el === true (name-in-dom routing precondition)"), EvalBool("('className' in __el) === true"));
+	TestTrue(TEXT("'class' in el === false (class is the attribute, not a bound JS property)"), EvalBool("('class' in __el) === false"));
+
+	// id <-> 'id' attribute, both directions, asserted live against FDomNode GetAttribute.
+	TestTrue(TEXT("el.id='x' -> el.id==='x' AND getAttribute('id')==='x'"), EvalBool("(function(){__el.id='x';return __el.id==='x' && __el.getAttribute('id')==='x';})()"));
+	TestEqual(TEXT("el.id='x' wrote the REAL 'id' attribute"), NativeAttr(TEXT("id")), FString(TEXT("x")));
+	TestTrue(TEXT("setAttribute('id','y') -> el.id==='y' (property reflects the attribute write)"), EvalBool("(function(){__el.setAttribute('id','y');return __el.id==='y';})()"));
+
+	// className <-> 'class' attribute (the NAME TRANSLATION), both directions.
+	TestTrue(TEXT("el.className='a b' -> getAttribute('class')==='a b' (name translation)"), EvalBool("(function(){__el.className='a b';return __el.getAttribute('class')==='a b' && __el.className==='a b';})()"));
+	TestEqual(TEXT("el.className='a b' wrote the REAL 'class' attribute"), NativeAttr(TEXT("class")), FString(TEXT("a b")));
+	TestTrue(TEXT("setAttribute('class','c') -> el.className==='c' (property reflects the attribute write)"), EvalBool("(function(){__el.setAttribute('class','c');return __el.className==='c';})()"));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

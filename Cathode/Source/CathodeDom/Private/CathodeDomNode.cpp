@@ -718,6 +718,36 @@ JSValue InsertBeforeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValu
 	Self->InsertBefore(Child, Reference);
 	return JS_DupValue(Ctx, Argv[0]); // the inserted node (=== the arg)
 }
+
+// === Sprint 012 slice 3: reflected properties (behavioral-contract #1 — name-in-dom routing) ===
+// A reflected property's JS member is backed by an ATTRIBUTE (not a private field): the getter reads, the setter
+// writes, the live attribute store — so it can NEVER desync from setAttribute/getAttribute (Preact writes both
+// paths). PURITY is the correctness guarantee: NO cached value anywhere; always read/write the attribute.
+// The attribute name is a const char* non-type template param, so one template pair serves every reflected prop.
+constexpr char ReflectAttrId[] = "id";       // JS 'id'        -> attribute 'id'
+constexpr char ReflectAttrClass[] = "class"; // JS 'className'  -> attribute 'class' (the name translation)
+
+template <const char* AttrName>
+JSValue ReflectedGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Out; // default-empty: reflected-DOMString semantics — an ABSENT attribute marshals as "" (NOT null,
+	             // unlike the getAttribute METHOD). GetAttribute leaves Out untouched when absent, so Out stays "".
+	Self->GetAttribute(FString(ANSI_TO_TCHAR(AttrName)), Out);
+	return MarshalString(Ctx, Out).Release();
+}
+
+template <const char* AttrName>
+JSValue ReflectedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst Val)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString In;
+	if (!UnmarshalString(Ctx, Val, In)) { return JS_ThrowTypeError(Ctx, "expected a string value"); }
+	Self->SetAttribute(FString(ANSI_TO_TCHAR(AttrName)), In); // write the live attribute store (no cached field)
+	return JS_UNDEFINED;
+}
 } // namespace
 
 // Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
@@ -764,6 +794,11 @@ JSValue InsertBeforeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValu
 	  &NodeArgMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
 #define CATHODE_BIND_METHOD_FN(JsName, Iface, Tag, Sig, ThunkFn) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
+// Slice 3 — a reflected property: getter+setter both route to the attribute store (AttrConst), no backing field.
+#define CATHODE_BIND_REFLECTED(JsName, Iface, Tag, Sig, AttrConst) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&ReflectedGetterThunk<AttrConst>), \
+	  reinterpret_cast<JSCFunction*>(&ReflectedSetterThunk<AttrConst>) }
 
 // THE ONE binding-definition table for the DOM node. INSTALL (InstallBoundMembers) + ENUMERATE
 // (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. The
@@ -793,6 +828,10 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_STR_RW("textContent", "Node", "margin", "string", GetTextContent, SetTextContent),
 	// CharacterData (Text)
 	CATHODE_BIND_STR_RW("data", "CharacterData", "required", "string", GetData, SetData),
+	// Element — reflected properties (behavioral-contract #1: name-in-dom routing; getter/setter -> attribute,
+	// no backing field). className reflects the 'class' attribute (the name translation).
+	CATHODE_BIND_REFLECTED("id", "Element", "reflected", "string", ReflectAttrId),
+	CATHODE_BIND_REFLECTED("className", "Element", "reflected", "string", ReflectAttrClass),
 };
 
 #undef CATHODE_BIND_GETTER
@@ -808,6 +847,7 @@ static const FBoundMember GDomNodeMembers[] =
 #undef CATHODE_BIND_VOID_METHOD
 #undef CATHODE_BIND_NODE_METHOD
 #undef CATHODE_BIND_METHOD_FN
+#undef CATHODE_BIND_REFLECTED
 
 FString GetDomNodeDescriptorJson()
 {
