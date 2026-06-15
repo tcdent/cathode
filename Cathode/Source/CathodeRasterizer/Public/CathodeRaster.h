@@ -213,4 +213,9 @@ public:
 // rasterizer swaps this implementation.
 CATHODERASTERIZER_API TUniquePtr<IRasterBackend> CreateBlend2DBackend();
 
+// Decode an encoded image's INTRINSIC dimensions from its raw bytes (the 003 decode-for-size), via Blend2D's
+// image decoder. Returns true + the real WxH for a decodable image; false + 0x0 for empty/undecodable input.
+// Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this at integration.
+CATHODERASTERIZER_API bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidth, int32& OutHeight);
+
 } // namespace Cathode

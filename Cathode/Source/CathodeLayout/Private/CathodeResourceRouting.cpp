@@ -1,5 +1,7 @@
 #include "CathodeResourceRouting.h"
 
+#include "CathodeRaster.h" // sprint 011 [c]: DecodeImageSize (Blend2D image-info) for get_image_size
+
 namespace Cathode
 {
 
@@ -17,15 +19,15 @@ bool RouteLinkedCss(const IResourceResolver* Resolver, const FString& Url, const
 
 void RouteImageSize(const IResourceResolver* Resolver, const FString& Src, const FString& BaseUrl, int32& OutWidth, int32& OutHeight)
 {
-	// get_image_size: the hook is wired through here (it ROUTES to the resolver), but the DIMENSIONS need
-	// decoding the bytes (003) -> integration (RQ1: the resolver has no size). So the size stays 0x0 this sprint
-	// (== 005's pre-hook stub), now produced via the routing layer rather than hardcoded. NOTE: this resolves
-	// then DISCARDS the bytes and does NOT gate on hit/miss — a forward-wiring placeholder; the integration
-	// tidy is to fold this into the 003 decode-for-size path (decode the resolved bytes -> real dimensions).
-	TArray<uint8> Bytes;
-	(void)(Resolver != nullptr && Resolver->ResolveBytes(Src, BaseUrl, Bytes));
+	// get_image_size: route to the resolver for the bytes, then DECODE their intrinsic dimensions via the 003
+	// Blend2D image-info decode (DecodeImageSize). A null resolver / miss / undecodable bytes -> 0x0.
 	OutWidth = 0;
 	OutHeight = 0;
+	TArray<uint8> Bytes;
+	if (Resolver != nullptr && Resolver->ResolveBytes(Src, BaseUrl, Bytes) && Bytes.Num() > 0)
+	{
+		DecodeImageSize(Bytes.GetData(), Bytes.Num(), OutWidth, OutHeight);
+	}
 }
 
 } // namespace Cathode

@@ -14,7 +14,9 @@ THIRD_PARTY_INCLUDES_END
 // hazard) + removeEventListener reference-drop; dispatch bubble ORDER; stopPropagation / preventDefault. Drive
 // the C++ dispatch algorithm directly with a RECORDING invoker (the FDomEvent -> JS Event object marshaling is
 // the deferred generate-from-interface part). Assert OUR bookkeeping (mark count, CurrentTarget order, flags).
-// ZERO GC-internal/refcount; actual cyclic RECLAIM needs a real JS_RunGC -> validation-pass. Authored, not run.
+// gc_mark VISIBILITY (the listener is marked) is proved by FCathodeDomListenerTest. The actual cyclic RECLAIM
+// — a real JS_RunGC freeing a node<->listener reference cycle — is the 011 [c] discharge below
+// (FCathodeDomCyclicGcReclaimTest): a measured live-object drop across a real GC, distinct from visibility.
 
 namespace
 {
@@ -234,6 +236,71 @@ bool FCathodeDomSameNodeStopTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("order is the two child listeners only (ascent halted)"),
 		Order.Num() == 2 && Order[0] == CId && Order[1] == CId);
 	TestTrue(TEXT("the parent (ascent) was not visited"), !Order.Contains(PId));
+
+	return true;
+}
+
+// Sprint 011 [c] target 4 — CYCLIC JS_RunGC RECLAIM (the come-due discharge).
+//
+// Builds a real node<->listener reference CYCLE entirely on the C++/test-seam path (NOT via uninstalled DOM JS
+// globals — the bare runtime has no document): the node's native gc_mark reports the listener (node -> listener
+// edge), and a JS back-edge (listener.node = the node's wrapper) closes it (listener -> node-wrapper). With all
+// external handles dropped, the cycle's refcounts never reach zero, so refcounting ALONE cannot reclaim it.
+//
+// The ORACLE is a MEASURED live-object DROP across a REAL JS_RunGC — distinct from gc_mark VISIBILITY (008,
+// FCathodeDomListenerTest). The non-owning, wrapper-graph-governed node index (FindNode; ~FDomNode ->
+// UnregisterNode) is the live-object probe: present before GC (cycle leaks), absent after GC (cycle reclaimed).
+// The contrast (1 -> 0 across the single real GC) is the proof; without the GC it stays 1.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomCyclicGcReclaimTest,
+	"Cathode.Dom.Event.CyclicGcReclaim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomCyclicGcReclaimTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	JSRuntime* Rt = JS_GetRuntime(Context);
+
+	FDomNodeId NodeId = INDEX_NONE;
+	{
+		// Construct the cycle, then release every external handle so ONLY the cycle holds the wrapper.
+		FJsValue NodeW = Doc->CreateElement(TEXT("div"));
+		FDomNode* Node = Doc->NodeFromWrapper(NodeW);
+		if (!Node) { AddError(TEXT("node wrapper did not resolve to a native node")); return false; }
+		NodeId = Node->GetNodeId();
+
+		// JS back-edge: listener.node = the node's wrapper (a dup, consumed by JS_SetPropertyStr). Now
+		// node-wrapper -> native -> listener (via gc_mark) and listener -> node-wrapper (via the property) = a
+		// refcount cycle. The node natively holds the listener (AddEventListener moves it in), so the listener
+		// has no external handle either.
+		FJsValue Listener(Context, Eval(Context, "(function(){})"));
+		JS_SetPropertyStr(Context, Listener.GetValue(), "node", JS_DupValue(Context, NodeW.GetValue()));
+		Node->AddEventListener(TEXT("click"), MoveTemp(Listener));
+	} // NodeW (and the moved-in Listener handle) destruct here -> the only thing keeping the wrapper alive is the cycle
+
+	// Without a GC: a refcount cycle CANNOT be reclaimed by refcounting -> the node is still live in the index.
+	const bool bLiveBeforeGc = Doc->FindNode(NodeId) != nullptr;
+	TestTrue(TEXT("before GC the node<->listener cycle is NOT reclaimed (refcount cycle leaks)"), bLiveBeforeGc);
+
+	// THE REAL PRIMITIVE: a single real cycle-collecting GC.
+	JS_RunGC(Rt);
+
+	// After the real GC: the cycle is collected -> the wrapper is finalized -> ~FDomNode -> UnregisterNode ->
+	// the node leaves the non-owning index.
+	const bool bReclaimedAfterGc = Doc->FindNode(NodeId) == nullptr;
+	TestTrue(TEXT("after JS_RunGC the cycle is reclaimed (node dropped from the index)"), bReclaimedAfterGc);
+
+	// The measured live-object DROP (1 -> 0 across the real GC) is the discharge — real reclaim, not gc_mark
+	// visibility. checked = 1 cycle reclaimed.
+	TestTrue(TEXT("measured cyclic reclaim: live-node count dropped 1->0 across the real JS_RunGC"),
+		bLiveBeforeGc && bReclaimedAfterGc);
 
 	return true;
 }

@@ -6,26 +6,44 @@
 #include "Misc/AutomationTest.h"
 
 // Specs for the 005 container -> resolver routing (litehtml-FREE, the CathodePaintRouting pattern). Drive the
-// routing helpers directly with a STUB IResourceResolver (input isolation — no litehtml, no real bytes):
-// assert load_image -> ResolveBytes, import_css -> ResolveText, get_image_size -> routes-but-0x0, and a null
-// resolver yields the pre-hook not-found result. ZERO litehtml / real-FS / real-decode assertions. Authored,
-// not run this sprint.
+// routing helpers directly with a STUB IResourceResolver (input isolation — no litehtml): assert load_image ->
+// ResolveBytes, import_css -> ResolveText, and a null resolver yields the pre-hook not-found result.
+// get_image_size -> RouteImageSize now drives the REAL 003 Blend2D image-info decode (sprint 011 [c]): a real
+// PNG fixture decodes to its intrinsic 7x3 (oracle = the image's OWN dims, not hardcoded in the path), and
+// non-image bytes decode to 0x0 (negative control). Still litehtml-FREE.
 
 namespace
 {
 using namespace Cathode;
+
+// A real 7x3, 8-bit-grayscale PNG (generated; exact bytes). The REAL Blend2D decode must return 7x3 from these
+// bytes — the oracle: the image's intrinsic dims, NOT hardcoded in the RouteImageSize path, so a faked or
+// constant decode FAILS. (Distinctive non-square 7x3 also catches a width/height transposition.)
+static const uint8 GTinyPng7x3[] = {
+	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00, 0x00, 0x7A, 0xA8, 0x4A,
+	0x19, 0x00, 0x00, 0x00, 0x13, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60, 0x90, 0xB3, 0x89,
+	0xAA, 0x98, 0xB6, 0x85, 0x01, 0x8D, 0x06, 0x00, 0x4E, 0xD8, 0x07, 0x63, 0x7D, 0x4E, 0x81, 0x0E,
+	0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+};
 
 // A stub resolver scripting hits by URL (the helper's normalization is tested in CathodeResolver; here we
 // test the container's DELEGATION to the resolver).
 class FStubResolver final : public IResourceResolver
 {
 public:
-	TMap<FString, FString> Files; // url -> content
+	TMap<FString, FString> Files;          // url -> text content (UTF-8 on resolve)
+	TMap<FString, TArray<uint8>> RawFiles; // url -> raw bytes (e.g. a real encoded image)
 	mutable int32 ByteCalls = 0;
 
 	virtual bool ResolveBytes(const FString& Url, const FString& /*BaseUrl*/, TArray<uint8>& OutBytes) const override
 	{
 		++ByteCalls;
+		if (const TArray<uint8>* Raw = RawFiles.Find(Url))
+		{
+			OutBytes.Append(*Raw);
+			return true;
+		}
 		if (const FString* Content = Files.Find(Url))
 		{
 			const FTCHARToUTF8 Conv(**Content);
@@ -59,6 +77,7 @@ bool FCathodeLayoutResourceRoutingTest::RunTest(const FString& Parameters)
 	FStubResolver Resolver;
 	Resolver.Files.Add(TEXT("logo.png"), TEXT("PNGDATA"));
 	Resolver.Files.Add(TEXT("main.css"), TEXT("body{}"));
+	Resolver.RawFiles.Add(TEXT("real.png"), TArray<uint8>(GTinyPng7x3, UE_ARRAY_COUNT(GTinyPng7x3)));
 
 	// load_image -> RouteImageBytes -> ResolveBytes (hit / miss).
 	{
@@ -78,13 +97,23 @@ bool FCathodeLayoutResourceRoutingTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("missing css -> clean miss"), RouteLinkedCss(&Resolver, TEXT("nope.css"), TEXT(""), MissCss));
 	}
 
-	// get_image_size -> RouteImageSize: routes to the resolver but returns 0x0 (size = 003 decode, integration).
+	// get_image_size -> RouteImageSize: routes to the resolver, then DECODES the bytes' intrinsic dimensions via
+	// the REAL 003 Blend2D image-info decode (the sprint 011 [c] discharge).
 	{
+		// A real PNG decodes to its OWN dims — 7x3 comes from the real decode of the fixture bytes, NOT a
+		// constant in the path (the oracle: a faked/constant decode FAILS these).
 		Resolver.ByteCalls = 0;
 		int32 W = -1, H = -1;
-		RouteImageSize(&Resolver, TEXT("logo.png"), TEXT(""), W, H);
+		RouteImageSize(&Resolver, TEXT("real.png"), TEXT(""), W, H);
 		TestTrue(TEXT("get_image_size routed to the resolver"), Resolver.ByteCalls == 1);
-		TestTrue(TEXT("get_image_size returns 0x0 (size deferred to 003)"), W == 0 && H == 0);
+		TestEqual(TEXT("real PNG decodes to its intrinsic WIDTH (7)"), W, 7);
+		TestEqual(TEXT("real PNG decodes to its intrinsic HEIGHT (3)"), H, 3);
+
+		// Negative control: non-image bytes ("PNGDATA") do NOT decode -> 0x0. Proves it is REALLY decoding (a
+		// faked always-7x3 would wrongly report 7x3 here; a real decoder rejects the garbage).
+		int32 GW = -1, GH = -1;
+		RouteImageSize(&Resolver, TEXT("logo.png"), TEXT(""), GW, GH);
+		TestTrue(TEXT("non-image bytes do not decode -> 0x0"), GW == 0 && GH == 0);
 	}
 
 	// Null resolver == the pre-hook stub behavior (no resolver wired): miss on every path, no crash.

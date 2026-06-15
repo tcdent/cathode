@@ -208,4 +208,24 @@ TUniquePtr<IRasterBackend> CreateBlend2DBackend()
 	return MakeUnique<FBlend2DBackend>();
 }
 
+bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidth, int32& OutHeight)
+{
+	OutWidth = 0;
+	OutHeight = 0;
+	if (EncodedData == nullptr || EncodedSize <= 0)
+	{
+		return false;
+	}
+	// A REAL Blend2D decode of the encoded bytes -> the image's OWN intrinsic dimensions (never hardcoded).
+	// Non-image / corrupt bytes return non-BL_SUCCESS -> 0x0 (so the caller distinguishes a real image).
+	BLImage Image;
+	if (Image.read_from_data(EncodedData, static_cast<size_t>(EncodedSize)) != BL_SUCCESS)
+	{
+		return false;
+	}
+	OutWidth = Image.width();
+	OutHeight = Image.height();
+	return OutWidth > 0 && OutHeight > 0;
+}
+
 } // namespace Cathode

@@ -153,6 +153,9 @@ void FDomDocument::SerializeNode(const FDomNode* Node, FString& Out) const
 
 	Out += TEXT("<");
 	Out += Node->TagName;
+	// data-node-id (sprint 011 [c] T1): the correlation handle the layout engine reads back via get_attr to map
+	// litehtml's placed element to our NodeId for the post-render geometry read. Emitted first, deterministic.
+	Out += FString::Printf(TEXT(" data-node-id=\"%d\""), Node->GetNodeId());
 	// Attributes in sorted-key order for DETERMINISTIC output (HTML attribute order is not semantic).
 	TArray<FString> Keys;
 	Node->Attributes.GetKeys(Keys);

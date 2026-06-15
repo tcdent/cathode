@@ -12,11 +12,11 @@ pass") resolves to an entry here.
 
 | Responsibility | Slice | Mechanism |
 |---|---|---|
-| **Lay out the document** (DOM + CSS → positioned geometry) | S2 + S3 | `FLiteHtmlRelayoutBackend::Render` feeds markup through `litehtml::document::createFromString` → `render(width)` (litehtml confined to `CathodeLayoutEngine.cpp`); the result is read out as neutral geometry (below). The vendor-computed boxes are *fidelity-deferred* (need a run). |
+| **Lay out the document** (DOM + CSS → positioned geometry) | S2 + S3 | `FLiteHtmlRelayoutBackend::Render` feeds markup through `litehtml::document::createFromString` → `render(width)` (litehtml confined to `CathodeLayoutEngine.cpp`); the result is read out as neutral geometry (below). litehtml's computed boxes are read via `QueryNodeBox` (`get_placement`) — **discharged + proven** in sprint 011 [c] (relational invariants vs litehtml's own boxes). |
 | **Parse and cascade CSS** (CSS 2/3, flexbox; no grid; partial CSS3) | S2 + S3 | Same `createFromString(html, container, master_css, user_css)` path — litehtml owns the cascade; we feed the document + author CSS. Coverage scope = litehtml's (grid is a doc-deferred gap). |
 | **Drive relayout on dirty** — BOTH complete + intelligent dirty-DOM rerender **BUILT** | S3 + S4 | `FDirtyTracker` (mark/flush, layout-vs-paint), `ComputeRelayoutPlan` (affected-subtree selection: walk up to the nearest `IsLayoutBoundary`, root-reaching ⇒ full, paint-only ⇒ no relayout — pure graph, litehtml-free), `FRelayoutController` driving `IRelayoutBackend` down **both** paths (`RelayoutDocument` / `RelayoutSubtree`). Dirty-DOM rerender is **built, not deferred**; only the offset *value* + efficient==full *proof* are validation-pass. |
 | **Route paint** (document_container → neutral paint-op stream) | S2 + S4 | `FCathodeDocumentContainer` callbacks → `Emit*` helpers → `TArray<FLayoutPaintOp>`. **Full border routing**: `DecomposeBorder` (solid+square → 4 `FillBox` edges; any styled side / corner radius → one neutral `StrokeBorder` op). Clip via `EmitClipPush`/`EmitClipPop`. The splice transform `OffsetPaintOps` is built + tested. |
-| **Surface computed geometry + resolved style (observation)** | S5 | `WalkGeometry` (pre-order DFS over `ILayoutDocumentSource`, one `FLayoutNodeGeometry{NodeId, Box, Style}` per node — walk/assembly are ours) + `MapResolvedStyle` bounded **by construction** to `ContractStyleProperties()` (box-model + visual subset, not the full CSSOM). Backs `getBoundingClientRect` / `getComputedStyle`; the vendor box/value reads are validation-pass edges. |
+| **Surface computed geometry + resolved style (observation)** | S5 | `WalkGeometry` (pre-order DFS over `ILayoutDocumentSource`, one `FLayoutNodeGeometry{NodeId, Box, Style}` per node — walk/assembly are ours) + `MapResolvedStyle` bounded **by construction** to `ContractStyleProperties()` (box-model + visual subset, not the full CSSOM). Backs `getBoundingClientRect` / `getComputedStyle`; the vendor BOX read (`QueryNodeBox`) is **discharged** (011 [c] — real `get_placement` through the observation read path), while the per-property computed-VALUE read (`QueryComputedValue`) stays deferred (see #2). |
 | **Delegate text measurement/shaping to Text & Fonts** | by design | The neutral `ITextMeasurer` input seam (`ResolveFont`/`MeasureWidth`/`GetFontMetrics`); the container's `create_font`/`text_width` route through `FLayoutFontCache` to it. **No `hb_*` / no `CathodeText` coupling** (grep-clean). Produces 004's measurement-*consumer* side. |
 | **Delegate rasterization to the Rasterizer** | by design | Output is OUR neutral `FLayoutPaintOp` stream (incl. `StrokeBorder`, `ClipPush`/`ClipPop`) — mapped to 003's `FPaintOp` at integration. **No `BL*` / no `CathodeRasterizer` coupling** (grep-clean). Produces 003's draw-call source + the `StrokeBorder` the Rasterizer's 003 `COVERAGE.md` #3 stroke op will consume. |
 | **Consume the DOM tree** | S2 + S3 | The neutral retained-DOM seam `ILayoutDocumentSource` (tree structure for selection + markup for the re-feed). The source *implementation* is sibling-missing (deferred). |
@@ -31,11 +31,20 @@ pass") resolves to an entry here.
 - **Unblocks:** the validation pass (execution-approval sprint).
 - **First-execution risk:** subtree paint ops splice at a zero offset (visually wrong placement) until the boundary-offset query is bound; the efficiency win is unproven until the equivalence holds. The transform that consumes the offset (`OffsetPaintOps`) and the path selection are built + tested.
 
-### 2. Vendor reads (`QueryNodeBox` / `QueryComputedValue`) + layout/CSS FIDELITY
-- **Reason:** the observation read's per-node box + per-property value are litehtml's computed boxes/cascade; no layout runs this sprint, so they are stubbed (`FBox2f(ForceInit)` / empty string) and fidelity cannot be asserted (the tautology guard — vendor output is never hand-asserted).
-- **Dependency:** an execution-sprint build + run; litehtml owns the layout/cascade correctness.
-- **Unblocks:** the validation pass.
-- **First-execution risk:** the geometry read returns zero boxes and empty style values until the vendor reads are bound; CSS layout fidelity (flexbox, the documented CSS scope) is proven only when laid out + rendered. The walk + bounded mapping around the reads are tested.
+### 2. Computed-STYLE-string read (`QueryComputedValue`) — style fidelity
+- **DISCHARGED in sprint 011 [c] — the BOX read (`QueryNodeBox`):** now returns litehtml's real `get_placement()`
+  via the retained `litehtml::document` + the `data-node-id` NodeId↔element map. Proven by
+  `Cathode.Layout.LiteHtml.ComputedBoxes` (the engine) and `Cathode.Dom.Observation.RealLayoutGeometry` (the
+  observation read path), both on relational invariants against litehtml's OWN boxes. No longer deferred.
+- **Still deferred — `QueryComputedValue` (the per-property computed-STYLE-string read):** litehtml exposes
+  computed style as TYPED properties (`css().get_display()` etc.), not name-keyed strings, so a real read needs a
+  litehtml-typed→string mapping over the bounded `ContractStyleProperties()` set. It was never one of the four
+  [c] geometry/decode/GC targets (the [c] oracles are boxes) — it is a style-fidelity follow-on, not a [c] gap.
+- **Dependency / re-tie:** the DORMANT CSS axis — Cathode's own litehtml-grounded CSS declaration (Authoring/,
+  roadmap). The declared CSS contract and the computed-style read are one style-fidelity track; resolve them
+  together. **Unblocker:** the litehtml-typed→string mapping.
+- **First-execution risk:** `getComputedStyle` returns empty property values until the typed→string read is
+  bound; the BOX read (`getBoundingClientRect`) is unaffected (discharged). The walk + bounded mapping are tested.
 
 ### 3. Styled / rounded-border DRAW
 - **Reason:** Layout *produces* the neutral `StrokeBorder` op for any styled side or corner radius; the op that actually draws it is the Rasterizer's stroke / rounded-rect / path op.

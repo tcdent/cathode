@@ -299,6 +299,17 @@ public:
 		OffsetPaintOps(TArrayView<FLayoutPaintOp>(Sink.GetData() + Before, Sink.Num() - Before), BoundaryOffset);
 	}
 
+	// Post-render geometry read (T1): resolve our NodeId to litehtml's placed element (via the data-node-id map
+	// built at render) and return litehtml's OWN computed box. ForceInit (zero) for an unknown/unrendered NodeId.
+	FBox2f QueryBox(int32 NodeId) const
+	{
+		if (const litehtml::element::ptr* Element = NodeElementMap.Find(NodeId))
+		{
+			return ToBox((*Element)->get_placement());
+		}
+		return FBox2f(ForceInit);
+	}
+
 private:
 	static constexpr int32 DefaultViewportWidth = 1920;
 	static constexpr int32 DefaultViewportHeight = 1080;
@@ -316,6 +327,11 @@ private:
 		{
 			Doc->render(Width);
 			Doc->draw(static_cast<litehtml::uint_ptr>(0), 0, 0, nullptr); // fires the container paint callbacks -> sink
+			// RETAIN the laid-out document + (re)build the NodeId<->element map (T1): get_placement() is valid
+			// after render(), so post-render geometry queries (QueryBox) resolve our NodeId to litehtml's placed
+			// element via the data-node-id attribute the DOM serializer emits.
+			RenderedDoc = Doc;
+			RebuildNodeElementMap();
 		}
 	}
 
@@ -326,9 +342,38 @@ private:
 		return FVector2f::ZeroVector;
 	}
 
+	// Walk the laid-out litehtml tree, mapping each element carrying a data-node-id attribute (the DOM
+	// serializer's correlation handle, preserved through litehtml's parse) to its placed element::ptr.
+	void RebuildNodeElementMap()
+	{
+		NodeElementMap.Reset();
+		if (RenderedDoc)
+		{
+			IndexElement(RenderedDoc->root());
+		}
+	}
+
+	void IndexElement(const litehtml::element::ptr& Element)
+	{
+		if (!Element)
+		{
+			return;
+		}
+		if (const char* IdAttr = Element->get_attr("data-node-id"))
+		{
+			NodeElementMap.Add(FCStringAnsi::Atoi(IdAttr), Element);
+		}
+		for (const litehtml::element::ptr& Child : Element->children())
+		{
+			IndexElement(Child);
+		}
+	}
+
 	const ILayoutDocumentSource& Source;
 	TArray<FLayoutPaintOp>& Sink;
 	FCathodeDocumentContainer Container;
+	litehtml::document::ptr RenderedDoc;                // retained laid-out document (T1 geometry queries)
+	TMap<int32, litehtml::element::ptr> NodeElementMap; // NodeId -> placed litehtml element (via data-node-id)
 };
 
 // The litehtml-backed layout engine. Owns the font cache + the paint-op sink + the relayout controller
@@ -397,11 +442,11 @@ private:
 	// --- Vendor edges: map our NodeId onto litehtml's laid-out element + read its box / computed value.
 	//     Stubbed this sprint (no render runs); the validation pass binds them to the rendered document.
 
-	FBox2f QueryNodeBox(int32 /*NodeId*/) const
+	FBox2f QueryNodeBox(int32 NodeId) const
 	{
-		// TODO(validation pass): resolve the element for NodeId in the laid-out litehtml document and read
-		// its placed position{x,y,w,h} -> ToBox. Vendor value; the walk/assembly around it is tested.
-		return FBox2f(ForceInit);
+		// T1: read litehtml's OWN computed box for NodeId via the backend's data-node-id map (resolved from the
+		// retained, laid-out document). The walk/assembly around this (WalkGeometry) is tested separately.
+		return Backend.IsValid() ? Backend->QueryBox(NodeId) : FBox2f(ForceInit);
 	}
 
 	FResolvedStyle QueryNodeStyle(int32 NodeId) const

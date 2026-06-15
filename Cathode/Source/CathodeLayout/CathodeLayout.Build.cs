@@ -7,14 +7,20 @@ public class CathodeLayout : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// Minimal Unreal deps: layout orchestration over our own neutral types (FBox2f/FColor/FString/
-		// TArray). It does NOT depend on CathodeRuntime / CathodeRasterizer / CathodeText — the paint-op
-		// output, the text-measurement input, and the DOM source are engine-neutral seams, wired across
-		// modules later.
+		// Layout orchestration over our own neutral types (FBox2f/FColor/FString/TArray). Still NOT coupled to
+		// CathodeRuntime / CathodeText — the paint-op output and text-measurement input are engine-neutral seams.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
-			"CathodeResolver", // sprint 009: the document_container's resource callbacks route to IResourceResolver
+			"CathodeResolver", // sprint 009: document_container resource callbacks route to IResourceResolver
+		});
+
+		// PRIVATE: CathodeRasterizer is used ONLY in the .cpp (CathodeResourceRouting -> DecodeImageSize, the
+		// Blend2D image-info decode for get_image_size), never in a public CathodeLayout header — so it is a
+		// private dep: it does NOT leak to CathodeLayout's consumers (e.g. CathodeDom). (sprint 011 [c])
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"CathodeRasterizer",
 		});
 
 		// --- Bundled ThirdParty: litehtml (the layout/CSS engine) ---
