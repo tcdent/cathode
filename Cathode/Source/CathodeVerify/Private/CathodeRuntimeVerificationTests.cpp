@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CathodeBuildId.h"
+#include "CathodeDom.h" // sprint 012 slice 1 lockstep proof — TEST-ONLY (this TU is WITH_DEV_AUTOMATION_TESTS-gated)
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTesting.h"
 
@@ -341,6 +342,161 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("faculty-B framework self-test exercised + ok"), bSelfTestOk);
 	}
 
+	GVerifyEmittedReports.Reset();
+	return true;
+}
+
+// Sprint 012 slice 1 — the 011<->012 LOCKSTEP PROOF (in-engine): the 011 faculty actually CONSUMES the 012
+// projection's descriptor (GetDomNodeDescriptorJson, emitted from the SAME FBoundMember table the members
+// install from) and reconciles it against the REAL installed DOM proto -> near-empty drift; a discriminating
+// omit-case drifts. Conditions: A1 the exposed names come LIVE from the real proto (the faculty reads
+// __cathodeDomProbe via Object.getOwnPropertyNames, never the table); A2 the iface axis is surfaced as
+// NOT-runtime-verified (name-presence is the verified axis); A3 the omit-case proves near-empty is a real
+// reconcile; B1/B2 CathodeDom is reached ONLY here (test-only, conditional non-Shipping dep, this TU gated).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeVerifyDomLockstepTest,
+	"Cathode.Verify.DomDescriptorLockstep",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
+	if (!Context) { AddError(TEXT("runtime exposes no native JS context")); return false; }
+
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
+	if (!Plugin.IsValid()) { AddError(TEXT("Cathode plugin not found")); return false; }
+	const FString JsDir = Plugin->GetBaseDir() / TEXT("Source/CathodeVerify/JS");
+	FString WalkSource, FacultySource;
+	if (!FFileHelper::LoadFileToString(WalkSource, *(JsDir / TEXT("surface-walk.js")))
+		|| !FFileHelper::LoadFileToString(FacultySource, *(JsDir / TEXT("runtime-verify.js"))))
+	{
+		AddError(TEXT("could not load the faculty JS"));
+		return false;
+	}
+
+	// Register the DOM node class in THIS runtime (the test-only CathodeDom edge): RegisterDomNodeClass installs
+	// the bound members on the class prototype (the same install path the production document uses) and returns the
+	// class id. We deliberately do NOT stand up an FDomDocument — the lockstep proves the installed-PROTO surface,
+	// and going through the already-exported registration entry point keeps FDomDocument's mutating API
+	// (CreateElement, …) intra-module (no public-surface widening). The probe is a bare object whose [[Prototype]]
+	// IS the class proto (exactly what a real node wrapper's prototype is — JS_GetClassProto(classId)), so
+	// Object.getPrototypeOf(probe) yields the live installed proto the faculty enumerates (A1).
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*Runtime);
+	const JSClassID NodeClassId = RegisterDomNodeClass(*Registry, Context);
+	JSValue NodeProto = JS_GetClassProto(Context, NodeClassId);
+	JSValue NodeProbe = JS_NewObjectProto(Context, NodeProto);
+	JS_FreeValue(Context, NodeProto);
+	if (JS_IsException(NodeProbe) || JS_IsNull(NodeProbe))
+	{
+		AddError(TEXT("could not build the DOM proto probe (RegisterDomNodeClass / JS_GetClassProto)"));
+		return false;
+	}
+
+	// Drive the faculty with a DECLARED descriptor + the real node probe; read back surface.dom.drift.
+	auto RunReconcile = [&](const FString& DescriptorJson, TSet<FString>& OutMissing, TSet<FString>& OutExtra,
+		int32& OutDeclaredCount, int32& OutExposedCount, FString& OutIfaceAxis) -> bool
+	{
+		GVerifyEmittedReports.Reset();
+		JSValue Global = JS_GetGlobalObject(Context);
+		JS_SetPropertyStr(Context, Global, "__cathodeEmitReport",
+			JS_NewCFunction(Context, &CathodeVerifyEmitReport, "__cathodeEmitReport", 1));
+		JS_SetPropertyStr(Context, Global, "__CATHODE_BUILD_ID__",
+			JS_NewString(Context, TCHAR_TO_UTF8(*Cathode::CathodeAggregateBuildId())));
+		// A1: expose the probe so the faculty reads its installed proto's OWN member names live.
+		JS_SetPropertyStr(Context, Global, "__cathodeDomProbe", JS_DupValue(Context, NodeProbe));
+		// The DECLARED descriptor (the lockstep input), parsed onto the runtime.
+		const FTCHARToUTF8 DescUtf8(*DescriptorJson);
+		JSValue Declared = JS_ParseJSON(Context, DescUtf8.Get(), DescUtf8.Length(), "descriptor.json");
+		if (JS_IsException(Declared))
+		{
+			JS_FreeValue(Context, Declared);
+			JS_FreeValue(Context, Global);
+			AddError(TEXT("descriptor JSON did not parse"));
+			return false;
+		}
+		JS_SetPropertyStr(Context, Global, "__CATHODE_DECLARED__", Declared); // consumes Declared
+		JS_FreeValue(Context, Global);
+
+		FString EvalError;
+		if (!EvalGlobal(Context, WalkSource, "surface-walk.js", EvalError)
+			|| !EvalGlobal(Context, FacultySource, "runtime-verify.js", EvalError))
+		{
+			AddError(FString::Printf(TEXT("faculty eval threw: %s"), *EvalError));
+			return false;
+		}
+		if (GVerifyEmittedReports.Num() != 1)
+		{
+			AddError(TEXT("faculty did not emit exactly one report"));
+			return false;
+		}
+		TSharedPtr<FJsonObject> Report;
+		const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(GVerifyEmittedReports[0]);
+		if (!FJsonSerializer::Deserialize(Reader, Report) || !Report.IsValid())
+		{
+			AddError(TEXT("self-report is not valid JSON"));
+			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* Surface = nullptr;
+		const TSharedPtr<FJsonObject>* DomAxis = nullptr;
+		const TSharedPtr<FJsonObject>* Drift = nullptr;
+		if (!Report->TryGetObjectField(TEXT("surface"), Surface) || !Surface
+			|| !(*Surface)->TryGetObjectField(TEXT("dom"), DomAxis) || !DomAxis
+			|| !(*DomAxis)->TryGetObjectField(TEXT("drift"), Drift) || !Drift)
+		{
+			AddError(TEXT("report has no surface.dom.drift — the DOM reconcile did not activate on the descriptor"));
+			return false;
+		}
+		OutMissing = ArrayFieldToSet(*Drift, TEXT("missing"));
+		OutExtra = ArrayFieldToSet(*Drift, TEXT("extra"));
+		(*Drift)->TryGetNumberField(TEXT("declaredCount"), OutDeclaredCount);
+		(*Drift)->TryGetNumberField(TEXT("exposedCount"), OutExposedCount);
+		(*DomAxis)->TryGetStringField(TEXT("ifaceAxis"), OutIfaceAxis);
+		return true;
+	};
+
+	// CASE 1 — the REAL descriptor (from the one table) vs the REAL installed proto -> NEAR-EMPTY drift.
+	{
+		TSet<FString> Missing, Extra;
+		int32 DeclaredCount = 0, ExposedCount = 0;
+		FString IfaceAxis;
+		if (!RunReconcile(GetDomNodeDescriptorJson(), Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the faculty CONSUMED the descriptor (reconcile activated; declaredCount>0)"), DeclaredCount > 0);
+		TestTrue(TEXT("the exposed set came from the REAL installed proto (exposedCount>0)"), ExposedCount > 0);
+		TestEqual(TEXT("near-empty drift: nothing declared-but-not-installed"), Missing.Num(), 0);
+		TestEqual(TEXT("near-empty drift: nothing installed-but-not-declared"), Extra.Num(), 0);
+		TestTrue(TEXT("A2: the iface axis is surfaced as name-presence (NOT runtime-verified)"),
+			IfaceAxis.Contains(TEXT("name-presence")));
+	}
+
+	// CASE 2 (A3 discriminating) — the real descriptor PLUS a member NOT installed -> it drifts as MISSING,
+	// proving near-empty above is a REAL reconcile of the live proto, not by-construction.
+	{
+		const FString WithBogus =
+			TEXT("{\"dom\":[")
+			TEXT("{\"iface\":\"Element\",\"name\":\"getAttribute\",\"kind\":\"method\"},")
+			TEXT("{\"iface\":\"Element\",\"name\":\"tagName\",\"kind\":\"property\"},")
+			TEXT("{\"iface\":\"Element\",\"name\":\"__bogusNotInstalled\",\"kind\":\"method\"}],\"globals\":[]}");
+		TSet<FString> Missing, Extra;
+		int32 DeclaredCount = 0, ExposedCount = 0;
+		FString IfaceAxis;
+		if (!RunReconcile(WithBogus, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		{
+			return false;
+		}
+		TestTrue(TEXT("A3: a declared-but-not-installed member drifts as MISSING"), Missing.Contains(TEXT("__bogusNotInstalled")));
+		TestEqual(TEXT("A3: ONLY the bogus member is missing (the real members are installed)"), Missing.Num(), 1);
+		TestEqual(TEXT("A3: nothing extra (the real proto members are all declared)"), Extra.Num(), 0);
+	}
+
+	JS_FreeValue(Context, NodeProbe);
 	GVerifyEmittedReports.Reset();
 	return true;
 }

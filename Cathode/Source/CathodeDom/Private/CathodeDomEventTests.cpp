@@ -305,4 +305,81 @@ bool FCathodeDomCyclicGcReclaimTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Sprint 012 slice 1 — the single binding-definition mechanism, criterion 2 (the first members REALLY work) +
+// a criterion-1 structural check (install <-> enumerate from the ONE table).
+//
+// Drives the REAL installed members through JS member access (the wrapper's own/proto bindings) and asserts the
+// marshaled value == FDomNode's OWN return (not a hand-typed constant). getAttribute (method, string->string|null)
+// + tagName (property getter). Then asserts BOTH members are present on the real proto (install side, via
+// JS_GetOwnPropertyNames) AND in the descriptor (enumerate side, GetDomNodeDescriptorJson) — both from the one
+// FBoundMember table. (The full faculty lockstep + the discriminating omit-case is the next step.)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomMemberBindingTest,
+	"Cathode.Dom.Binding.MemberRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomMemberBindingTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout); // installs the bound members
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	FJsValue NodeW = Doc->CreateElement(TEXT("div"));
+	FDomNode* Node = Doc->NodeFromWrapper(NodeW);
+	Node->SetAttribute(TEXT("data-x"), TEXT("hello"));
+
+	// Expose the wrapper so member access goes through the REAL installed bindings (not a back-door C++ call).
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__node", JS_DupValue(Context, NodeW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	// CRITERION 2 — getAttribute (method): JS call -> thunk -> FDomNode::GetAttribute -> marshaled return,
+	// asserted == the primitive's OWN output.
+	{
+		JSValue Result = Eval(Context, "__node.getAttribute('data-x')");
+		FString Got;
+		const bool bOk = UnmarshalString(Context, Result, Got);
+		JS_FreeValue(Context, Result);
+		FString NativeOut;
+		Node->GetAttribute(TEXT("data-x"), NativeOut); // the real primitive's own output
+		TestTrue(TEXT("getAttribute returned a JS string"), bOk);
+		TestEqual(TEXT("node.getAttribute(JS) == FDomNode::GetAttribute output"), Got, NativeOut);
+	}
+	// absent attribute -> JS null (the thunk's optional-return discipline).
+	{
+		JSValue Result = Eval(Context, "__node.getAttribute('missing')");
+		TestTrue(TEXT("absent attribute reads JS null"), JS_IsNull(Result));
+		JS_FreeValue(Context, Result);
+	}
+	// CRITERION 2 — tagName (property getter): JS property access -> getter thunk -> FDomNode::GetTagName.
+	{
+		JSValue Result = Eval(Context, "__node.tagName");
+		FString Tag;
+		UnmarshalString(Context, Result, Tag);
+		JS_FreeValue(Context, Result);
+		TestEqual(TEXT("node.tagName(JS) == FDomNode::GetTagName output"), Tag, Node->GetTagName());
+	}
+
+	// CRITERION 1 (structural) — both members are on the REAL proto (install side, JS_GetOwnPropertyNames via JS)
+	// AND in the descriptor (enumerate side) — from the one FBoundMember table.
+	{
+		JSValue Result = Eval(Context, "Object.getOwnPropertyNames(Object.getPrototypeOf(__node)).join(',')");
+		FString ProtoMembers;
+		UnmarshalString(Context, Result, ProtoMembers);
+		JS_FreeValue(Context, Result);
+		const FString Descriptor = GetDomNodeDescriptorJson();
+		TestTrue(TEXT("getAttribute is installed on the real proto"), ProtoMembers.Contains(TEXT("getAttribute")));
+		TestTrue(TEXT("tagName is installed on the real proto"), ProtoMembers.Contains(TEXT("tagName")));
+		TestTrue(TEXT("getAttribute is in the descriptor"), Descriptor.Contains(TEXT("\"name\":\"getAttribute\"")));
+		TestTrue(TEXT("tagName is in the descriptor"), Descriptor.Contains(TEXT("\"name\":\"tagName\"")));
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

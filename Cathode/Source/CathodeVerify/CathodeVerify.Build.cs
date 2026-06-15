@@ -27,6 +27,18 @@ public class CathodeVerify : ModuleRules
 			"Projects",
 		});
 
+		// TEST-ONLY conditional deps (sprint 012 slice 1, the 011<->012 lockstep proof): the lockstep test installs
+		// the DOM node class in the test runtime to feed the 011 faculty a REAL descriptor (GetDomNodeDescriptorJson,
+		// from CathodeDom) and a real installed-proto probe — built via the registry (CreateNativeClassRegistry, from
+		// CathodeBinding). These are the ONLY couplings and they are automation-test-only — the include is
+		// WITH_DEV_AUTOMATION_TESTS-gated and the production faculty (CathodeVerifyModule.cpp) stays DOM-agnostic.
+		// Gated to non-Shipping so a Shipping CathodeVerify carries NO CathodeDom/CathodeBinding test dependency.
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateDependencyModuleNames.Add("CathodeDom");
+			PrivateDependencyModuleNames.Add("CathodeBinding");
+		}
+
 		// quickjs-ng (the SHARED DLL): the driver installs the native emit-sink (JS_NewCFunction) and injects
 		// the harness inputs onto the live JSContext recovered from the runtime, so it calls JS_* directly and
 		// must LINK the ONE shared quickjs import lib (same model as CathodeBinding/CathodeDom — the DLL is

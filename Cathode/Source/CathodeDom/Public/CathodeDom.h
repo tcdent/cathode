@@ -234,8 +234,14 @@ private:
 // --- Registration + construction (composing the siblings) ---
 
 // Register the single DOM node class via 007 — wires the gc_mark (held-ref marking) + the finalizer
-// (FinalizeNativeObject<FDomNode>). Returns the class id used to wrap nodes. (Body Slice 2.)
-CATHODEDOM_API JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry);
+// (FinalizeNativeObject<FDomNode>), and (sprint 012 slice 1) INSTALLS the bound members onto the class proto
+// from the single binding-definition table (needs the live JSContext). Returns the class id used to wrap nodes.
+CATHODEDOM_API JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Context);
+
+// The DOM node's declared-member DESCRIPTOR (sprint 012 slice 1), emitted from the SAME binding-definition
+// table the members install from — CathodeVerify/SCHEMA.md section-2 shape. The 011 faculty consumes this as
+// __CATHODE_DECLARED__ (the 011<->012 lockstep). Projection/test seam; no production faculty coupling.
+CATHODEDOM_API FString GetDomNodeDescriptorJson();
 
 // Construct a DOM document over 007's runtime/registry (for wrapping + lifetime) and 005's layout engine
 // (for the handshake). Composes the siblings; stands up no second runtime, builds no layout. (Body Slice 2+.)

@@ -242,7 +242,10 @@ FJsValue FDomDocument::CreateTextNode(const FString& Data)
 TUniquePtr<FDomDocument> CreateDomDocument(
 	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout)
 {
-	const JSClassID NodeClassId = RegisterDomNodeClass(Registry);
+	// sprint 012 slice 1: RegisterDomNodeClass now also installs the bound members onto the class proto, so it
+	// needs the live JSContext (002's confined context).
+	const JSClassID NodeClassId =
+		RegisterDomNodeClass(Registry, static_cast<JSContext*>(Runtime.GetNativeContextHandle()));
 	return MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
 }
 

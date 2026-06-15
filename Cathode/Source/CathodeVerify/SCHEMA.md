@@ -79,12 +79,24 @@ DeclaredGlobal = {
 
 ### Reconcile key + diff (baseline-agnostic — works over whatever declared-set is supplied)
 
-- **DOM** entries key on `iface + "." + name` (the same member name can exist on multiple interfaces).
+- **DOM** entries key on **`name`** (NAME-PRESENCE) — see the iface-axis note below.
 - **globals** entries key on `name`.
 - The diff is set-membership only:
   - `missing` = declared keys **not** in the exposed set → **under-exposure** (declared, not built).
   - `extra`   = exposed names **not** in the declared set → **over-exposure** (built, not declared).
-- Only `iface`/`name`/`kind` form the key; `tag`/`signature` are carried metadata, not diffed.
+- Only `name`/`kind` form the key; `iface`/`tag`/`signature` are carried metadata, not diffed.
+
+> **STANDING NOTE — the DOM iface axis is structurally UNVERIFIABLE (sprint 012 S1, review-ruled).** The
+> contract's per-interface split (Document / Node / Element / EventTarget …) collapses onto ONE runtime class
+> (`FDomNode` — one quickjs class, one prototype carries every member). The runtime therefore exposes bare
+> member NAMES with no iface, and the binding table is the only source of iface — so iface-qualifying the
+> exposed side would be **tautological** (table-sourced on both sides) and verifies nothing. The faculty
+> therefore keys the DOM reconcile by **name-presence** (the genuinely end-to-end axis: declared name ⇒ a real
+> member on the live installed proto, via `JS_GetOwnPropertyNames`), and carries `iface` as declared metadata,
+> reported but NOT runtime-verified (`surface.dom.ifaceAxis` says so). This holds for ALL future DOM reconcile —
+> a later reviewer must not mistake the iface tautology for a gap; name-presence is the verifiable DOM axis.
+> (Same-named members across ifaces, e.g. `querySelector` on Document + Element, likewise collapse to one name
+> on the single proto — expected, not drift.)
 
 ### Exposed side (what `missing`/`extra` compare the declared set against)
 

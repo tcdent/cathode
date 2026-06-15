@@ -35,6 +35,7 @@
     "__CATHODE_CSS_SUBSET__": "declared CSS contract the driver injects for the CSS reconcile (harness input, not surface)",
     "CathodeSurfaceWalk": "the shared walk the driver injects (the introspection mechanism, not surface-under-test)",
     "__CATHODE_DECLARED__": "the declared-interface descriptor the 012 Host Bridge projection injects for the DOM/globals reconcile (faculty input, not surface; dormant until 012)",
+    "__cathodeDomProbe": "a live DOM node the driver exposes so faculty-A reads the REAL installed proto's members for the DOM reconcile (012 lockstep test input, not production surface)",
   };
 
   // --- Faculty-A: enumerate the ACTUALLY-exposed surface (reflect the real runtime; no hardcoded list),
@@ -109,10 +110,16 @@
         note: axis + " declared set is DEFINITION-derived from the 012 projection (interface-IS-source), never a re-walk; reconcile machinery built + dormant pending the descriptor",
       };
     }
-    var keyFn = (axis === "dom")
-      ? function (e) { return (e.iface || "") + "." + e.name; } // DOM: same member name across interfaces
-      : function (e) { return e.name; };                        // globals: name
-    return { declaredSource: DESCRIPTOR_REF, declaredCount: declared.length, drift: reconcileAxis(declared, keyFn, exposedNames) };
+    // A2 (012 lockstep): the DOM reconcile is keyed by NAME-PRESENCE. The contract's iface (Element/Node/...)
+    // collapses onto ONE runtime FDomNode class, so iface is NOT runtime-verifiable — it is carried DECLARED
+    // metadata (tautological), and name-presence is the verified axis (see SCHEMA.md §2). Globals key by name too.
+    var keyFn = function (e) { return e.name; };
+    return {
+      declaredSource: DESCRIPTOR_REF,
+      declaredCount: declared.length,
+      ifaceAxis: "declared-metadata, NOT runtime-verified (iface-collapse); verified axis = name-presence",
+      drift: reconcileAxis(declared, keyFn, exposedNames),
+    };
   }
 
   // Exposed sides the reconcile diffs the declared set against (see SCHEMA.md §2 "Exposed side"):
@@ -124,7 +131,16 @@
     return out;
   }
   function exposedDomMembers(exposed) {
-    return []; // bare runtime: no DOM wrapper. When wired, enumerate its members keyed iface.name to match.
+    // A1: the EXPOSED DOM members are the REAL installed proto's OWN member names — read LIVE off a node probe
+    // (globalThis.__cathodeDomProbe) the driver exposes, via Object.getOwnPropertyNames(getPrototypeOf(probe)).
+    // NEVER re-derived from the descriptor/table, so a declared-but-not-installed member shows as drift. A bare
+    // runtime (no probe) -> [] (the DOM surface is under-exposed).
+    var probe = (typeof globalThis.__cathodeDomProbe !== "undefined") ? globalThis.__cathodeDomProbe : null;
+    if (!probe) return [];
+    try {
+      var proto = Object.getPrototypeOf(probe);
+      return proto ? Object.getOwnPropertyNames(proto).sort() : [];
+    } catch (e) { return []; }
   }
 
   // --- Faculty-B: exercise-and-report FRAMEWORK (scaffold). [c] registers the 4 come-due proofs. ---

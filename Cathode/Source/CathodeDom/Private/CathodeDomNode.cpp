@@ -1,5 +1,7 @@
 #include "CathodeDom.h"
 
+#include "CathodeBoundMember.h" // sprint 012 slice 1: the single binding-definition mechanism (install + enumerate)
+
 // The DOM is quickjs-type-coupled by design (via 007). quickjs.h reaches here through CathodeBinding.h; the
 // DOM calls a few quickjs primitives directly to map wrappers<->opaques. Include path wired at execution.
 THIRD_PARTY_INCLUDES_START
@@ -402,7 +404,66 @@ bool FDomNode::GetComputedStyle(FResolvedStyle& OutStyle) const
 	return false;
 }
 
-JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry)
+// --- Sprint 012 slice 1: the DOM node member bindings (the single binding-definition table) ---
+
+namespace
+{
+// The DOM node class id, set at registration; the per-member thunks recover the native instance via it.
+JSClassID GDomNodeClassId = 0;
+
+// Shape-template thunks — one C++ method-ptr instantiates one install thunk. The CATHODE_BIND_* macros emit
+// BOTH the thunk (this instantiation) AND the FBoundMember entry from ONE declaration, so install + enumerate
+// then both consume the single table.
+template <const FString& (FDomNode::*Getter)() const>
+JSValue StrGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalString(Ctx, (Self->*Getter)()).Release();
+}
+
+template <bool (FDomNode::*Method)(const FString&, FString&) const>
+JSValue StrOptStrMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Name;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Name)) { return JS_ThrowTypeError(Ctx, "expected a string argument"); }
+	FString Out;
+	if (!(Self->*Method)(Name, Out)) { return JS_NULL; } // absent attribute -> JS null
+	return MarshalString(Ctx, Out).Release();
+}
+} // namespace
+
+// Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
+// getter-shaped; the reinterpret_cast into JSCFunction* is the quickjs idiom (JS_NewCFunction2 dispatches on the
+// JS_CFUNC_getter cproto).
+#define CATHODE_BIND_GETTER(JsName, Iface, Tag, Sig, CppGetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&StrGetterThunk<&FDomNode::CppGetter>), nullptr }
+#define CATHODE_BIND_OPT_STR_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
+	  &StrOptStrMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+
+// THE ONE binding-definition table for the DOM node. INSTALL (InstallBoundMembers) + ENUMERATE
+// (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. Slice 1
+// proves the mechanism with the first members; later slices extend the table (the member contract grows here).
+static const FBoundMember GDomNodeMembers[] =
+{
+	CATHODE_BIND_GETTER("tagName", "Element", "margin", "string", GetTagName),
+	CATHODE_BIND_OPT_STR_METHOD("getAttribute", "Element", "margin", "(qualifiedName: string) -> string | null", GetAttribute),
+};
+
+#undef CATHODE_BIND_GETTER
+#undef CATHODE_BIND_OPT_STR_METHOD
+
+FString GetDomNodeDescriptorJson()
+{
+	// ENUMERATE side: the descriptor emitted from the SAME table the members install from (lockstep source).
+	return EnumerateBoundMembersJson(GDomNodeMembers, UE_ARRAY_COUNT(GDomNodeMembers));
+}
+
+JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Context)
 {
 	// One class for both node kinds. gc_mark marks the node's held refs (cycle visibility); the finalizer
 	// frees the native side (de-register + FreeRT held refs). 007 owns the mechanism; the DOM supplies the hooks.
@@ -411,14 +472,19 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry)
 	Def.Finalizer = &FinalizeNativeObject<FDomNode>;
 	Def.GcMark = [](JSRuntime* Runtime, JSValueConst Value, JS_MarkFunc* MarkFunc)
 	{
-		// TODO-PREBUILD(signature): JS_GetAnyOpaque(obj,&class_id)->void* (quickjs.h:1042) — see 007.
 		JSClassID ClassId;
 		if (FDomNode* Node = static_cast<FDomNode*>(JS_GetAnyOpaque(Value, &ClassId)))
 		{
 			Node->MarkHeldRefs(Runtime, MarkFunc);
 		}
 	};
-	return Registry.RegisterClass(Def);
+	const JSClassID ClassId = Registry.RegisterClass(Def);
+	GDomNodeClassId = ClassId; // the member thunks recover the native via this id
+
+	// INSTALL side (sprint 012 slice 1): build the proto + install every bound member from the one table +
+	// JS_SetClassProto. CreateWrappedObject's JS_GetClassProto path then gives every node instance the members.
+	InstallBoundMembers(Context, ClassId, GDomNodeMembers, UE_ARRAY_COUNT(GDomNodeMembers));
+	return ClassId;
 }
 
 } // namespace Cathode
