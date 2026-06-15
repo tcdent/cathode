@@ -19,6 +19,15 @@ public class CathodeDom : ModuleRules
 			"CathodeSurfaces" // 006: ISurfaceDocument — the surface<->DOM binding resolved at integration
 		});
 
+		// TEST-ONLY conditional dep (sprint 012 first-mount proof): the mount-proof test uses IPluginManager
+		// (Projects module) to resolve the plugin dir for the runtime-loaded JS fixtures (the vendored Preact
+		// bundle + the panel). The use is WITH_DEV_AUTOMATION_TESTS-gated; non-Shipping so a Shipping CathodeDom
+		// carries no Projects dependency.
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateDependencyModuleNames.Add("Projects");
+		}
+
 		// quickjs-ng (the SHARED DLL): the DOM calls JS_* directly, so it must LINK the quickjs import lib
 		// itself. The public INCLUDE propagates from CathodeBinding, but the import lib does NOT reliably
 		// propagate across the 2-hop chain (the first cross-module link proved it — JS_* were unresolved in
