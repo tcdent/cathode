@@ -228,6 +228,24 @@ public:
 	// node is only in the index while its wrapper is alive (finalizer de-registers) -> no read of a dead borrow.
 	FJsValue GetWrapperForNode(FDomNodeId NodeId) const;
 
+	// --- Sprint 012 slice 5: the document subsystem ---
+	// getElementById's backing: find an element by its id ATTRIBUTE (the slice-3 reflected `id`) — a tree walk
+	// from the root checking GetAttribute("id"). Returns the matching node id, INDEX_NONE if none. The JS binding
+	// marshals the result via GetWrapperForNode so it is the SAME wrapper (S2 identity ===).
+	FDomNodeId FindElementById(const FString& ElementId) const;
+
+	// Expose THIS document as the JS `document` global on its own context: wrap it via the document JS class (007
+	// CreateWrappedObject — NON-OWNING: the document is C++/TUniquePtr-owned, the wrapper never deletes it) and set
+	// globalThis.document. The PRODUCTION install method; the per-surface flow fires it at surface-load (the
+	// surface-load wiring is the routed forward roadmap item — document is per-surface, not per-runtime).
+	void InstallAsGlobal();
+
+	// NB: the document JS class has NO gc_mark (intentionally absent) + a NULL finalizer — it is C++/TUniquePtr-
+	// owned. Reclaim is Dispose() (drops RootWrapper) + the node gc_mark/T4 (intra-tree cycles); RootWrapper's C++
+	// refcount governs survival. No JS-ref cycle runs through the document wrapper (node->document non-owning, no
+	// event API bound to JS), so there is nothing for a document gc_mark to collect. See the lifetime note in
+	// CathodeDom/COVERAGE.md (carry-not-rediscover: gc_mark returns when the event API is bound to JS).
+
 	// Drive 005 (S5): relayout at the available width + cache the result so the observation reads can compose
 	// its geometry/style. The DOM serializes + drives; it does NOT lay out.
 	void Relayout(int32 AvailableWidth);
@@ -270,6 +288,17 @@ CATHODEDOM_API JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JS
 // table the members install from — CathodeVerify/SCHEMA.md section-2 shape. The 011 faculty consumes this as
 // __CATHODE_DECLARED__ (the 011<->012 lockstep). Projection/test seam; no production faculty coupling.
 CATHODEDOM_API FString GetDomNodeDescriptorJson();
+
+// Register the FDomDocument JS class via 007 (sprint 012 slice 5) — the single binding-definition mechanism
+// extended to a SECOND class: a NULL non-owning finalizer + NO gc_mark (the document is C++/TUniquePtr-owned;
+// reclaim is Dispose() + the node gc_mark/T4, and RootWrapper's C++ refcount governs survival — see the
+// CathodeDom/COVERAGE.md lifetime note) + INSTALLS the document members (getElementById/createElement/
+// createTextNode/createElementNS) from GDomDocumentMembers. CreateDomDocument calls this.
+CATHODEDOM_API JSClassID RegisterDomDocumentClass(INativeClassRegistry& Registry, JSContext* Context);
+
+// The FDomDocument declared-member DESCRIPTOR, emitted from GDomDocumentMembers via the SAME
+// EnumerateBoundMembersJson (the 011<->012 lockstep, PER CLASS — reconciled vs the live document proto).
+CATHODEDOM_API FString GetDomDocumentDescriptorJson();
 
 // Construct a DOM document over 007's runtime/registry (for wrapping + lifetime) and 005's layout engine
 // (for the handshake). Composes the siblings; stands up no second runtime, builds no layout. (Body Slice 2+.)

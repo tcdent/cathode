@@ -396,8 +396,22 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// Slice 5: the SECOND class — register the document class + build its proto probe (same pattern). The
+	// lockstep reconciles the node descriptor vs the node proto AND the document descriptor vs the document proto,
+	// independently (per class), proving the mechanism generalizes beyond FDomNode.
+	const JSClassID DocClassId = RegisterDomDocumentClass(*Registry, Context);
+	JSValue DocProto = JS_GetClassProto(Context, DocClassId);
+	JSValue DocProbe = JS_NewObjectProto(Context, DocProto);
+	JS_FreeValue(Context, DocProto);
+	if (JS_IsException(DocProbe) || JS_IsNull(DocProbe))
+	{
+		AddError(TEXT("could not build the document proto probe (RegisterDomDocumentClass / JS_GetClassProto)"));
+		JS_FreeValue(Context, NodeProbe);
+		return false;
+	}
+
 	// Drive the faculty with a DECLARED descriptor + the real node probe; read back surface.dom.drift.
-	auto RunReconcile = [&](const FString& DescriptorJson, TSet<FString>& OutMissing, TSet<FString>& OutExtra,
+	auto RunReconcile = [&](JSValue Probe, const FString& DescriptorJson, TSet<FString>& OutMissing, TSet<FString>& OutExtra,
 		int32& OutDeclaredCount, int32& OutExposedCount, FString& OutIfaceAxis) -> bool
 	{
 		GVerifyEmittedReports.Reset();
@@ -406,8 +420,10 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 			JS_NewCFunction(Context, &CathodeVerifyEmitReport, "__cathodeEmitReport", 1));
 		JS_SetPropertyStr(Context, Global, "__CATHODE_BUILD_ID__",
 			JS_NewString(Context, TCHAR_TO_UTF8(*Cathode::CathodeAggregateBuildId())));
-		// A1: expose the probe so the faculty reads its installed proto's OWN member names live.
-		JS_SetPropertyStr(Context, Global, "__cathodeDomProbe", JS_DupValue(Context, NodeProbe));
+		// A1: expose the probe so the faculty reads its installed proto's OWN member names live (PER CLASS — node
+		// or document; the faculty reconciles whatever proto __cathodeDomProbe carries vs whatever descriptor is
+		// injected, so the two classes never conflate).
+		JS_SetPropertyStr(Context, Global, "__cathodeDomProbe", JS_DupValue(Context, Probe));
 		// The DECLARED descriptor (the lockstep input), parsed onto the runtime.
 		const FTCHARToUTF8 DescUtf8(*DescriptorJson);
 		JSValue Declared = JS_ParseJSON(Context, DescUtf8.Get(), DescUtf8.Length(), "descriptor.json");
@@ -459,20 +475,20 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		return true;
 	};
 
-	// CASE 1 — the REAL descriptor (from the one table) vs the REAL installed proto -> NEAR-EMPTY drift.
+	// CASE 1 (NODE) — the REAL node descriptor (from the one table) vs the REAL installed node proto -> NEAR-EMPTY.
 	{
 		TSet<FString> Missing, Extra;
 		int32 DeclaredCount = 0, ExposedCount = 0;
 		FString IfaceAxis;
-		if (!RunReconcile(GetDomNodeDescriptorJson(), Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		if (!RunReconcile(NodeProbe, GetDomNodeDescriptorJson(), Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
 		{
 			return false;
 		}
-		TestTrue(TEXT("the faculty CONSUMED the descriptor (reconcile activated; declaredCount>0)"), DeclaredCount > 0);
-		TestTrue(TEXT("the exposed set came from the REAL installed proto (exposedCount>0)"), ExposedCount > 0);
-		TestEqual(TEXT("near-empty drift: nothing declared-but-not-installed"), Missing.Num(), 0);
-		TestEqual(TEXT("near-empty drift: nothing installed-but-not-declared"), Extra.Num(), 0);
-		TestTrue(TEXT("A2: the iface axis is surfaced as name-presence (NOT runtime-verified)"),
+		TestTrue(TEXT("node: the faculty CONSUMED the descriptor (reconcile activated; declaredCount>0)"), DeclaredCount > 0);
+		TestTrue(TEXT("node: the exposed set came from the REAL installed proto (exposedCount>0)"), ExposedCount > 0);
+		TestEqual(TEXT("node: near-empty drift: nothing declared-but-not-installed"), Missing.Num(), 0);
+		TestEqual(TEXT("node: near-empty drift: nothing installed-but-not-declared"), Extra.Num(), 0);
+		TestTrue(TEXT("node A2: the iface axis is surfaced as name-presence (NOT runtime-verified)"),
 			IfaceAxis.Contains(TEXT("name-presence")));
 	}
 
@@ -487,22 +503,69 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		const bool bInjected = WithBogus.ReplaceInline(TEXT("],\"globals\":["), *(BogusEntry + TEXT("],\"globals\":["))) > 0;
 		if (!bInjected)
 		{
-			AddError(TEXT("could not inject the discriminating member into the real descriptor"));
+			AddError(TEXT("could not inject the discriminating member into the real node descriptor"));
 			return false;
 		}
 		TSet<FString> Missing, Extra;
 		int32 DeclaredCount = 0, ExposedCount = 0;
 		FString IfaceAxis;
-		if (!RunReconcile(WithBogus, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		if (!RunReconcile(NodeProbe, WithBogus, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
 		{
 			return false;
 		}
-		TestTrue(TEXT("A3: a declared-but-not-installed member drifts as MISSING"), Missing.Contains(TEXT("__bogusNotInstalled")));
-		TestEqual(TEXT("A3: ONLY the bogus member is missing (every real member is installed)"), Missing.Num(), 1);
-		TestEqual(TEXT("A3: nothing extra (every installed proto member is declared in the real descriptor)"), Extra.Num(), 0);
+		TestTrue(TEXT("node A3: a declared-but-not-installed member drifts as MISSING"), Missing.Contains(TEXT("__bogusNotInstalled")));
+		TestEqual(TEXT("node A3: ONLY the bogus member is missing (every real member is installed)"), Missing.Num(), 1);
+		TestEqual(TEXT("node A3: nothing extra (every installed proto member is declared)"), Extra.Num(), 0);
+	}
+
+	// CASE 3 (DOCUMENT) — the REAL document descriptor vs the REAL installed DOCUMENT proto -> NEAR-EMPTY. Proves
+	// the SECOND class reconciles independently (no conflation: the document descriptor's members are exactly the
+	// document proto's, none of the node members leak in).
+	{
+		TSet<FString> Missing, Extra;
+		int32 DeclaredCount = 0, ExposedCount = 0;
+		FString IfaceAxis;
+		if (!RunReconcile(DocProbe, GetDomDocumentDescriptorJson(), Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		{
+			JS_FreeValue(Context, NodeProbe);
+			JS_FreeValue(Context, DocProbe);
+			return false;
+		}
+		TestTrue(TEXT("document: the faculty CONSUMED the document descriptor (declaredCount>0)"), DeclaredCount > 0);
+		TestTrue(TEXT("document: the exposed set came from the REAL document proto (exposedCount>0)"), ExposedCount > 0);
+		TestEqual(TEXT("document: near-empty drift: nothing declared-but-not-installed (no node member leaks in)"), Missing.Num(), 0);
+		TestEqual(TEXT("document: near-empty drift: nothing installed-but-not-declared"), Extra.Num(), 0);
+	}
+
+	// CASE 4 (DOCUMENT A3) — the real document descriptor PLUS one not-installed member -> drifts MISSING, nothing
+	// else: the document reconcile is REAL per class, not by-construction.
+	{
+		const FString BogusEntry = TEXT(",{\"iface\":\"Document\",\"name\":\"__bogusDocNotInstalled\",\"kind\":\"method\"}");
+		FString WithBogus = GetDomDocumentDescriptorJson();
+		const bool bInjected = WithBogus.ReplaceInline(TEXT("],\"globals\":["), *(BogusEntry + TEXT("],\"globals\":["))) > 0;
+		if (!bInjected)
+		{
+			AddError(TEXT("could not inject the discriminating member into the real document descriptor"));
+			JS_FreeValue(Context, NodeProbe);
+			JS_FreeValue(Context, DocProbe);
+			return false;
+		}
+		TSet<FString> Missing, Extra;
+		int32 DeclaredCount = 0, ExposedCount = 0;
+		FString IfaceAxis;
+		if (!RunReconcile(DocProbe, WithBogus, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis))
+		{
+			JS_FreeValue(Context, NodeProbe);
+			JS_FreeValue(Context, DocProbe);
+			return false;
+		}
+		TestTrue(TEXT("document A3: a declared-but-not-installed member drifts as MISSING"), Missing.Contains(TEXT("__bogusDocNotInstalled")));
+		TestEqual(TEXT("document A3: ONLY the bogus member is missing"), Missing.Num(), 1);
+		TestEqual(TEXT("document A3: nothing extra"), Extra.Num(), 0);
 	}
 
 	JS_FreeValue(Context, NodeProbe);
+	JS_FreeValue(Context, DocProbe);
 	GVerifyEmittedReports.Reset();
 	return true;
 }

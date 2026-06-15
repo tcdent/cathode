@@ -39,6 +39,25 @@ freed wrapper. `GetWrapperForNode` `JS_DupValue`s it to hand JS a **new owning**
 (identity `===` holds). The 1:1 wrapper↔node invariant holds: the borrow is set exactly once, at each of the two
 and only wrapper-mint sites (`CreateElement`, `CreateTextNode`); there is **no re-wrap path**.
 
+**Document lifetime + the intentionally-absent `document` gc_mark (sprint 012 S5, browse-design-ruled, review
+topology-confirmed).** The `FDomDocument` JS class (the 2nd class, exposed as `globalThis.document`) is
+**C++/TUniquePtr-owned** with a **NULL finalizer** (`RegisterDomDocumentClass` — a deliberate special case, not
+uniform-with-nodes) and **NO `gc_mark`**. The document's reclaim is **`Dispose()`** (drops `RootWrapper`) +
+**the node `gc_mark`/T4** (reclaims unrooted intra-tree cycles); the `RootWrapper` C++ owning ref governs
+**survival** (it pins the tree against the cyclic collector while the document is alive). A `document` gc_mark
+would be **redundant**: it marks `RootWrapper` (a ref the C++ document already owns), and post-`Dispose`
+`RootWrapper` is empty so it marks nothing — no discriminating test can exist for it (the `DisposeReclaim` test
+proves the real mechanism instead). **Justification is TOPOLOGY-DEPENDENT:** `node→document` is non-owning
+(`CathodeDom.h`) **and no event API is bound to JS**, so nothing reachable from the document wrapper holds an
+**owning JS ref back to it** → no JS-GC cycle through the wrapper for a gc_mark to collect.
+
+> **Carry-not-rediscover — the PRECISE re-introduction trigger:** binding the **event API
+> (`addEventListener`/`dispatchEvent`) to JS**, where a listener can close over the document wrapper, creates the
+> cycle `document-wrapper → RootWrapper → … → node → listener → document-wrapper`. **When the event API is bound
+> to JS (a future slice), RE-EVALUATE: `document.gc_mark` likely RETURNS, with a discriminating reclaim test for
+> THAT cycle.** Do NOT inherit "gc_mark removed as redundant" blindly — the removal is justified by *today's*
+> topology, not a general rule.
+
 ## Covered
 
 | Responsibility | Slice | Mechanism | Proof |

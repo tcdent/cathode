@@ -1,5 +1,7 @@
 #include "CathodeDom.h"
 
+#include "CathodeBoundMember.h" // sprint 012: the single binding-definition mechanism (install + enumerate)
+
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -268,9 +270,160 @@ TUniquePtr<FDomDocument> CreateDomDocument(
 {
 	// sprint 012 slice 1: RegisterDomNodeClass now also installs the bound members onto the class proto, so it
 	// needs the live JSContext (002's confined context).
-	const JSClassID NodeClassId =
-		RegisterDomNodeClass(Registry, static_cast<JSContext*>(Runtime.GetNativeContextHandle()));
+	JSContext* const Context = static_cast<JSContext*>(Runtime.GetNativeContextHandle());
+	const JSClassID NodeClassId = RegisterDomNodeClass(Registry, Context);
+	// sprint 012 slice 5: register the FDomDocument JS class (the 2nd class via the one mechanism) + install its
+	// members, so the document can be wrapped + exposed as the `document` global (InstallAsGlobal).
+	RegisterDomDocumentClass(Registry, Context);
 	return MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
+}
+
+// === Sprint 012 slice 5: the FDomDocument JS class (the 2nd class via the one binding-definition mechanism) ===
+
+namespace
+{
+// The document class id, set at registration; the document member thunks recover the native via it.
+JSClassID GDomDocumentClassId = 0;
+
+// getElementById(id): find the element whose id ATTRIBUTE == id (the slice-3 reflected id) -> its EXISTING
+// wrapper (S2 identity) or null. Find-by-attribute, NOT a node-id/shadow.
+JSValue DocGetElementByIdThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString ElementId;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], ElementId)) { return JS_ThrowTypeError(Ctx, "expected a string id"); }
+	const FDomNodeId Found = Self->FindElementById(ElementId);
+	if (Found == INDEX_NONE) { return JS_NULL; } // non-existent id -> null
+	FJsValue Wrapper = Self->GetWrapperForNode(Found); // the SAME wrapper (identity ===)
+	return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+}
+
+// createElement(localName) -> a real element wrapper (the existing C++ factory).
+JSValue DocCreateElementThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Tag;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Tag)) { return JS_ThrowTypeError(Ctx, "expected a tag name"); }
+	return Self->CreateElement(Tag).Release();
+}
+
+// createTextNode(data) -> a real text node wrapper.
+JSValue DocCreateTextNodeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Data;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Data)) { return JS_ThrowTypeError(Ctx, "expected text data"); }
+	return Self->CreateTextNode(Data).Release();
+}
+
+// createElementNS(namespace, qualifiedName) -> a real element. Preact calls this UNIVERSALLY with the HTML ns;
+// the ns is ACCEPTED but NOT stored this slice (no namespaceURI consumer; SVG ns deferred) — create by the
+// qualifiedName.
+JSValue DocCreateElementNSThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString QualifiedName;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[1], QualifiedName)) { return JS_ThrowTypeError(Ctx, "expected (namespace, qualifiedName)"); }
+	return Self->CreateElement(QualifiedName).Release();
+}
+
+// THE 2nd binding-definition table — install (InstallBoundMembers) + enumerate (EnumerateBoundMembersJson) BOTH
+// consume it (crit-1, now PER CLASS). Document-iface members; names distinct from the node set (no conflation).
+#define CATHODE_BIND_DOC_METHOD(JsName, Iface, Tag, Sig, ThunkFn) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
+static const FBoundMember GDomDocumentMembers[] =
+{
+	CATHODE_BIND_DOC_METHOD("getElementById",  "Document", "required", "(elementId: string) -> Element | null", DocGetElementByIdThunk),
+	CATHODE_BIND_DOC_METHOD("createElement",   "Document", "margin",   "(localName: string) -> Element", DocCreateElementThunk),
+	CATHODE_BIND_DOC_METHOD("createTextNode",  "Document", "required", "(data: string) -> Text", DocCreateTextNodeThunk),
+	CATHODE_BIND_DOC_METHOD("createElementNS", "Document", "required", "(namespace: string | null, qualifiedName: string) -> Element", DocCreateElementNSThunk),
+};
+#undef CATHODE_BIND_DOC_METHOD
+} // namespace
+
+// --- FDomDocument slice-5 backings ---
+
+FDomNodeId FDomDocument::FindElementById(const FString& ElementId) const
+{
+	// Tree walk (pre-order) from the root, matching the id ATTRIBUTE. The mount looks up rarely, so no by-id
+	// index (no maintenance/invalidation burden). Children pushed reversed so the stack pops document-order.
+	if (ElementId.IsEmpty())
+	{
+		return INDEX_NONE;
+	}
+	TArray<FDomNodeId> Stack;
+	if (RootNodeId != INDEX_NONE)
+	{
+		Stack.Add(RootNodeId);
+	}
+	while (Stack.Num() > 0)
+	{
+		const FDomNodeId Current = Stack.Pop();
+		const FDomNode* Node = FindNode(Current);
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		FString Value;
+		if (Node->GetAttribute(TEXT("id"), Value) && Value == ElementId)
+		{
+			return Current; // first in document order
+		}
+		TArray<FDomNodeId> Children;
+		Node->GetChildNodes(Children);
+		for (int32 Index = Children.Num() - 1; Index >= 0; --Index)
+		{
+			Stack.Add(Children[Index]);
+		}
+	}
+	return INDEX_NONE;
+}
+
+void FDomDocument::InstallAsGlobal()
+{
+	// Wrap THIS document via the document JS class (NON-OWNING: the wrapper's opaque is this C++/TUniquePtr-owned
+	// document; the class finalizer is null so GC never deletes it) and set globalThis.document. The production
+	// install method; the per-surface OnInstallDocument seam fires it at surface-load (gap-doc'd follow-on).
+	if (Context == nullptr)
+	{
+		return;
+	}
+	FJsValue DocumentWrapper = Registry.CreateWrappedObject(GDomDocumentClassId, this);
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "document", DocumentWrapper.Release());
+	JS_FreeValue(Context, Global);
+}
+
+JSClassID RegisterDomDocumentClass(INativeClassRegistry& Registry, JSContext* Context)
+{
+	// The 2nd class via the SAME mechanism. Finalizer is NON-OWNING (nullptr): the FDomDocument is
+	// C++/TUniquePtr-owned; deleting it on GC would double-free. ~FDomDocument (passive, order-safe) handles the
+	// C++ teardown. NO gc_mark (nullptr) — intentionally absent: no JS-ref cycle runs through the document wrapper
+	// (node->document non-owning + no event API bound to JS), so there is nothing for a document gc_mark to
+	// collect; reclaim is Dispose() + the node gc_mark/T4, and RootWrapper's C++ refcount governs survival. See
+	// the lifetime note in CathodeDom/COVERAGE.md (carry-not-rediscover: gc_mark returns when the event API binds).
+	FNativeClassDef Def;
+	Def.Name = "CathodeDomDocument";
+	Def.Finalizer = nullptr; // non-owning wrapper — do NOT delete the C++-owned document on GC
+	Def.GcMark = nullptr;    // intentionally absent (no wrapper-cycle to collect) — see COVERAGE.md lifetime note
+	const JSClassID ClassId = Registry.RegisterClass(Def);
+	GDomDocumentClassId = ClassId; // the member thunks recover the native via this id
+
+	// INSTALL side: build the proto + install every document member from the one table. CreateWrappedObject's
+	// JS_GetClassProto path then gives the document wrapper the members.
+	InstallBoundMembers(Context, ClassId, GDomDocumentMembers, UE_ARRAY_COUNT(GDomDocumentMembers));
+	return ClassId;
+}
+
+FString GetDomDocumentDescriptorJson()
+{
+	// ENUMERATE side: the document descriptor from the SAME table the members install from (the per-class
+	// lockstep source — the faculty reconciles it vs the live document proto).
+	return EnumerateBoundMembersJson(GDomDocumentMembers, UE_ARRAY_COUNT(GDomDocumentMembers));
 }
 
 } // namespace Cathode
