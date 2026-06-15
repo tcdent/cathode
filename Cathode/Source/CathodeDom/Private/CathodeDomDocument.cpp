@@ -221,13 +221,35 @@ FDomNodeId FDomDocument::GetRootNodeId() const
 	return RootNodeId;
 }
 
+FJsValue FDomDocument::GetWrapperForNode(FDomNodeId InNodeId) const
+{
+	// The node marshaler (S2): resolve a node's EXISTING wrapper via its NON-OWNING borrow (set once at creation) —
+	// O(1) and complete for root / attached / DETACHED. JS_DupValue gives the caller a NEW OWNING ref to the SAME
+	// JS object (JS identity === preserved) WITHOUT minting a second wrapper; the stored borrow stays non-owning.
+	// SOUND (no read-after-finalize): a node is in NodeIndex only while its wrapper is alive — the finalizer
+	// (FinalizeNativeObject<FDomNode>) destroys the node, whose ~FDomNode de-registers it from NodeIndex — so a
+	// FindNode hit is always a LIVE node with a LIVE wrapper. Empty (-> JS null) for INDEX_NONE / unknown / unset.
+	if (InNodeId == INDEX_NONE)
+	{
+		return FJsValue();
+	}
+	const FDomNode* Node = FindNode(InNodeId); // a hit => the node (and thus its wrapper) is alive
+	if (Node == nullptr || JS_IsUndefined(Node->WrapperBorrow))
+	{
+		return FJsValue();
+	}
+	return FJsValue(Context, JS_DupValue(Context, Node->WrapperBorrow));
+}
+
 FJsValue FDomDocument::CreateElement(const FString& TagName)
 {
 	const FDomNodeId Id = NextNodeId++;
 	FDomNode* Node = new FDomNode(*this, Id, EDomNodeType::Element);
 	Node->TagName = TagName;
-	NodeIndex.Add(Id, Node);                                // NON-OWNING index entry
-	return Registry.CreateWrappedObject(NodeClassId, Node); // OWNING wrapper -> the caller (the lifetime handle)
+	NodeIndex.Add(Id, Node);                                       // NON-OWNING index entry
+	FJsValue Wrapper = Registry.CreateWrappedObject(NodeClassId, Node); // OWNING wrapper -> the caller
+	Node->SetWrapperBorrow(Wrapper.GetValue());                   // S2: NON-OWNING reverse-lookup borrow (set once)
+	return Wrapper;
 }
 
 FJsValue FDomDocument::CreateTextNode(const FString& Data)
@@ -236,7 +258,9 @@ FJsValue FDomDocument::CreateTextNode(const FString& Data)
 	FDomNode* Node = new FDomNode(*this, Id, EDomNodeType::Text);
 	Node->TextData = Data;
 	NodeIndex.Add(Id, Node);
-	return Registry.CreateWrappedObject(NodeClassId, Node);
+	FJsValue Wrapper = Registry.CreateWrappedObject(NodeClassId, Node);
+	Node->SetWrapperBorrow(Wrapper.GetValue());                   // S2: NON-OWNING reverse-lookup borrow (set once)
+	return Wrapper;
 }
 
 TUniquePtr<FDomDocument> CreateDomDocument(

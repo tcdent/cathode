@@ -305,6 +305,91 @@ void FDomNode::SetTextContent(const FString& Text)
 	Document->MarkDirty(NodeId, EDirtyKind::Structure);
 }
 
+// --- Sprint 012 slice 2: thin backing for the node-core member bindings (spec-anchored, additive) ---
+
+FString FDomNode::GetNodeName() const
+{
+	// Node.nodeName: the element's tag name; "#text" for a text node (the spec node-name table).
+	return Type == EDomNodeType::Element ? TagName : FString(TEXT("#text"));
+}
+
+bool FDomNode::GetNodeValue(FString& OutValue) const
+{
+	// Node.nodeValue: a text node's character data; null (false) for an element.
+	if (Type == EDomNodeType::Text)
+	{
+		OutValue = TextData;
+		return true;
+	}
+	return false;
+}
+
+void FDomNode::SetNodeValue(const FString& Value)
+{
+	// Element nodeValue set is a no-op (spec); a text node's set mutates its data (delegates to SetData).
+	if (Type == EDomNodeType::Text)
+	{
+		SetData(Value);
+	}
+}
+
+FString FDomNode::GetData() const
+{
+	// CharacterData.data — the text node's character data (empty off a non-text node in the collapsed class).
+	return TextData;
+}
+
+void FDomNode::SetData(const FString& Value)
+{
+	// Text mutation: replace the character data + dirty-mark (a text change reflows -> Layout). No-op off a text
+	// node (data is a CharacterData member).
+	if (Type != EDomNodeType::Text)
+	{
+		return;
+	}
+	TextData = Value;
+	if (Document != nullptr)
+	{
+		Document->MarkDirty(NodeId, EDirtyKind::Layout);
+	}
+}
+
+void FDomNode::Remove()
+{
+	// ChildNode.remove(): the parent drops its OWNING ref to THIS node's wrapper (a reference-drop; 007 reclaims
+	// if nothing else holds it). Self does not hold its own wrapper (Model A), so find it in the parent's Children
+	// by native identity. Dirty-mark the parent's subtree on a real removal.
+	if (Document == nullptr || ParentId == INDEX_NONE)
+	{
+		return;
+	}
+	FDomNode* Parent = Document->FindNode(ParentId);
+	if (Parent == nullptr)
+	{
+		return;
+	}
+	FDomDocument* const Doc = Document;
+	const int32 Removed = Parent->Children.RemoveAll(
+		[this, Doc](const FJsValue& Held) { return Doc->NodeFromWrapper(Held) == this; });
+	if (Removed > 0)
+	{
+		ParentId = INDEX_NONE;
+		Document->MarkDirty(Parent->NodeId, EDirtyKind::Structure);
+	}
+}
+
+void FDomNode::GetChildWrappers(TArray<FJsValue>& OutWrappers) const
+{
+	// childNodes snapshot source: the parent's OWNING child wrappers, read DIRECTLY (O(n)) — assigning the array
+	// copies each FJsValue (=> JS_DupValue), so the node marshaler gets its own snapshot refs.
+	OutWrappers = Children;
+}
+
+FDomDocument* FDomNode::GetOwningDocument() const
+{
+	return Document;
+}
+
 // --- Event system (S6) — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
 
 void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener)
@@ -433,6 +518,206 @@ JSValue StrOptStrMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSV
 	if (!(Self->*Method)(Name, Out)) { return JS_NULL; } // absent attribute -> JS null
 	return MarshalString(Ctx, Out).Release();
 }
+
+// === Sprint 012 slice 2: the full node-core surface — marshalers + thunks (every member via the ONE table) ===
+
+// Node marshaler (the identity-preserving deep oracle): an FDomNodeId -> the node's EXISTING wrapper (JS ===),
+// or JS null. Resolves via the owning wrapper graph (FDomDocument::GetWrapperForNode) — never mints a second.
+JSValue MarshalNode(JSContext* Ctx, FDomDocument* Doc, FDomNodeId Id)
+{
+	if (Doc == nullptr || Id == INDEX_NONE)
+	{
+		return JS_NULL;
+	}
+	FJsValue Wrapper = Doc->GetWrapperForNode(Id); // a NEW owning ref to the SAME stored wrapper (or empty)
+	return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+}
+
+// Node.nodeType spec constants (the collapsed class carries both kinds).
+double NodeTypeToSpec(EDomNodeType NodeType)
+{
+	return NodeType == EDomNodeType::Text ? 3.0 /* TEXT_NODE */ : 1.0 /* ELEMENT_NODE */;
+}
+
+// The NodeList TYPE (behavioral-contract #8 reference instance): the EXACT spec method surface — item/forEach/
+// keys/values/entries/[Symbol.iterator] reading off the instance's indexed props + length — authored in Cathode
+// JS, with NO array superset (the silent map/filter divergence exact-spec-typing prevents). Iterators are plain
+// closures (no generator dependency on the bare runtime). Installed once per context; idempotent.
+void InstallNodeListType(JSContext* Ctx)
+{
+	static const char* const NodeListSource =
+		"(function(){"
+		"  if (globalThis.NodeList) { return; }"
+		"  function NodeList(){ throw new TypeError('Illegal constructor'); }"
+		"  NodeList.prototype.item = function(i){ i = i | 0; return (i >= 0 && i < this.length) ? this[i] : null; };"
+		"  NodeList.prototype.forEach = function(cb, thisArg){ for (var i = 0; i < this.length; i++) { cb.call(thisArg, this[i], i, this); } };"
+		"  function makeIter(get, host){ var i = 0; var it = { next: function(){ return i < host.length ? { value: get(i++), done: false } : { value: undefined, done: true }; } }; it[Symbol.iterator] = function(){ return this; }; return it; }"
+		"  NodeList.prototype.values = function(){ var s = this; return makeIter(function(i){ return s[i]; }, s); };"
+		"  NodeList.prototype.keys = function(){ var s = this; return makeIter(function(i){ return i; }, s); };"
+		"  NodeList.prototype.entries = function(){ var s = this; return makeIter(function(i){ return [i, s[i]]; }, s); };"
+		"  NodeList.prototype[Symbol.iterator] = NodeList.prototype.values;"
+		"  globalThis.NodeList = NodeList;"
+		"})();";
+	JSValue Result = JS_Eval(Ctx, NodeListSource, FCStringAnsi::Strlen(NodeListSource), "cathode-nodelist.js", JS_EVAL_TYPE_GLOBAL);
+	JS_FreeValue(Ctx, Result);
+}
+
+// childNodes -> a NodeList-TYPED SNAPSHOT: an object whose [[Prototype]] is the context's NodeList.prototype
+// (instanceof + the spec surface), carrying the child wrappers as indexed own props + length. Snapshot depth.
+FJsValue MarshalNodeList(JSContext* Ctx, const TArray<FJsValue>& Wrappers)
+{
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JSValue Ctor = JS_GetPropertyStr(Ctx, Global, "NodeList");
+	JSValue Proto = JS_GetPropertyStr(Ctx, Ctor, "prototype");
+	JSValue List = JS_NewObjectProto(Ctx, Proto); // [[Prototype]] = NodeList.prototype
+	JS_FreeValue(Ctx, Proto);
+	JS_FreeValue(Ctx, Ctor);
+	JS_FreeValue(Ctx, Global);
+	for (int32 Index = 0; Index < Wrappers.Num(); ++Index)
+	{
+		JS_SetPropertyUint32(Ctx, List, static_cast<uint32>(Index), JS_DupValue(Ctx, Wrappers[Index].GetValue()));
+	}
+	JS_SetPropertyStr(Ctx, List, "length", JS_NewInt32(Ctx, Wrappers.Num()));
+	return FJsValue(Ctx, List);
+}
+
+// --- Template thunks (one C++ member-ptr -> one install thunk), mirroring slice 1. ---
+
+// By-value string getter (return FString) — the const-ref StrGetterThunk's sibling.
+template <FString (FDomNode::*Getter)() const>
+JSValue StrValGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalString(Ctx, (Self->*Getter)()).Release();
+}
+
+// Optional-string property getter (bool(FString&) -> string | null) — the no-arg analog of getAttribute.
+template <bool (FDomNode::*Getter)(FString&) const>
+JSValue OptStrGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Out;
+	if (!(Self->*Getter)(Out)) { return JS_NULL; }
+	return MarshalString(Ctx, Out).Release();
+}
+
+// nodeType: enum getter -> the spec number.
+template <EDomNodeType (FDomNode::*Getter)() const>
+JSValue NodeTypeGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalNumber(Ctx, NodeTypeToSpec((Self->*Getter)())).Release();
+}
+
+// Node getter (FDomNodeId -> Node | null), identity-preserving via the node marshaler.
+template <FDomNodeId (FDomNode::*Getter)() const>
+JSValue NodeGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalNode(Ctx, Self->GetOwningDocument(), (Self->*Getter)());
+}
+
+// childNodes: the parent's OWNING child wrappers (read directly) -> a NodeList-typed snapshot.
+JSValue ChildNodesGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	TArray<FJsValue> Wrappers;
+	Self->GetChildWrappers(Wrappers);
+	return MarshalNodeList(Ctx, Wrappers).Release();
+}
+
+// String property setter (void(const FString&)).
+template <void (FDomNode::*Setter)(const FString&)>
+JSValue StrSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst Val)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString In;
+	if (!UnmarshalString(Ctx, Val, In)) { return JS_ThrowTypeError(Ctx, "expected a string value"); }
+	(Self->*Setter)(In);
+	return JS_UNDEFINED;
+}
+
+// Two-string -> void method (setAttribute).
+template <void (FDomNode::*Method)(const FString&, const FString&)>
+JSValue StrStrVoidMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString A, B;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], A) || !UnmarshalString(Ctx, Argv[1], B))
+	{
+		return JS_ThrowTypeError(Ctx, "expected two string arguments");
+	}
+	(Self->*Method)(A, B);
+	return JS_UNDEFINED;
+}
+
+// One-string -> void method (removeAttribute).
+template <void (FDomNode::*Method)(const FString&)>
+JSValue StrVoidMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString A;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], A)) { return JS_ThrowTypeError(Ctx, "expected a string argument"); }
+	(Self->*Method)(A);
+	return JS_UNDEFINED;
+}
+
+// No-arg -> void method (remove).
+template <void (FDomNode::*Method)()>
+JSValue VoidMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int /*Argc*/, JSValueConst* /*Argv*/)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	(Self->*Method)();
+	return JS_UNDEFINED;
+}
+
+// node-arg, node-return (appendChild/removeChild): pass the arg wrapper to the primitive, RETURN THE SAME wrapper
+// (=== the arg — identity trivially preserved; no re-resolve).
+template <void (FDomNode::*Method)(const FJsValue&)>
+JSValue NodeArgMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	if (Argc < 1 || JS_GetOpaque(Argv[0], GDomNodeClassId) == nullptr)
+	{
+		return JS_ThrowTypeError(Ctx, "expected a DOM node argument");
+	}
+	FJsValue Arg(Ctx, JS_DupValue(Ctx, Argv[0]));
+	(Self->*Method)(Arg);
+	return JS_DupValue(Ctx, Argv[0]); // the same wrapper -> appendChild(c) === c
+}
+
+// insertBefore(node, ref | null) -> node: a node arg + a nullable node ref; returns the inserted node (the arg).
+JSValue InsertBeforeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	if (Argc < 1 || JS_GetOpaque(Argv[0], GDomNodeClassId) == nullptr)
+	{
+		return JS_ThrowTypeError(Ctx, "expected a DOM node argument");
+	}
+	FJsValue Child(Ctx, JS_DupValue(Ctx, Argv[0]));
+	FJsValue Reference;
+	if (Argc >= 2 && !JS_IsNull(Argv[1]) && !JS_IsUndefined(Argv[1]))
+	{
+		if (JS_GetOpaque(Argv[1], GDomNodeClassId) == nullptr)
+		{
+			return JS_ThrowTypeError(Ctx, "insertBefore reference is not a DOM node");
+		}
+		Reference = FJsValue(Ctx, JS_DupValue(Ctx, Argv[1]));
+	}
+	Self->InsertBefore(Child, Reference);
+	return JS_DupValue(Ctx, Argv[0]); // the inserted node (=== the arg)
+}
 } // namespace
 
 // Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
@@ -444,18 +729,85 @@ JSValue StrOptStrMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSV
 #define CATHODE_BIND_OPT_STR_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
 	  &StrOptStrMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+// Slice 2 shapes — each instantiates its template thunk from the C++ member name (or names a one-off thunk).
+#define CATHODE_BIND_VAL_GETTER(JsName, Iface, Tag, Sig, CppGetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&StrValGetterThunk<&FDomNode::CppGetter>), nullptr }
+#define CATHODE_BIND_NODETYPE_GETTER(JsName, Iface, Tag, Sig, CppGetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&NodeTypeGetterThunk<&FDomNode::CppGetter>), nullptr }
+#define CATHODE_BIND_NODE_GETTER(JsName, Iface, Tag, Sig, CppGetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&NodeGetterThunk<&FDomNode::CppGetter>), nullptr }
+#define CATHODE_BIND_GETTER_FN(JsName, Iface, Tag, Sig, GetterFn) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&GetterFn), nullptr }
+#define CATHODE_BIND_STR_RW(JsName, Iface, Tag, Sig, CppGetter, CppSetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&StrValGetterThunk<&FDomNode::CppGetter>), \
+	  reinterpret_cast<JSCFunction*>(&StrSetterThunk<&FDomNode::CppSetter>) }
+#define CATHODE_BIND_OPT_RW(JsName, Iface, Tag, Sig, CppGetter, CppSetter) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&OptStrGetterThunk<&FDomNode::CppGetter>), \
+	  reinterpret_cast<JSCFunction*>(&StrSetterThunk<&FDomNode::CppSetter>) }
+#define CATHODE_BIND_STR_STR_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
+	  &StrStrVoidMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+#define CATHODE_BIND_STR_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
+	  &StrVoidMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+#define CATHODE_BIND_VOID_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
+	  &VoidMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+#define CATHODE_BIND_NODE_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
+	  &NodeArgMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
+#define CATHODE_BIND_METHOD_FN(JsName, Iface, Tag, Sig, ThunkFn) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
 
 // THE ONE binding-definition table for the DOM node. INSTALL (InstallBoundMembers) + ENUMERATE
-// (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. Slice 1
-// proves the mechanism with the first members; later slices extend the table (the member contract grows here).
+// (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. The
+// node-core surface (sprint 012 S2) extends the slice-1 first members; the contract grows HERE. Names are
+// distinct across ifaces (no cross-iface name clash), so the name-keyed lockstep dedupes nothing.
 static const FBoundMember GDomNodeMembers[] =
 {
+	// Element — attributes + tag (tagName/getAttribute landed slice 1)
 	CATHODE_BIND_GETTER("tagName", "Element", "margin", "string", GetTagName),
 	CATHODE_BIND_OPT_STR_METHOD("getAttribute", "Element", "margin", "(qualifiedName: string) -> string | null", GetAttribute),
+	CATHODE_BIND_STR_STR_METHOD("setAttribute", "Element", "required", "(qualifiedName: string, value: string) -> void", SetAttribute),
+	CATHODE_BIND_STR_METHOD("removeAttribute", "Element", "required", "(qualifiedName: string) -> void", RemoveAttribute),
+	// Node — kind + name/value
+	CATHODE_BIND_NODETYPE_GETTER("nodeType", "Node", "required", "number", GetNodeType),
+	CATHODE_BIND_VAL_GETTER("nodeName", "Node", "obs", "string", GetNodeName),
+	CATHODE_BIND_OPT_RW("nodeValue", "Node", "obs", "string | null", GetNodeValue, SetNodeValue),
+	// Node — tree reads (identity-preserving)
+	CATHODE_BIND_NODE_GETTER("parentNode", "Node", "required", "Node | null", GetParentNode),
+	CATHODE_BIND_NODE_GETTER("firstChild", "Node", "required", "Node | null", GetFirstChild),
+	CATHODE_BIND_NODE_GETTER("nextSibling", "Node", "required", "Node | null", GetNextSibling),
+	CATHODE_BIND_GETTER_FN("childNodes", "Node", "required", "NodeList", ChildNodesGetterThunk),
+	// Node — mutations
+	CATHODE_BIND_METHOD_FN("insertBefore", "Node", "required", "(node: Node, child: Node | null) -> Node", InsertBeforeThunk),
+	CATHODE_BIND_NODE_METHOD("appendChild", "Node", "margin", "(node: Node) -> Node", AppendChild),
+	CATHODE_BIND_NODE_METHOD("removeChild", "Node", "margin", "(child: Node) -> Node", RemoveChild),
+	CATHODE_BIND_VOID_METHOD("remove", "Node", "required", "() -> void", Remove),
+	CATHODE_BIND_STR_RW("textContent", "Node", "margin", "string", GetTextContent, SetTextContent),
+	// CharacterData (Text)
+	CATHODE_BIND_STR_RW("data", "CharacterData", "required", "string", GetData, SetData),
 };
 
 #undef CATHODE_BIND_GETTER
 #undef CATHODE_BIND_OPT_STR_METHOD
+#undef CATHODE_BIND_VAL_GETTER
+#undef CATHODE_BIND_NODETYPE_GETTER
+#undef CATHODE_BIND_NODE_GETTER
+#undef CATHODE_BIND_GETTER_FN
+#undef CATHODE_BIND_STR_RW
+#undef CATHODE_BIND_OPT_RW
+#undef CATHODE_BIND_STR_STR_METHOD
+#undef CATHODE_BIND_STR_METHOD
+#undef CATHODE_BIND_VOID_METHOD
+#undef CATHODE_BIND_NODE_METHOD
+#undef CATHODE_BIND_METHOD_FN
 
 FString GetDomNodeDescriptorJson()
 {
@@ -484,6 +836,10 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Contex
 	// INSTALL side (sprint 012 slice 1): build the proto + install every bound member from the one table +
 	// JS_SetClassProto. CreateWrappedObject's JS_GetClassProto path then gives every node instance the members.
 	InstallBoundMembers(Context, ClassId, GDomNodeMembers, UE_ARRAY_COUNT(GDomNodeMembers));
+
+	// Slice 2: install the NodeList TYPE (childNodes' return type — behavioral-contract #8) so MarshalNodeList can
+	// mint typed snapshots. Idempotent (no-op if already present on this context's global).
+	InstallNodeListType(Context);
 	return ClassId;
 }
 

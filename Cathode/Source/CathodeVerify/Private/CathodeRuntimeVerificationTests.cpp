@@ -476,14 +476,20 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 			IfaceAxis.Contains(TEXT("name-presence")));
 	}
 
-	// CASE 2 (A3 discriminating) — the real descriptor PLUS a member NOT installed -> it drifts as MISSING,
-	// proving near-empty above is a REAL reconcile of the live proto, not by-construction.
+	// CASE 2 (A3 discriminating) — the REAL descriptor PLUS one member NOT installed -> it drifts as MISSING and
+	// nothing else, proving near-empty above is a REAL reconcile of the live proto, not by-construction. Injecting
+	// into the real descriptor (rather than a hand-listed subset) keeps this robust as the member set grows: every
+	// real member stays declared (extra empty) and only the bogus one is missing.
 	{
-		const FString WithBogus =
-			TEXT("{\"dom\":[")
-			TEXT("{\"iface\":\"Element\",\"name\":\"getAttribute\",\"kind\":\"method\"},")
-			TEXT("{\"iface\":\"Element\",\"name\":\"tagName\",\"kind\":\"property\"},")
-			TEXT("{\"iface\":\"Element\",\"name\":\"__bogusNotInstalled\",\"kind\":\"method\"}],\"globals\":[]}");
+		const FString RealDescriptor = GetDomNodeDescriptorJson(); // {"dom":[...],"globals":[]}
+		const FString BogusEntry = TEXT(",{\"iface\":\"Node\",\"name\":\"__bogusNotInstalled\",\"kind\":\"method\"}");
+		FString WithBogus = RealDescriptor;
+		const bool bInjected = WithBogus.ReplaceInline(TEXT("],\"globals\":["), *(BogusEntry + TEXT("],\"globals\":["))) > 0;
+		if (!bInjected)
+		{
+			AddError(TEXT("could not inject the discriminating member into the real descriptor"));
+			return false;
+		}
 		TSet<FString> Missing, Extra;
 		int32 DeclaredCount = 0, ExposedCount = 0;
 		FString IfaceAxis;
@@ -492,8 +498,8 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 			return false;
 		}
 		TestTrue(TEXT("A3: a declared-but-not-installed member drifts as MISSING"), Missing.Contains(TEXT("__bogusNotInstalled")));
-		TestEqual(TEXT("A3: ONLY the bogus member is missing (the real members are installed)"), Missing.Num(), 1);
-		TestEqual(TEXT("A3: nothing extra (the real proto members are all declared)"), Extra.Num(), 0);
+		TestEqual(TEXT("A3: ONLY the bogus member is missing (every real member is installed)"), Missing.Num(), 1);
+		TestEqual(TEXT("A3: nothing extra (every installed proto member is declared in the real descriptor)"), Extra.Num(), 0);
 	}
 
 	JS_FreeValue(Context, NodeProbe);

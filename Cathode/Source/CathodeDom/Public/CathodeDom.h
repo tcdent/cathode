@@ -93,6 +93,7 @@ using FDomListenerInvoker = TFunction<void(const FJsValue& ListenerFn, FDomEvent
 //     node's matched held listener ref. No explicit free — the GC reclaims (007).
 // The exact private representation (the JS-ref child container, the non-owning back-refs) is RQ1 — settled in
 // Slice 2 within this non-negotiable principle; not shown here.
+class FDomDocument; // the owning document (FDomNode holds a non-owning back-ref + exposes GetOwningDocument)
 class FDomNode
 {
 public:
@@ -137,6 +138,17 @@ public:
 	bool GetBoundingClientRect(FBox2f& OutBox) const;
 	bool GetComputedStyle(FResolvedStyle& OutStyle) const;
 
+	// --- Sprint 012 slice 2: thin backing for the node-core member bindings (spec-anchored, additive — no change
+	//     to existing behavior). The bound thunks marshal these; data/remove are the Preact-required deltas. ---
+	FString GetNodeName() const;                 // Node.nodeName — element: tag name; text: "#text"
+	bool GetNodeValue(FString& OutValue) const;  // Node.nodeValue get — text: data (true); element: null (false)
+	void SetNodeValue(const FString& Value);     // Node.nodeValue set — text: set data; element: no-op (spec)
+	FString GetData() const;                     // CharacterData.data get — the text node's character data
+	void SetData(const FString& Value);          // CharacterData.data set — text mutation (dirty-marks Layout)
+	void Remove();                               // ChildNode.remove() — detach self from its parent (ref-drop)
+	void GetChildWrappers(TArray<FJsValue>& OutWrappers) const; // childNodes snapshot: the OWNING child wrappers
+	FDomDocument* GetOwningDocument() const;     // the owning document (for the node marshaler); null if orphaned
+
 	// --- Internal mechanism (Model A) — not the author surface ---
 	// Finalizer-driven (FinalizeNativeObject<FDomNode> -> delete): de-register from the document's NON-OWNING
 	// index via the back-ref (if still valid), then FreeRT held refs (rt-based — a finalizer has no ctx).
@@ -164,6 +176,15 @@ private:
 	TMap<FString, FString> Attributes; // plain STRING data (the bounded surface is string-valued) — NOT held JS refs
 	TArray<TPair<FString, FJsValue>> Listeners; // (type, held JS function) — HELD JS refs, gc_mark-marked (the
 	                                            // node<->listener cycle, THE Model-A hazard); FreeRT'd in the finalizer
+
+	// Sprint 012 slice 2: a NON-OWNING (borrowed, never JS_DupValue'd) reverse-lookup ref to THIS node's OWN
+	// wrapper, set once at creation. Model A invariant (design-ruled refinement): no OWNING self-reference, but a
+	// non-owning borrow is permitted — it adds NO refcount (so NO self-root / Model-B leak), is NOT gc_marked and
+	// NOT FreeRT'd, and cannot dangle (the wrapper OWNS the node via the opaque + finalizer, so the node never
+	// outlives its wrapper). Powers GetWrapperForNode in O(1), complete for root/attached/detached. The SAME T4
+	// guarantee, restated — not a change to it. See CathodeDom/COVERAGE.md.
+	JSValue WrapperBorrow = JS_UNDEFINED;
+	void SetWrapperBorrow(JSValue InWrapper) { WrapperBorrow = InWrapper; } // borrow: stored WITHOUT a dup
 };
 
 // --- The document ---
@@ -199,6 +220,13 @@ public:
 	FDomNodeId GetRootNodeId() const;
 	FDomNode* FindNode(FDomNodeId NodeId) const; // wrapper-governed index lookup (non-owning); nullptr if unknown
 	FDomNode* NodeFromWrapper(const FJsValue& Wrapper) const; // wrapper -> its C++ node via the opaque (derived)
+
+	// Resolve a node id to its EXISTING wrapper (the node marshaler, S2) via the node's NON-OWNING wrapper borrow
+	// (set once at creation) — O(1) and complete for root / attached / DETACHED (no parent-reachability needed).
+	// Returns a NEW OWNING ref to the SAME wrapper (JS_DupValue) so JS identity (===) holds; the borrow stays
+	// non-owning. Empty (-> JS null) for INDEX_NONE / an unknown id / a node with no wrapper set. Sound because a
+	// node is only in the index while its wrapper is alive (finalizer de-registers) -> no read of a dead borrow.
+	FJsValue GetWrapperForNode(FDomNodeId NodeId) const;
 
 	// Drive 005 (S5): relayout at the available width + cache the result so the observation reads can compose
 	// its geometry/style. The DOM serializes + drives; it does NOT lay out.

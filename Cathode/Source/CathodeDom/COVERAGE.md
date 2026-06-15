@@ -26,6 +26,19 @@ sprint's obligation, discharged). Parent→child links and listeners are **JS re
 **supersedes** that premise — `removeChild`/`removeEventListener` are **reference-drops** (drop the held
 child/listener JS ref); 007's `gc_mark` + finalizer reclaim. There are no explicit-free teardown triggers.
 
+**Model-A invariant refinement (sprint 012 S2, browse-design-ruled — a restatement of the SAME T4 guarantee,
+not a change to it):** *no **OWNING** self-reference, but a **non-owning reverse-lookup borrow** is permitted.*
+The node-member bindings need an identity-preserving node marshaler (`child.parentNode === parent`, one wrapper
+per node), which requires resolving a node id → its existing wrapper — complete even for a **detached** subtree
+root, whose wrapper is held only by JS. `FDomNode::WrapperBorrow` is that reverse-lookup: a `JSValue` stored
+**without** `JS_DupValue` (non-owning) at the wrapper-mint, so it **adds no refcount** (no self-root / Model-B
+leak), is **not `gc_mark`-marked** and **not `FreeRT`'d**. It cannot dangle: the wrapper **owns** the node (the
+node is the wrapper's opaque; the finalizer destroys it), so the node never outlives its wrapper, and
+`GetWrapperForNode` only reads the borrow for a node still in `NodeIndex` (the finalizer de-registers) — never a
+freed wrapper. `GetWrapperForNode` `JS_DupValue`s it to hand JS a **new owning** ref to the **same** object
+(identity `===` holds). The 1:1 wrapper↔node invariant holds: the borrow is set exactly once, at each of the two
+and only wrapper-mint sites (`CreateElement`, `CreateTextNode`); there is **no re-wrap path**.
+
 ## Covered
 
 | Responsibility | Slice | Mechanism | Proof |
