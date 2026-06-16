@@ -180,6 +180,10 @@ public:
 	virtual const IMatchableNode* GetMatchParent() const override;
 	virtual void GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) const override; // child ELEMENTS, in order
 
+	// Sprint 012 snapshot-returns: the node's attributes as (name, value) pairs in deterministic (sorted-key) order —
+	// the source for the Element.attributes NamedNodeMap SNAPSHOT (minimal { name, value } items, no Attr class).
+	void GetAttributesSnapshot(TArray<TPair<FString, FString>>& OutAttributes) const;
+
 	// --- Internal mechanism (Model A) — not the author surface ---
 	// Finalizer-driven (FinalizeNativeObject<FDomNode> -> delete): de-register from the document's NON-OWNING
 	// index via the back-ref (if still valid), then FreeRT held refs (rt-based — a finalizer has no ctx).

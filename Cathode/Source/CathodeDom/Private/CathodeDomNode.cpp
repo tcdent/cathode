@@ -430,6 +430,19 @@ const IMatchableNode* FDomNode::GetMatchParent() const
 	return (Document != nullptr) ? Document->FindNode(ParentId) : nullptr;
 }
 
+void FDomNode::GetAttributesSnapshot(TArray<TPair<FString, FString>>& OutAttributes) const
+{
+	// Deterministic (sorted-key) order — matches SerializeNode's ordering; attribute order is not semantic.
+	OutAttributes.Reset();
+	TArray<FString> Keys;
+	Attributes.GetKeys(Keys);
+	Keys.Sort();
+	for (const FString& Key : Keys)
+	{
+		OutAttributes.Emplace(Key, Attributes[Key]);
+	}
+}
+
 void FDomNode::GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) const
 {
 	// Child ELEMENTS in document order. Resolve each owning child wrapper to its node; skip text nodes (they never
@@ -720,6 +733,92 @@ FJsValue MarshalNodeList(JSContext* Ctx, const TArray<FJsValue>& Wrappers)
 	}
 	JS_SetPropertyStr(Ctx, List, "length", JS_NewInt32(Ctx, Wrappers.Num()));
 	return FJsValue(Ctx, List);
+}
+
+// DOMRect (sprint 012 snapshot-returns): the [CSSOM-View] geometry VALUE type. A spec-typed object (instanceof
+// DOMRect) carrying the 8 readonly number props minted at the call (point-in-time value, behavioral-contract #8).
+// Mirrors the NodeList type-in-JS-proto pattern; the props are minted in C++ (MarshalDOMRect). Installed once.
+void InstallDOMRectType(JSContext* Ctx)
+{
+	static const char* const DOMRectSource =
+		"(function(){"
+		"  if (globalThis.DOMRect) { return; }"
+		"  function DOMRect(){ throw new TypeError('Illegal constructor'); }"
+		"  DOMRect.prototype.toJSON = function(){ return { x:this.x, y:this.y, width:this.width, height:this.height,"
+		"    top:this.top, right:this.right, bottom:this.bottom, left:this.left }; };"
+		"  globalThis.DOMRect = DOMRect;"
+		"})();";
+	JSValue Result = JS_Eval(Ctx, DOMRectSource, FCStringAnsi::Strlen(DOMRectSource), "cathode-domrect.js", JS_EVAL_TYPE_GLOBAL);
+	JS_FreeValue(Ctx, Result);
+}
+
+// Mint a DOMRect (proto = DOMRect.prototype) with the 8 number props from a layout box. The geometry VALUE is the
+// layout's (real layout = validation-pass); top/left/right/bottom derive from x/y/width/height per spec. An all-zeros
+// box (no laid-out geometry) mints an all-zeros DOMRect — the spec's unrendered-element rect, never null.
+FJsValue MarshalDOMRect(JSContext* Ctx, const FBox2f& Box)
+{
+	const double X = Box.Min.X;
+	const double Y = Box.Min.Y;
+	const double W = static_cast<double>(Box.Max.X) - Box.Min.X;
+	const double H = static_cast<double>(Box.Max.Y) - Box.Min.Y;
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JSValue Ctor = JS_GetPropertyStr(Ctx, Global, "DOMRect");
+	JSValue Proto = JS_GetPropertyStr(Ctx, Ctor, "prototype");
+	JSValue Rect = JS_NewObjectProto(Ctx, Proto); // [[Prototype]] = DOMRect.prototype (instanceof DOMRect)
+	JS_FreeValue(Ctx, Proto);
+	JS_FreeValue(Ctx, Ctor);
+	JS_FreeValue(Ctx, Global);
+	JS_SetPropertyStr(Ctx, Rect, "x", JS_NewFloat64(Ctx, X));
+	JS_SetPropertyStr(Ctx, Rect, "y", JS_NewFloat64(Ctx, Y));
+	JS_SetPropertyStr(Ctx, Rect, "width", JS_NewFloat64(Ctx, W));
+	JS_SetPropertyStr(Ctx, Rect, "height", JS_NewFloat64(Ctx, H));
+	JS_SetPropertyStr(Ctx, Rect, "top", JS_NewFloat64(Ctx, Y));
+	JS_SetPropertyStr(Ctx, Rect, "right", JS_NewFloat64(Ctx, X + W));
+	JS_SetPropertyStr(Ctx, Rect, "bottom", JS_NewFloat64(Ctx, Y + H));
+	JS_SetPropertyStr(Ctx, Rect, "left", JS_NewFloat64(Ctx, X));
+	return FJsValue(Ctx, Rect);
+}
+
+// NamedNodeMap (sprint 012 snapshot-returns, Element.attributes): the spec-typed SURFACE (length / item /
+// getNamedItem / [i] / iterator) over MINIMAL { name, value } Attr-shaped items — browse-design's #8 ruling
+// (obs-tier, consumer-scoped depth; a minimal SUBSET of Attr, NO Attr class; the consumer reads only name/value).
+// A SNAPSHOT mint (read at a point). Mirrors the NodeList type-in-JS-proto pattern.
+void InstallNamedNodeMapType(JSContext* Ctx)
+{
+	static const char* const NamedNodeMapSource =
+		"(function(){"
+		"  if (globalThis.NamedNodeMap) { return; }"
+		"  function NamedNodeMap(){ throw new TypeError('Illegal constructor'); }"
+		"  NamedNodeMap.prototype.item = function(i){ i = i | 0; return (i >= 0 && i < this.length) ? this[i] : null; };"
+		"  NamedNodeMap.prototype.getNamedItem = function(name){ for (var i = 0; i < this.length; i++) { if (this[i].name === name) { return this[i]; } } return null; };"
+		"  function makeIter(get, host){ var i = 0; var it = { next: function(){ return i < host.length ? { value: get(i++), done: false } : { value: undefined, done: true }; } }; it[Symbol.iterator] = function(){ return this; }; return it; }"
+		"  NamedNodeMap.prototype.values = function(){ var s = this; return makeIter(function(i){ return s[i]; }, s); };"
+		"  NamedNodeMap.prototype[Symbol.iterator] = NamedNodeMap.prototype.values;"
+		"  globalThis.NamedNodeMap = NamedNodeMap;"
+		"})();";
+	JSValue Result = JS_Eval(Ctx, NamedNodeMapSource, FCStringAnsi::Strlen(NamedNodeMapSource), "cathode-namednodemap.js", JS_EVAL_TYPE_GLOBAL);
+	JS_FreeValue(Ctx, Result);
+}
+
+// Mint a NamedNodeMap (proto = NamedNodeMap.prototype) of MINIMAL { name, value } items from the attr snapshot.
+FJsValue MarshalNamedNodeMap(JSContext* Ctx, const TArray<TPair<FString, FString>>& Attrs)
+{
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JSValue Ctor = JS_GetPropertyStr(Ctx, Global, "NamedNodeMap");
+	JSValue Proto = JS_GetPropertyStr(Ctx, Ctor, "prototype");
+	JSValue Map = JS_NewObjectProto(Ctx, Proto); // [[Prototype]] = NamedNodeMap.prototype
+	JS_FreeValue(Ctx, Proto);
+	JS_FreeValue(Ctx, Ctor);
+	JS_FreeValue(Ctx, Global);
+	for (int32 Index = 0; Index < Attrs.Num(); ++Index)
+	{
+		JSValue Item = JS_NewObject(Ctx); // a minimal { name, value } item — NO Attr class
+		JS_SetPropertyStr(Ctx, Item, "name", MarshalString(Ctx, Attrs[Index].Key).Release());
+		JS_SetPropertyStr(Ctx, Item, "value", MarshalString(Ctx, Attrs[Index].Value).Release());
+		JS_SetPropertyUint32(Ctx, Map, static_cast<uint32>(Index), Item);
+	}
+	JS_SetPropertyStr(Ctx, Map, "length", JS_NewInt32(Ctx, Attrs.Num()));
+	return FJsValue(Ctx, Map);
 }
 
 // --- Template thunks (one C++ member-ptr -> one install thunk), mirroring slice 1. ---
@@ -1088,6 +1187,27 @@ JSValue ClosestThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueCons
 	}
 	return JS_NULL;
 }
+
+// getBoundingClientRect (Element): the node's layout box -> a DOMRect (point-in-time value). Geometry from the
+// layout (LastLayout); unrendered / not-yet-laid-out -> an all-zeros DOMRect (spec), never null.
+JSValue GetBoundingClientRectThunk(JSContext* Ctx, JSValueConst ThisVal, int /*Argc*/, JSValueConst* /*Argv*/)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FBox2f Box(ForceInit); // all-zeros if GetBoundingClientRect finds no laid-out geometry (leaves Box untouched)
+	Self->GetBoundingClientRect(Box);
+	return MarshalDOMRect(Ctx, Box).Release();
+}
+
+// attributes (Element, getter): a SNAPSHOT NamedNodeMap of the node's attributes as minimal { name, value } items.
+JSValue AttributesGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	TArray<TPair<FString, FString>> Attrs;
+	Self->GetAttributesSnapshot(Attrs);
+	return MarshalNamedNodeMap(Ctx, Attrs).Release();
+}
 } // namespace
 
 // Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
@@ -1199,6 +1319,9 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_METHOD_FN("querySelectorAll", "Element", "margin", "(selectors: string) -> NodeList", QuerySelectorAllThunk),
 	CATHODE_BIND_METHOD_FN("matches", "Element", "margin", "(selectors: string) -> boolean", MatchesThunk),
 	CATHODE_BIND_METHOD_FN("closest", "Element", "margin", "(selectors: string) -> Element | null", ClosestThunk),
+	// Element — snapshot-returns (sprint 012): attributes -> NamedNodeMap snapshot; getBoundingClientRect -> DOMRect value.
+	CATHODE_BIND_GETTER_FN("attributes", "Element", "obs", "NamedNodeMap", AttributesGetterThunk),
+	CATHODE_BIND_METHOD_FN("getBoundingClientRect", "Element", "obs", "() -> DOMRect", GetBoundingClientRectThunk),
 };
 
 #undef CATHODE_BIND_GETTER
@@ -1247,6 +1370,9 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Contex
 	// Slice 2: install the NodeList TYPE (childNodes' return type — behavioral-contract #8) so MarshalNodeList can
 	// mint typed snapshots. Idempotent (no-op if already present on this context's global).
 	InstallNodeListType(Context);
+	// Sprint 012 snapshot-returns: the object-return TYPES (Element.attributes / getBoundingClientRect). Idempotent.
+	InstallNamedNodeMapType(Context);
+	InstallDOMRectType(Context);
 	return ClassId;
 }
 
