@@ -1254,6 +1254,281 @@ JSValue CheckedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst Va
 	Self->SetChecked(Truthy != 0);
 	return JS_UNDEFINED;
 }
+
+// ===== CSSStyleDeclaration (sprint 012 style) — ONE C++-EXOTIC class, two BACKINGS. The 'style' ATTRIBUTE is the
+// SINGLE SOURCE OF TRUTH for inline style: element.style is a write-through ACCESSOR over it (no parallel store);
+// getComputedStyle is a read-only view over FResolvedStyle (the slice-5 stub -> EMPTY values until the CSS epic).
+// Open-ended named property access via the quickjs EXOTIC handler (get_own_property/set_property — NOT a JS Proxy).
+// Registered DIRECTLY here (CathodeDom calls JS_* directly) because FNativeClassDef can't express exotic methods —
+// CathodeBinding stays untouched (negative control). =====
+
+JSClassID GStyleDeclClassId = 0;
+
+// The backing: which node + writable (element.style write-through to the 'style' attribute) vs read-only
+// (getComputedStyle over FResolvedStyle, writes no-op). POD; freed in the finalizer.
+struct FStyleBacking
+{
+	FDomDocument* Doc = nullptr;
+	FDomNodeId NodeId = INDEX_NONE;
+	bool bWritable = false;
+};
+
+// camelCase JS name -> dash-case CSS property ("fontSize" -> "font-size"). Custom (--x) / vendor (-webkit) pass through.
+FString StyleNameToCss(const FString& JsName)
+{
+	if (JsName.StartsWith(TEXT("-"))) { return JsName; }
+	FString Out;
+	for (const TCHAR Ch : JsName)
+	{
+		if (Ch >= 'A' && Ch <= 'Z') { Out.AppendChar(TEXT('-')); Out.AppendChar(Ch - 'A' + 'a'); }
+		else { Out.AppendChar(Ch); }
+	}
+	return Out;
+}
+
+// Parse the canonical inline-style string "color: red; font-size: 12px" -> ordered (name, value) pairs (trimmed).
+void ParseInlineStyle(const FString& Css, TArray<TPair<FString, FString>>& Out)
+{
+	Out.Reset();
+	TArray<FString> Decls;
+	Css.ParseIntoArray(Decls, TEXT(";"), true);
+	for (const FString& Decl : Decls)
+	{
+		int32 Colon = INDEX_NONE;
+		if (Decl.FindChar(TEXT(':'), Colon))
+		{
+			const FString Name = Decl.Left(Colon).TrimStartAndEnd();
+			const FString Value = Decl.Mid(Colon + 1).TrimStartAndEnd();
+			if (!Name.IsEmpty()) { Out.Emplace(Name, Value); }
+		}
+	}
+}
+
+FString SerializeInlineStyle(const TArray<TPair<FString, FString>>& Decls)
+{
+	FString Out;
+	for (const TPair<FString, FString>& D : Decls)
+	{
+		if (!Out.IsEmpty()) { Out += TEXT("; "); }
+		Out += D.Key; Out += TEXT(": "); Out += D.Value;
+	}
+	return Out;
+}
+
+FString GetCanonicalStyle(FDomNode* Node)
+{
+	FString S;
+	return (Node != nullptr && Node->GetAttribute(TEXT("style"), S)) ? S : FString();
+}
+
+bool GetInlineProperty(FDomNode* Node, const FString& CssName, FString& OutValue)
+{
+	TArray<TPair<FString, FString>> Decls;
+	ParseInlineStyle(GetCanonicalStyle(Node), Decls);
+	for (const TPair<FString, FString>& D : Decls)
+	{
+		if (D.Key == CssName) { OutValue = D.Value; return true; }
+	}
+	return false;
+}
+
+// Write one CSS property to the node's CANONICAL inline style (-> the 'style' attribute via SetAttribute, which
+// dirty-marks Layout). Empty value removes it. No parallel store -> the 'style' attribute never desyncs.
+void SetInlineProperty(FDomNode* Node, const FString& CssName, const FString& Value)
+{
+	if (Node == nullptr) { return; }
+	TArray<TPair<FString, FString>> Decls;
+	ParseInlineStyle(GetCanonicalStyle(Node), Decls);
+	bool bFound = false;
+	for (int32 i = 0; i < Decls.Num(); ++i)
+	{
+		if (Decls[i].Key == CssName)
+		{
+			if (Value.IsEmpty()) { Decls.RemoveAt(i); } else { Decls[i].Value = Value; }
+			bFound = true;
+			break;
+		}
+	}
+	if (!bFound && !Value.IsEmpty()) { Decls.Emplace(CssName, Value); }
+	Node->SetAttribute(TEXT("style"), SerializeInlineStyle(Decls)); // canonical 'style' attribute + dirty-mark
+}
+
+// Read a resolved/computed property from FResolvedStyle (getComputedStyle's backing) — the slice-5 stub: present
+// keys with EMPTY values until the CSS epic implements QueryComputedValue (the 1-line-real downstream joint).
+bool GetResolvedProperty(FDomNode* Node, const FString& CssName, FString& OutValue)
+{
+	if (Node == nullptr) { return false; }
+	FResolvedStyle Resolved;
+	if (!Node->GetComputedStyle(Resolved)) { return false; } // no laid-out geometry yet
+	if (const FString* V = Resolved.Properties.Find(CssName)) { OutValue = *V; return true; }
+	return false;
+}
+
+// EXOTIC get_own_property: cssText + named CSS properties resolve here; everything else (the setProperty proto
+// method, unset props) returns 0 -> the prototype chain. Backing-parameterized (inline vs resolved).
+int StyleGetOwnProperty(JSContext* Ctx, JSPropertyDescriptor* Desc, JSValueConst Obj, JSAtom Prop)
+{
+	FStyleBacking* B = static_cast<FStyleBacking*>(JS_GetOpaque(Obj, GStyleDeclClassId));
+	if (B == nullptr) { return 0; }
+	FDomNode* Node = (B->Doc != nullptr) ? B->Doc->FindNode(B->NodeId) : nullptr;
+	if (Node == nullptr) { return 0; }
+	const char* NameC = JS_AtomToCString(Ctx, Prop);
+	if (NameC == nullptr) { return -1; }
+	const FString Name(UTF8_TO_TCHAR(NameC));
+	JS_FreeCString(Ctx, NameC);
+
+	FString Value;
+	bool bHas = false;
+	if (Name == TEXT("cssText"))
+	{
+		Value = B->bWritable ? GetCanonicalStyle(Node) : FString(); // computed cssText is "" per spec
+		bHas = true;
+	}
+	else
+	{
+		const FString CssName = StyleNameToCss(Name);
+		bHas = B->bWritable ? GetInlineProperty(Node, CssName, Value) : GetResolvedProperty(Node, CssName, Value);
+	}
+	if (!bHas) { return 0; } // -> the prototype (setProperty) / undefined
+	if (Desc != nullptr)
+	{
+		Desc->flags = JS_PROP_C_W_E;
+		Desc->value = MarshalString(Ctx, Value).Release();
+		Desc->getter = JS_UNDEFINED;
+		Desc->setter = JS_UNDEFINED;
+	}
+	return 1;
+}
+
+// EXOTIC set_property: cssText + named CSS properties write through to the canonical 'style' attribute. A READ-ONLY
+// backing (getComputedStyle) silently no-ops (spec). Arbitrary names route here (--custom / anyName), not just color.
+int StyleSetProperty(JSContext* Ctx, JSValueConst Obj, JSAtom Prop, JSValueConst Value, JSValueConst /*Receiver*/, int /*Flags*/)
+{
+	FStyleBacking* B = static_cast<FStyleBacking*>(JS_GetOpaque(Obj, GStyleDeclClassId));
+	if (B == nullptr) { return 0; }
+	if (!B->bWritable) { return 1; } // getComputedStyle is READ-ONLY -> write is a silent no-op
+	FDomNode* Node = (B->Doc != nullptr) ? B->Doc->FindNode(B->NodeId) : nullptr;
+	if (Node == nullptr) { return 1; }
+	const char* NameC = JS_AtomToCString(Ctx, Prop);
+	if (NameC == nullptr) { return -1; }
+	const FString Name(UTF8_TO_TCHAR(NameC));
+	JS_FreeCString(Ctx, NameC);
+
+	FString ValStr;
+	MarshalAttributeValue(Ctx, Value, ValStr); // bounded coercion (String as-is / Number / Bool -> string)
+	if (Name == TEXT("cssText"))
+	{
+		Node->SetAttribute(TEXT("style"), ValStr); // cssText IS the canonical attribute string
+	}
+	else
+	{
+		SetInlineProperty(Node, StyleNameToCss(Name), ValStr);
+	}
+	return 1;
+}
+
+void StyleDeclFinalizer(JSRuntime* /*Rt*/, JSValueConst Val)
+{
+	delete static_cast<FStyleBacking*>(JS_GetOpaque(Val, GStyleDeclClassId)); // POD backing, no held JS refs
+}
+
+JSValue ThrowIllegalConstructor(JSContext* Ctx, JSValueConst, int, JSValueConst*)
+{
+	return JS_ThrowTypeError(Ctx, "Illegal constructor");
+}
+
+// setProperty(name, value) — the var()/custom-props path (required). Uses the name AS-IS (CSSOM: dash-case / --x,
+// NOT camelCase). Read-only no-ops. Write-through to the canonical 'style' attribute.
+JSValue StyleSetPropertyMethod(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FStyleBacking* B = static_cast<FStyleBacking*>(JS_GetOpaque2(Ctx, ThisVal, GStyleDeclClassId));
+	if (B == nullptr) { return JS_EXCEPTION; }
+	if (!B->bWritable) { return JS_UNDEFINED; } // read-only no-op
+	FDomNode* Node = (B->Doc != nullptr) ? B->Doc->FindNode(B->NodeId) : nullptr;
+	if (Node == nullptr) { return JS_UNDEFINED; }
+	FString Name, Val;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Name)) { return JS_ThrowTypeError(Ctx, "setProperty expects (name, value)"); }
+	MarshalAttributeValue(Ctx, Argv[1], Val);
+	SetInlineProperty(Node, Name, Val); // name AS-IS (already CSS-form)
+	return JS_UNDEFINED;
+}
+
+// Install the CSSStyleDeclaration exotic class + globalThis.CSSStyleDeclaration (for instanceof). The idempotency
+// guard is PER-CONTEXT (the class GLOBAL + proto are per-context, like InstallNodeListType) — a process-global
+// class-id guard would wrongly skip the per-context global on every context after the first (the bug that threw
+// `x instanceof CSSStyleDeclaration` everywhere but the first test). The class id is allocated ONCE (process-global;
+// quickjs ids are unique + reusable across runtimes); the class is (re)registered on this runtime; the proto + the
+// global constructor are set PER CONTEXT.
+void InstallCSSStyleDeclarationClass(JSContext* Ctx)
+{
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JSValue Existing = JS_GetPropertyStr(Ctx, Global, "CSSStyleDeclaration");
+	const bool bAlready = !JS_IsUndefined(Existing);
+	JS_FreeValue(Ctx, Existing);
+	if (bAlready) { JS_FreeValue(Ctx, Global); return; } // THIS context already has it
+
+	JSRuntime* Rt = JS_GetRuntime(Ctx);
+	// Allocate a FRESH id per install (per runtime). JS_NewClassID is IDEMPOTENT on a non-zero *pclass_id — it
+	// returns the stale value WITHOUT allocating — so the static MUST be reset to 0 first (the registry passes a
+	// fresh zero local each call for exactly this reason). Without the reset, the stale rt-1 id is reused on rt-2,
+	// where it collides with a registry-allocated class, and JS_NewClass grafts the CSSStyleDeclaration exotic
+	// handlers onto that FOREIGN class (the node/document class) -> StyleGetOwnProperty fires on a non-style object
+	// -> JS_GetOpaque reinterprets it as an FStyleBacking -> FindNode on garbage -> access violation. One runtime is
+	// active at a time, so the single static then holds the current runtime's fresh id (exactly like GDomNodeClassId).
+	GStyleDeclClassId = 0;
+	JS_NewClassID(Rt, &GStyleDeclClassId);
+	static JSClassExoticMethods Exotic = {};
+	Exotic.get_own_property = &StyleGetOwnProperty;
+	Exotic.set_property = &StyleSetProperty;
+	JSClassDef Def = {};
+	Def.class_name = "CSSStyleDeclaration";
+	Def.finalizer = &StyleDeclFinalizer;
+	Def.exotic = &Exotic;
+	JS_NewClass(Rt, GStyleDeclClassId, &Def); // (re)register on this runtime
+
+	JSValue Proto = JS_NewObject(Ctx);
+	JS_SetPropertyStr(Ctx, Proto, "setProperty", JS_NewCFunction(Ctx, &StyleSetPropertyMethod, "setProperty", 2));
+	JS_SetClassProto(Ctx, GStyleDeclClassId, JS_DupValue(Ctx, Proto)); // class instances get this proto (instanceof)
+
+	JSValue Ctor = JS_NewCFunction(Ctx, &ThrowIllegalConstructor, "CSSStyleDeclaration", 0);
+	JS_SetPropertyStr(Ctx, Ctor, "prototype", JS_DupValue(Ctx, Proto)); // CSSStyleDeclaration.prototype = the class proto
+	JS_SetPropertyStr(Ctx, Global, "CSSStyleDeclaration", Ctor); // consumes Ctor
+	JS_FreeValue(Ctx, Global);
+	JS_FreeValue(Ctx, Proto); // release my ref (held by the class + ctor.prototype)
+}
+
+// Mint a CSSStyleDeclaration over a node, parameterized by backing (write-through inline vs read-only resolved).
+FJsValue MarshalStyleDeclaration(JSContext* Ctx, FDomDocument* Doc, FDomNodeId NodeId, bool bWritable)
+{
+	JSValue Obj = JS_NewObjectClass(Ctx, GStyleDeclClassId); // [[Prototype]] = the class proto -> instanceof works
+	JS_SetOpaque(Obj, new FStyleBacking{ Doc, NodeId, bWritable });
+	return FJsValue(Ctx, Obj);
+}
+
+// element.style (HTMLElement getter): a WRITE-THROUGH CSSStyleDeclaration over the node's canonical 'style' attribute.
+JSValue StyleGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalStyleDeclaration(Ctx, Self->GetOwningDocument(), Self->GetNodeId(), /*bWritable*/ true).Release();
+}
+
+// getComputedStyle(elt) — the GLOBAL function (a faculty-A HOST_GLOBAL): a READ-ONLY CSSStyleDeclaration over the
+// element's FResolvedStyle (the read path; values empty = the stubbed cascade, the 1-line-real downstream joint).
+JSValue GetComputedStyleThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int Argc, JSValueConst* Argv)
+{
+	if (Argc < 1) { return JS_ThrowTypeError(Ctx, "getComputedStyle expects an element"); }
+	FDomNode* El = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, Argv[0], GDomNodeClassId));
+	if (El == nullptr) { return JS_EXCEPTION; }
+	return MarshalStyleDeclaration(Ctx, El->GetOwningDocument(), El->GetNodeId(), /*bWritable*/ false).Release();
+}
+
+void InstallGetComputedStyleGlobal(JSContext* Ctx)
+{
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JS_SetPropertyStr(Ctx, Global, "getComputedStyle", JS_NewCFunction(Ctx, &GetComputedStyleThunk, "getComputedStyle", 1));
+	JS_FreeValue(Ctx, Global);
+}
 } // namespace
 
 // Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
@@ -1377,6 +1652,9 @@ static const FBoundMember GDomNodeMembers[] =
 	// DISTINCT from the value/checked attributes — so they route to the live-state get/set, NOT CATHODE_BIND_REFLECTED.
 	CATHODE_BIND_STR_RW("value", "HTMLInputElement", "reflected", "string", GetValue, SetValue),
 	CATHODE_BIND_PROP_FN("checked", "HTMLInputElement", "reflected", "boolean", CheckedGetterThunk, CheckedSetterThunk),
+	// HTMLElement — style (sprint 012): a WRITE-THROUGH CSSStyleDeclaration over the canonical 'style' attribute.
+	// (CSSStyleDeclaration is a C++-EXOTIC class — NOT lockstep-bound; getComputedStyle is a GLOBAL, installed separately.)
+	CATHODE_BIND_GETTER_FN("style", "HTMLElement", "required", "CSSStyleDeclaration", StyleGetterThunk),
 };
 
 #undef CATHODE_BIND_GETTER
@@ -1429,6 +1707,10 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Contex
 	// Sprint 012 snapshot-returns: the object-return TYPES (Element.attributes / getBoundingClientRect). Idempotent.
 	InstallNamedNodeMapType(Context);
 	InstallDOMRectType(Context);
+	// Sprint 012 style: the CSSStyleDeclaration EXOTIC class (element.style / getComputedStyle backing) + the
+	// getComputedStyle GLOBAL function (a host global). Idempotent.
+	InstallCSSStyleDeclarationClass(Context);
+	InstallGetComputedStyleGlobal(Context);
 	return ClassId;
 }
 
