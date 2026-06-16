@@ -6,6 +6,7 @@
 #include "CathodeBinding.h" // 007: FJsValue (+ Mark/FreeRT), INativeClassRegistry, FNativeClassDef,
                             //      FCallableHandle, FinalizeNativeObject, marshaling, ICathodeJsRuntime
 #include "CathodeLayout.h"  // 005: ILayoutDocumentSource, ILayoutEngine, EDirtyKind, FResolvedStyle, FLayoutResult
+#include "CathodeSelector.h" // 012 selectors: IMatchableNode (FDomNode implements) + ISelectorService (NEUTRAL seam — no litehtml)
 // 006 CathodeSurfaces' ISurfaceDocument is the surface<->DOM binding resolved at INTEGRATION (a surface's
 // document resolves to a DOM); it is named in COVERAGE, not coupled into this header.
 
@@ -108,7 +109,9 @@ struct FDomEventListener
 // The exact private representation (the JS-ref child container, the non-owning back-refs) is RQ1 — settled in
 // Slice 2 within this non-negotiable principle; not shown here.
 class FDomDocument; // the owning document (FDomNode holds a non-owning back-ref + exposes GetOwningDocument)
-class FDomNode
+// FDomNode IS-A IMatchableNode (012 selectors): the matcher walks the LIVE retained tree through this neutral
+// interface (NOT litehtml's per-layout snapshot), so a freshly-mutated node matches without a relayout.
+class FDomNode : public IMatchableNode
 {
 public:
 	// Identity / kind
@@ -169,6 +172,13 @@ public:
 	void Remove();                               // ChildNode.remove() — detach self from its parent (ref-drop)
 	void GetChildWrappers(TArray<FJsValue>& OutWrappers) const; // childNodes snapshot: the OWNING child wrappers
 	FDomDocument* GetOwningDocument() const;     // the owning document (for the node marshaler); null if orphaned
+
+	// --- IMatchableNode (012 selectors): the neutral structural surface the CathodeLayout matcher walks. Reads the
+	//     LIVE node (tag/attrs/parent/child elements) off the retained tree — never a serialized snapshot. ---
+	virtual FString GetMatchTagName() const override;
+	virtual bool GetMatchAttribute(const FString& Name, FString& OutValue) const override; // case-insensitive (HTML attr names)
+	virtual const IMatchableNode* GetMatchParent() const override;
+	virtual void GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) const override; // child ELEMENTS, in order
 
 	// --- Internal mechanism (Model A) — not the author surface ---
 	// Finalizer-driven (FinalizeNativeObject<FDomNode> -> delete): de-register from the document's NON-OWNING
@@ -267,6 +277,13 @@ public:
 	// event API bound to JS), so there is nothing for a document gc_mark to collect. See the lifetime note in
 	// CathodeDom/COVERAGE.md (carry-not-rediscover: gc_mark returns when the event API is bound to JS).
 
+	// --- Sprint 012 selectors: the matcher service (CathodeLayout-implemented, litehtml-grounded). Held by an
+	//     ABSTRACT pointer (no litehtml type enters CathodeDom). Installed at construction (CreateDomDocument's
+	//     optional arg) or via the setter; node/document querySelector routes here. Null until installed -> the
+	//     querySelector thunk throws (a wiring invariant — production + the proof test always install it).
+	void SetSelectorService(const ISelectorService* InService);
+	const ISelectorService* GetSelectorService() const;
+
 	// Drive 005 (S5): relayout at the available width + cache the result so the observation reads can compose
 	// its geometry/style. The DOM serializes + drives; it does NOT lay out.
 	void Relayout(int32 AvailableWidth);
@@ -289,6 +306,7 @@ private:
 	ICathodeJsRuntime& Runtime;
 	INativeClassRegistry& Registry;
 	ILayoutEngine& Layout;
+	const ISelectorService* SelectorService = nullptr; // 012 selectors: CathodeLayout's matcher (abstract; no litehtml here)
 	JSContext* Context = nullptr;          // 002's live context (wrapping/marshaling), via GetNativeContextHandle
 	JSClassID NodeClassId = 0;             // the registered DOM-node class id
 	int32 NextNodeId = 0;
@@ -335,8 +353,12 @@ CATHODEDOM_API FString GetDomKeyboardEventDescriptorJson();
 
 // Construct a DOM document over 007's runtime/registry (for wrapping + lifetime) and 005's layout engine
 // (for the handshake). Composes the siblings; stands up no second runtime, builds no layout. (Body Slice 2+.)
+// The optional Selector arg (012) installs the matcher service so node/document querySelector works; defaulted null
+// so the many existing call sites (which don't exercise selectors) are untouched. Production + the selector proof
+// pass CreateSelectorService().
 CATHODEDOM_API TUniquePtr<FDomDocument> CreateDomDocument(
-	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout);
+	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout,
+	const ISelectorService* Selector = nullptr);
 
 // Marshal a JS value to a DOM attribute/property STRING via 007's bounded vocabulary: String as-is, Number
 // stringified, Bool -> "true"/"false"; REJECTS exotic + non-scalar (Null/Undefined/Array/Record/NativeObject/

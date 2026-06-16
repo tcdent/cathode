@@ -398,6 +398,57 @@ FDomDocument* FDomNode::GetOwningDocument() const
 	return Document;
 }
 
+// --- IMatchableNode (012 selectors): the structural surface the CathodeLayout matcher walks over the LIVE tree.
+//     Reads this node's current state directly (no serialization) so a freshly-mutated node matches without relayout. ---
+
+FString FDomNode::GetMatchTagName() const
+{
+	return TagName; // "" for text nodes — they never match a type selector or condition
+}
+
+bool FDomNode::GetMatchAttribute(const FString& Name, FString& OutValue) const
+{
+	// HTML attribute names are case-insensitive: exact key first (the common path), else a case-insensitive scan.
+	if (const FString* Exact = Attributes.Find(Name))
+	{
+		OutValue = *Exact;
+		return true;
+	}
+	for (const TPair<FString, FString>& Pair : Attributes)
+	{
+		if (Pair.Key.Equals(Name, ESearchCase::IgnoreCase))
+		{
+			OutValue = Pair.Value;
+			return true;
+		}
+	}
+	return false;
+}
+
+const IMatchableNode* FDomNode::GetMatchParent() const
+{
+	return (Document != nullptr) ? Document->FindNode(ParentId) : nullptr;
+}
+
+void FDomNode::GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) const
+{
+	// Child ELEMENTS in document order. Resolve each owning child wrapper to its node; skip text nodes (they never
+	// match a selector) so the matcher's pre-order walk only visits matchable elements.
+	OutChildren.Reset();
+	if (Document == nullptr)
+	{
+		return;
+	}
+	for (const FJsValue& ChildWrapper : Children)
+	{
+		const FDomNode* Child = Document->NodeFromWrapper(ChildWrapper);
+		if (Child != nullptr && Child->Type == EDomNodeType::Element)
+		{
+			OutChildren.Add(Child);
+		}
+	}
+}
+
 // --- Event system (S6) — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
 
 void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture)
@@ -961,6 +1012,29 @@ JSValue DispatchEventThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSVal
 	Self->DispatchEvent(*E);
 	return MarshalBool(Ctx, !E->bDefaultPrevented).Release();
 }
+
+// querySelector (Element): the FIRST element in tree PRE-ORDER matching the selector, via the CathodeLayout matcher
+// walking the LIVE FDomNode tree. Element-scoped = DESCENDANTS ONLY (bIncludeRoot=false -> EXCLUDE-SELF). Identity
+// (===) via the node marshaler; no match -> null; an invalid/unsupported selector -> a SyntaxError (never silently
+// mis-matched). The matched IMatchableNode is one of Self's descendants, which are FDomNodes -> safe downcast.
+JSValue QuerySelectorThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "querySelector expects a selector string"); }
+	FDomDocument* Doc = Self->GetOwningDocument();
+	const ISelectorService* Service = (Doc != nullptr) ? Doc->GetSelectorService() : nullptr;
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "querySelector: no selector service installed"); }
+	const IMatchableNode* Match = nullptr;
+	const ESelectorStatus Status = Service->QueryFirst(*Self, /*bIncludeRoot*/ false, Selector, Match);
+	if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "querySelector: invalid or unsupported selector"); }
+	if (Status == ESelectorStatus::Matched && Match != nullptr)
+	{
+		return MarshalNode(Ctx, Doc, static_cast<const FDomNode*>(Match)->GetNodeId());
+	}
+	return JS_NULL;
+}
 } // namespace
 
 // Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
@@ -1049,6 +1123,8 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_METHOD_FN("addEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", AddEventListenerThunk),
 	CATHODE_BIND_METHOD_FN("removeEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", RemoveEventListenerThunk),
 	CATHODE_BIND_METHOD_FN("dispatchEvent", "EventTarget", "margin", "(event: Event) -> boolean", DispatchEventThunk),
+	// Element — selectors (sprint 012): querySelector scopes to descendants (exclude-self), first match in pre-order.
+	CATHODE_BIND_METHOD_FN("querySelector", "Element", "required", "(selectors: string) -> Element | null", QuerySelectorThunk),
 };
 
 #undef CATHODE_BIND_GETTER

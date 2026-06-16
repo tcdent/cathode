@@ -223,6 +223,16 @@ FDomNodeId FDomDocument::GetRootNodeId() const
 	return RootNodeId;
 }
 
+void FDomDocument::SetSelectorService(const ISelectorService* InService)
+{
+	SelectorService = InService;
+}
+
+const ISelectorService* FDomDocument::GetSelectorService() const
+{
+	return SelectorService;
+}
+
 FJsValue FDomDocument::GetWrapperForNode(FDomNodeId InNodeId) const
 {
 	// The node marshaler (S2): resolve a node's EXISTING wrapper via its NON-OWNING borrow (set once at creation) —
@@ -266,7 +276,7 @@ FJsValue FDomDocument::CreateTextNode(const FString& Data)
 }
 
 TUniquePtr<FDomDocument> CreateDomDocument(
-	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout)
+	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout, const ISelectorService* Selector)
 {
 	// sprint 012 slice 1: RegisterDomNodeClass now also installs the bound members onto the class proto, so it
 	// needs the live JSContext (002's confined context).
@@ -277,7 +287,14 @@ TUniquePtr<FDomDocument> CreateDomDocument(
 	RegisterDomDocumentClass(Registry, Context);
 	// sprint 012 events: register the Event + KeyboardEvent classes (the dispatch wraps the live FDomEvent in one).
 	RegisterDomEventClasses(Registry, Context);
-	return MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
+	TUniquePtr<FDomDocument> Document = MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
+	// sprint 012 selectors: install the matcher service (abstract; the litehtml-backed impl lives in CathodeLayout)
+	// so node/document querySelector resolves. Optional so the non-selector call sites stay null (querySelector unused).
+	if (Selector != nullptr)
+	{
+		Document->SetSelectorService(Selector);
+	}
+	return Document;
 }
 
 // === Sprint 012 slice 5: the FDomDocument JS class (the 2nd class via the one binding-definition mechanism) ===
@@ -299,6 +316,31 @@ JSValue DocGetElementByIdThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, J
 	if (Found == INDEX_NONE) { return JS_NULL; } // non-existent id -> null
 	FJsValue Wrapper = Self->GetWrapperForNode(Found); // the SAME wrapper (identity ===)
 	return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+}
+
+// querySelector(selectors) -> the FIRST element in the WHOLE tree (pre-order) matching the selector, via the
+// CathodeLayout matcher over the LIVE tree. Document scope = the root element + all descendants (bIncludeRoot=true,
+// no exclude-self since the document node isn't an element). === identity via the existing wrapper; no match -> null;
+// invalid/unsupported selector -> SyntaxError. The matched IMatchableNode is a node in this document -> FDomNode.
+JSValue DocQuerySelectorThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "querySelector expects a selector string"); }
+	const ISelectorService* Service = Self->GetSelectorService();
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "querySelector: no selector service installed"); }
+	const FDomNode* Root = Self->FindNode(Self->GetRootNodeId());
+	if (Root == nullptr) { return JS_NULL; } // an empty document matches nothing
+	const IMatchableNode* Match = nullptr;
+	const ESelectorStatus Status = Service->QueryFirst(*Root, /*bIncludeRoot*/ true, Selector, Match);
+	if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "querySelector: invalid or unsupported selector"); }
+	if (Status == ESelectorStatus::Matched && Match != nullptr)
+	{
+		FJsValue Wrapper = Self->GetWrapperForNode(static_cast<const FDomNode*>(Match)->GetNodeId()); // SAME wrapper (===)
+		return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+	}
+	return JS_NULL;
 }
 
 // createElement(localName) -> a real element wrapper (the existing C++ factory).
@@ -340,6 +382,7 @@ JSValue DocCreateElementNSThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, 
 static const FBoundMember GDomDocumentMembers[] =
 {
 	CATHODE_BIND_DOC_METHOD("getElementById",  "Document", "required", "(elementId: string) -> Element | null", DocGetElementByIdThunk),
+	CATHODE_BIND_DOC_METHOD("querySelector",   "Document", "required", "(selectors: string) -> Element | null", DocQuerySelectorThunk),
 	CATHODE_BIND_DOC_METHOD("createElement",   "Document", "margin",   "(localName: string) -> Element", DocCreateElementThunk),
 	CATHODE_BIND_DOC_METHOD("createTextNode",  "Document", "required", "(data: string) -> Text", DocCreateTextNodeThunk),
 	CATHODE_BIND_DOC_METHOD("createElementNS", "Document", "required", "(namespace: string | null, qualifiedName: string) -> Element", DocCreateElementNSThunk),
