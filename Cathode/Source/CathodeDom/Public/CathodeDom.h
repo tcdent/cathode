@@ -351,6 +351,12 @@ CATHODEDOM_API void RegisterDomEventClasses(INativeClassRegistry& Registry, JSCo
 CATHODEDOM_API FString GetDomEventDescriptorJson();
 CATHODEDOM_API FString GetDomKeyboardEventDescriptorJson();
 
+// Internal (shared across the DOM TUs, sprint 012 selectors): marshal a selector-match list (live FDomNodes, as
+// IMatchableNode*) to a STATIC NodeList of their EXISTING wrappers (=== identity), reusing the slice-2 NodeList
+// recipe. querySelectorAll on BOTH Element (CathodeDomNode.cpp) and Document (CathodeDomDocument.cpp) calls this —
+// one marshaling, no duplication. Defined in CathodeDomNode.cpp. Not exported (same-module use only).
+JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArray<const IMatchableNode*>& Matches);
+
 // Construct a DOM document over 007's runtime/registry (for wrapping + lifetime) and 005's layout engine
 // (for the handshake). Composes the siblings; stands up no second runtime, builds no layout. (Body Slice 2+.)
 // The optional Selector arg (012) installs the matcher service so node/document querySelector works; defaulted null

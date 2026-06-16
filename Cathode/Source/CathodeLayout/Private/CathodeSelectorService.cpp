@@ -296,8 +296,53 @@ public:
 		return ESelectorStatus::NoMatch;
 	}
 
-	// querySelectorAll / matches / closest fold in here over the SAME ParseAndValidate + MatchChain primitive when
-	// the contract confirms the trio (compose-not-duplicate) — held out now to avoid unbound surface.
+	// --- The TRIO over the SAME ParseAndValidate + MatchChain primitive (compose-not-duplicate) ---
+
+	virtual ESelectorStatus QueryAll(const IMatchableNode& Root, bool bIncludeRoot, const FString& Selector,
+		TArray<const IMatchableNode*>& OutMatches) const override
+	{
+		OutMatches.Reset();
+		litehtml::css_selector Parsed;
+		if (!ParseAndValidate(Selector, Parsed))
+		{
+			return ESelectorStatus::InvalidSelector;
+		}
+		WalkScope(Root, bIncludeRoot, Parsed, /*bFirstOnly*/ false, OutMatches); // all matches, pre-order
+		return OutMatches.Num() > 0 ? ESelectorStatus::Matched : ESelectorStatus::NoMatch;
+	}
+
+	virtual ESelectorStatus Matches(const IMatchableNode& Node, const FString& Selector, bool& bOutMatches) const override
+	{
+		bOutMatches = false;
+		litehtml::css_selector Parsed;
+		if (!ParseAndValidate(Selector, Parsed))
+		{
+			return ESelectorStatus::InvalidSelector;
+		}
+		bOutMatches = MatchChain(Node, Parsed); // the primitive tested on Node itself
+		return bOutMatches ? ESelectorStatus::Matched : ESelectorStatus::NoMatch;
+	}
+
+	virtual ESelectorStatus Closest(const IMatchableNode& Node, const FString& Selector,
+		const IMatchableNode*& OutMatch) const override
+	{
+		OutMatch = nullptr;
+		litehtml::css_selector Parsed;
+		if (!ParseAndValidate(Selector, Parsed))
+		{
+			return ESelectorStatus::InvalidSelector;
+		}
+		// Node-or-ancestor (INCLUDES self), nearest first, walking up the real parent chain.
+		for (const IMatchableNode* Cur = &Node; Cur != nullptr; Cur = Cur->GetMatchParent())
+		{
+			if (MatchChain(*Cur, Parsed))
+			{
+				OutMatch = Cur;
+				return ESelectorStatus::Matched;
+			}
+		}
+		return ESelectorStatus::NoMatch;
+	}
 
 private:
 	static bool ParseAndValidate(const FString& Selector, litehtml::css_selector& OutParsed)

@@ -1035,7 +1035,77 @@ JSValue QuerySelectorThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSVal
 	}
 	return JS_NULL;
 }
+
+// querySelectorAll (Element): ALL matching DESCENDANTS (exclude-self) in pre-order -> a STATIC NodeList snapshot.
+// Same matcher + invalid-selector contract as querySelector; empty list (not null) when nothing matches.
+JSValue QuerySelectorAllThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "querySelectorAll expects a selector string"); }
+	FDomDocument* Doc = Self->GetOwningDocument();
+	const ISelectorService* Service = (Doc != nullptr) ? Doc->GetSelectorService() : nullptr;
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "querySelectorAll: no selector service installed"); }
+	TArray<const IMatchableNode*> Matches;
+	const ESelectorStatus Status = Service->QueryAll(*Self, /*bIncludeRoot*/ false, Selector, Matches);
+	if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "querySelectorAll: invalid or unsupported selector"); }
+	return MarshalMatchListToNodeList(Ctx, Doc, Matches);
+}
+
+// matches (Element): does THIS element match the selector (the primitive tested on self) -> boolean.
+JSValue MatchesThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "matches expects a selector string"); }
+	FDomDocument* Doc = Self->GetOwningDocument();
+	const ISelectorService* Service = (Doc != nullptr) ? Doc->GetSelectorService() : nullptr;
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "matches: no selector service installed"); }
+	bool bMatches = false;
+	const ESelectorStatus Status = Service->Matches(*Self, Selector, bMatches);
+	if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "matches: invalid or unsupported selector"); }
+	return MarshalBool(Ctx, bMatches).Release();
+}
+
+// closest (Element): nearest of self-or-ANCESTOR matching the selector (INCLUDES self, unlike querySelector), or null.
+JSValue ClosestThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "closest expects a selector string"); }
+	FDomDocument* Doc = Self->GetOwningDocument();
+	const ISelectorService* Service = (Doc != nullptr) ? Doc->GetSelectorService() : nullptr;
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "closest: no selector service installed"); }
+	const IMatchableNode* Match = nullptr;
+	const ESelectorStatus Status = Service->Closest(*Self, Selector, Match);
+	if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "closest: invalid or unsupported selector"); }
+	if (Status == ESelectorStatus::Matched && Match != nullptr)
+	{
+		return MarshalNode(Ctx, Doc, static_cast<const FDomNode*>(Match)->GetNodeId());
+	}
+	return JS_NULL;
+}
 } // namespace
+
+// Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
+// (=== identity), reusing the slice-2 MarshalNodeList recipe. querySelectorAll on Element + Document both call this
+// (compose-not-duplicate). The snapshot is inherently static — it captures the wrappers now; later DOM mutations do
+// not alter a returned list.
+JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArray<const IMatchableNode*>& Matches)
+{
+	TArray<FJsValue> Wrappers;
+	Wrappers.Reserve(Matches.Num());
+	for (const IMatchableNode* Match : Matches)
+	{
+		if (Match == nullptr || Doc == nullptr) { continue; }
+		FJsValue Wrapper = Doc->GetWrapperForNode(static_cast<const FDomNode*>(Match)->GetNodeId());
+		if (Wrapper.IsValid()) { Wrappers.Add(MoveTemp(Wrapper)); }
+	}
+	return MarshalNodeList(Ctx, Wrappers).Release();
+}
 
 // Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
 // getter-shaped; the reinterpret_cast into JSCFunction* is the quickjs idiom (JS_NewCFunction2 dispatches on the
@@ -1125,6 +1195,10 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_METHOD_FN("dispatchEvent", "EventTarget", "margin", "(event: Event) -> boolean", DispatchEventThunk),
 	// Element — selectors (sprint 012): querySelector scopes to descendants (exclude-self), first match in pre-order.
 	CATHODE_BIND_METHOD_FN("querySelector", "Element", "required", "(selectors: string) -> Element | null", QuerySelectorThunk),
+	// Element — the selector TRIO over the SAME matcher: all-vs-first (static NodeList) / self-bool / ancestor-or-self.
+	CATHODE_BIND_METHOD_FN("querySelectorAll", "Element", "margin", "(selectors: string) -> NodeList", QuerySelectorAllThunk),
+	CATHODE_BIND_METHOD_FN("matches", "Element", "margin", "(selectors: string) -> boolean", MatchesThunk),
+	CATHODE_BIND_METHOD_FN("closest", "Element", "margin", "(selectors: string) -> Element | null", ClosestThunk),
 };
 
 #undef CATHODE_BIND_GETTER

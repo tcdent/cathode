@@ -63,9 +63,21 @@ public:
 	virtual ESelectorStatus QueryFirst(const IMatchableNode& Root, bool bIncludeRoot, const FString& Selector,
 		const IMatchableNode*& OutMatch) const = 0;
 
-	// NOTE: querySelectorAll / matches / closest (the TRIO) extend THIS interface over the SAME parsed-selector +
-	// match primitive (compose-not-duplicate) when the contract confirms — added with their bindings + proof so the
-	// matcher is never re-opened. Held out here only to avoid unbound/unproven surface ahead of that confirm.
+	// The TRIO (querySelectorAll / matches / closest) — composed over the SAME ParseAndValidate + match primitive
+	// as QueryFirst (one matcher, all shapes; NOT a matcher-per-shape). Same scoping rules + InvalidSelector contract.
+
+	// ALL elements matching Selector in PRE-ORDER (querySelectorAll). Scoping mirrors QueryFirst (bIncludeRoot).
+	// The caller snapshots OutMatches into a STATIC NodeList (a later mutation does not change a captured list).
+	virtual ESelectorStatus QueryAll(const IMatchableNode& Root, bool bIncludeRoot, const FString& Selector,
+		TArray<const IMatchableNode*>& OutMatches) const = 0;
+
+	// Does Node ITSELF match Selector (Element.matches) — the match primitive tested on Node, no tree walk.
+	virtual ESelectorStatus Matches(const IMatchableNode& Node, const FString& Selector, bool& bOutMatches) const = 0;
+
+	// Nearest of Node-or-ANCESTOR matching Selector (Element.closest — INCLUDES self, distinct from querySelector's
+	// exclude-self), walking UP; OutMatch null if none.
+	virtual ESelectorStatus Closest(const IMatchableNode& Node, const FString& Selector,
+		const IMatchableNode*& OutMatch) const = 0;
 };
 
 // The production matcher (litehtml-backed parse + live-tree match). Stateless + container-free — it needs no

@@ -343,6 +343,26 @@ JSValue DocQuerySelectorThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JS
 	return JS_NULL;
 }
 
+// querySelectorAll(selectors) -> ALL elements in the WHOLE tree (pre-order) matching the selector -> a STATIC
+// NodeList snapshot (the SAME marshaling as Element.querySelectorAll). Document scope = root element + descendants.
+JSValue DocQuerySelectorAllThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Selector;
+	if (Argc < 1 || !UnmarshalString(Ctx, Argv[0], Selector)) { return JS_ThrowTypeError(Ctx, "querySelectorAll expects a selector string"); }
+	const ISelectorService* Service = Self->GetSelectorService();
+	if (Service == nullptr) { return JS_ThrowInternalError(Ctx, "querySelectorAll: no selector service installed"); }
+	TArray<const IMatchableNode*> Matches;
+	const FDomNode* Root = Self->FindNode(Self->GetRootNodeId());
+	if (Root != nullptr)
+	{
+		const ESelectorStatus Status = Service->QueryAll(*Root, /*bIncludeRoot*/ true, Selector, Matches);
+		if (Status == ESelectorStatus::InvalidSelector) { return JS_ThrowSyntaxError(Ctx, "querySelectorAll: invalid or unsupported selector"); }
+	}
+	return MarshalMatchListToNodeList(Ctx, Self, Matches); // empty document / no match -> empty NodeList
+}
+
 // createElement(localName) -> a real element wrapper (the existing C++ factory).
 JSValue DocCreateElementThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
@@ -383,6 +403,7 @@ static const FBoundMember GDomDocumentMembers[] =
 {
 	CATHODE_BIND_DOC_METHOD("getElementById",  "Document", "required", "(elementId: string) -> Element | null", DocGetElementByIdThunk),
 	CATHODE_BIND_DOC_METHOD("querySelector",   "Document", "required", "(selectors: string) -> Element | null", DocQuerySelectorThunk),
+	CATHODE_BIND_DOC_METHOD("querySelectorAll","Document", "margin",   "(selectors: string) -> NodeList", DocQuerySelectorAllThunk),
 	CATHODE_BIND_DOC_METHOD("createElement",   "Document", "margin",   "(localName: string) -> Element", DocCreateElementThunk),
 	CATHODE_BIND_DOC_METHOD("createTextNode",  "Document", "required", "(data: string) -> Text", DocCreateTextNodeThunk),
 	CATHODE_BIND_DOC_METHOD("createElementNS", "Document", "required", "(namespace: string | null, qualifiedName: string) -> Element", DocCreateElementNSThunk),

@@ -141,4 +141,105 @@ bool FCathodeDomQuerySelectorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Sprint 012 selectors TRIO — querySelectorAll / matches / closest over the SAME shipped matcher (the floor's
+// ParseAndValidate + MatchChain; compose-not-duplicate — one service drives all four shapes). Proves: all-matches
+// pre-order + the STATIC-snapshot discriminator (capture a list, mutate the tree, the captured list is UNCHANGED);
+// matches(self) bool; closest INCLUDES-self (distinct from querySelector's exclude-self) + ancestor-walk + null;
+// invalid -> SyntaxError carries. Same tree as the floor: .item at b, d, f (pre-order); f outside a's subtree.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomSelectorTrioTest,
+	"Cathode.Dom.Selector.Trio",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomSelectorTrioTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<ISelectorService> Service = CreateSelectorService();
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout, Service.Get());
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	Doc->InstallAsGlobal();
+
+	FDomNode* Html = Doc->FindNode(Doc->GetRootNodeId());
+	auto MakeEl = [&](const TCHAR* Tag, FDomNode* Parent, TFunction<void(FDomNode&)> Init) -> FJsValue
+	{
+		FJsValue W = Doc->CreateElement(Tag);
+		FDomNode* N = Doc->NodeFromWrapper(W);
+		Init(*N);
+		if (Parent != nullptr) { Parent->AppendChild(W); }
+		return W;
+	};
+	FJsValue RootW = MakeEl(TEXT("div"), Html, [](FDomNode& N){ N.SetAttribute(TEXT("id"), TEXT("root")); });
+	FDomNode* Root = Doc->NodeFromWrapper(RootW);
+	FJsValue AW = MakeEl(TEXT("section"), Root, [](FDomNode& N){ N.SetAttribute(TEXT("class"), TEXT("outer")); });
+	FDomNode* A = Doc->NodeFromWrapper(AW);
+	FJsValue BW = MakeEl(TEXT("p"), A, [](FDomNode& N){ N.SetAttribute(TEXT("class"), TEXT("item")); N.SetAttribute(TEXT("id"), TEXT("first")); });
+	FDomNode* B = Doc->NodeFromWrapper(BW);
+	FJsValue CW = MakeEl(TEXT("span"), B, [](FDomNode& N){ N.SetAttribute(TEXT("data-x"), TEXT("1")); });
+	FJsValue DW = MakeEl(TEXT("p"), A, [](FDomNode& N){ N.SetAttribute(TEXT("class"), TEXT("item")); });
+	FJsValue EW = MakeEl(TEXT("footer"), Root, [](FDomNode&){});
+	FDomNode* E = Doc->NodeFromWrapper(EW);
+	FJsValue FW = MakeEl(TEXT("span"), E, [](FDomNode& N){ N.SetAttribute(TEXT("class"), TEXT("item")); });
+
+	JSValue Global = JS_GetGlobalObject(Context);
+	auto Expose = [&](const char* Name, const FJsValue& W) { JS_SetPropertyStr(Context, Global, Name, JS_DupValue(Context, W.GetValue())); };
+	Expose("__root", RootW); Expose("__a", AW); Expose("__b", BW); Expose("__c", CW); Expose("__d", DW); Expose("__e", EW); Expose("__f", FW);
+	JS_FreeValue(Context, Global);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { JS_FreeValue(Context, R); AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); return false; }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+
+	// --- querySelectorAll: a NodeList of ALL matches in pre-order; scoping mirrors querySelector ---
+	TestTrue(TEXT("querySelectorAll returns a NodeList"), EvalBool("document.querySelectorAll('.item') instanceof NodeList"));
+	TestTrue(TEXT("document.querySelectorAll('.item') = [b,d,f] in pre-order"),
+		EvalBool("(function(){ var l = document.querySelectorAll('.item'); return l.length === 3 && l[0] === __b && l[1] === __d && l[2] === __f; })()"));
+	TestTrue(TEXT("element scope + exclude-self: a.querySelectorAll('.item') = [b,d] (f is outside a)"),
+		EvalBool("(function(){ var l = __a.querySelectorAll('.item'); return l.length === 2 && l[0] === __b && l[1] === __d; })()"));
+	TestTrue(TEXT("no-match querySelectorAll -> empty NodeList (length 0, not null)"),
+		EvalBool("(function(){ var l = document.querySelectorAll('.nonexistent'); return (l instanceof NodeList) && l.length === 0; })()"));
+
+	// --- STATIC-SNAPSHOT discriminator: a captured list does NOT change when the tree mutates after capture ---
+	TestTrue(TEXT("querySelectorAll is a STATIC snapshot: captured list unchanged after a later mutation; re-query reflects it"),
+		EvalBool("(function(){"
+			"  var captured = document.querySelectorAll('.item');"      // capture: b,d,f -> length 3
+			"  var before = captured.length;"
+			"  var g = document.createElement('p'); g.setAttribute('class','item'); __root.appendChild(g);" // mutate: add a 4th .item
+			"  var stillCaptured = captured.length;"                    // the CAPTURED list is UNCHANGED (static)
+			"  var requeried = document.querySelectorAll('.item').length;" // a fresh query SEES the mutation
+			"  return before === 3 && stillCaptured === 3 && requeried === 4;"
+			"})()"));
+
+	// --- matches(self): the primitive tested on the element itself -> bool ---
+	TestTrue(TEXT("matches: b.matches('.item') true; b.matches('#first') true; b.matches('p.item') true"),
+		EvalBool("__b.matches('.item') && __b.matches('#first') && __b.matches('p.item')"));
+	TestTrue(TEXT("matches: b.matches('span') false; b.matches('div') false (b is a p)"),
+		EvalBool("!__b.matches('span') && !__b.matches('div')"));
+	TestTrue(TEXT("matches: invalid selector -> SyntaxError"),
+		EvalBool("(function(){ try { __b.matches('>>>'); return false; } catch(e){ return e instanceof SyntaxError; } })()"));
+
+	// --- closest: nearest of self-or-ANCESTOR (INCLUDES self, distinct from querySelector's exclude-self), or null ---
+	TestTrue(TEXT("closest INCLUDES self: b.closest('.item') === b (self matches)"), EvalBool("__b.closest('.item') === __b"));
+	TestTrue(TEXT("closest INCLUDES self: b.closest('p') === b"), EvalBool("__b.closest('p') === __b"));
+	TestTrue(TEXT("closest ancestor-walk: c.closest('.item') === b (nearest matching ancestor)"), EvalBool("__c.closest('.item') === __b"));
+	TestTrue(TEXT("closest ancestor-walk: c.closest('section') === a"), EvalBool("__c.closest('section') === __a"));
+	TestTrue(TEXT("closest ancestor-walk: c.closest('#root') === root"), EvalBool("__c.closest('#root') === __root"));
+	TestTrue(TEXT("closest no-match -> null"), EvalBool("__c.closest('.nonexistent') === null"));
+
+	// One matcher drives all four shapes (querySelector floor + this trio) via the ONE CathodeLayout service —
+	// compose-not-duplicate is structural (a single ISelectorService over the shared ParseAndValidate + MatchChain).
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
