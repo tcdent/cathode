@@ -51,12 +51,20 @@ proves the real mechanism instead). **Justification is TOPOLOGY-DEPENDENT:** `no
 (`CathodeDom.h`) **and no event API is bound to JS**, so nothing reachable from the document wrapper holds an
 **owning JS ref back to it** → no JS-GC cycle through the wrapper for a gc_mark to collect.
 
-> **Carry-not-rediscover — the PRECISE re-introduction trigger:** binding the **event API
-> (`addEventListener`/`dispatchEvent`) to JS**, where a listener can close over the document wrapper, creates the
-> cycle `document-wrapper → RootWrapper → … → node → listener → document-wrapper`. **When the event API is bound
-> to JS (a future slice), RE-EVALUATE: `document.gc_mark` likely RETURNS, with a discriminating reclaim test for
-> THAT cycle.** Do NOT inherit "gc_mark removed as redundant" blindly — the removal is justified by *today's*
-> topology, not a general rule.
+> **Carry-not-rediscover — the event API binding INVERTS the S5 prediction (sprint 012 events, browse-design-ruled
+> + review's blind re-derivation converged).** The event API IS now bound to JS, and a listener CAN close over the
+> document wrapper — the cycle `document-wrapper → RootWrapper → … → node → listener → document-wrapper` is
+> formable. **But `document.gc_mark` STAYS REMOVED, and re-adding it is UNSAFE (a UAF) under the current
+> C++-owned / null-finalizer model.** Re-adding gc_mark mis-attributes the C++-EXTERNAL `RootWrapper` owning ref
+> as an IN-GRAPH edge; once a listener cycle exists, the cycle collector would free the C++-OWNED root out from
+> under the live `RootWrapper` → the owning ref dangles → use-after-free (the premature-collection hazard S5's
+> review retracted *because there was no cycle then*; the event API re-introduces the cycle, which makes re-add
+> UNSAFE, NOT needed). The SAFE/shipped behavior: the listener cycle is benignly over-retained (the document
+> wrapper's lifetime extends to `Dispose`); reclaim is `Dispose` + the node `gc_mark`/T4. `document.gc_mark`
+> becomes safe + load-bearing ONLY under a full **ownership-model change** (make `RootWrapper` an in-graph edge +
+> a non-null finalizer that owns the document) — a separate REDESIGN, not the event trigger. **Carry-not-rediscover:
+> the next author inherits `document.gc_mark` UNSAFE-to-re-add under this model.** (Demonstrated: the events slice's
+> node↔listener JS-closure reclaim test + the listener→document benign-over-retention test.)
 
 ## Covered
 

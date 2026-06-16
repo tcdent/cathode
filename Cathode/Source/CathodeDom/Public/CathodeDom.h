@@ -32,6 +32,8 @@ namespace Cathode
 // A DOM node id — int32, matching 005's ILayoutDocumentSource node-id space (the DOM IS the source 005 reads).
 using FDomNodeId = int32;
 
+class FDomDocument; // forward — FDomEvent carries a non-owning back-ref so target/currentTarget marshal to wrappers
+
 // One registered quickjs class covers both kinds (element + text node) — Text nodes ignore element-only ops.
 enum class EDomNodeType : uint8
 {
@@ -45,8 +47,9 @@ enum class EDomNodeType : uint8
 // KeyboardEvent{key,code}.
 enum class EDomEventPhase : uint8
 {
+	Capturing, // sprint 012 events: the capture phase (ancestors, top-down) before the target
 	AtTarget,
-	Bubbling, // capture phase deferred
+	Bubbling,
 };
 
 struct FDomEvent
@@ -58,6 +61,8 @@ struct FDomEvent
 	bool bBubbles = true;
 	bool bDefaultPrevented = false;        // preventDefault() set this
 	bool bPropagationStopped = false;      // stopPropagation() set this (ends bubbling)
+	FDomDocument* Document = nullptr;      // sprint 012 events: non-owning — set by the dispatch so the JS event
+	                                       // object's target/currentTarget getters resolve node wrappers (S2 marshaler)
 };
 
 // The frozen KeyboardEvent — the base Event plus { key, code } (keyboard is the live input path).
@@ -74,6 +79,15 @@ struct FDomKeyboardEvent
 // preventDefault (by setting the Event flags), so the dispatch ALGORITHM is testable in C++ without the
 // deferred Event-object exposure.
 using FDomListenerInvoker = TFunction<void(const FJsValue& ListenerFn, FDomEvent& Event)>;
+
+// A registered listener (sprint 012 events): the HELD JS function (owning FJsValue — gc_mark-marked, the
+// node<->listener cycle visibility) keyed by (type, capture). removeEventListener matches the full triple.
+struct FDomEventListener
+{
+	FString Type;
+	FJsValue Listener;
+	bool bCapture = false;
+};
 
 // --- The DOM node ---
 //
@@ -129,9 +143,16 @@ public:
 	// directly gc_mark-markable (the node<->listener cycle is THE Model-A hazard) and identity-matchable for
 	// removal — 007's FCallableHandle hides its function and 007 is frozen, so the listener is held as FJsValue
 	// and FCallableHandle is used transiently for INVOCATION. removeEventListener = the reference-DROP.
-	void AddEventListener(const FString& EventType, FJsValue Listener);
-	void RemoveEventListener(const FString& EventType, JSValueConst ListenerFn); // match by JS fn identity; reference-drop
-	void DispatchEvent(FDomEvent& Event);             // production: invoke via 007 FCallableHandle (event arg deferred)
+	// Sprint 012 events: (type, fn, capture) — the listener is keyed by the (type, capture) tuple + fn identity.
+	// DOM DEDUP: adding the same (type, fn, capture) triple twice registers ONCE. removeEventListener removes the
+	// matching triple only (SameJsObject(fn) AND type AND capture); a mismatch on ANY of the three is a no-op.
+	void AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture = false);
+	void RemoveEventListener(const FString& EventType, JSValueConst ListenerFn, bool bCapture = false);
+	// Dispatch through the live shared event: capture (ancestors top-down) -> AtTarget -> bubble (ancestors
+	// bottom-up); the (type,capture) tuple selects which listeners fire per phase. The Invoker is handed the live
+	// shared Event each step (currentTarget/phase advance; preventDefault/stopPropagation mutate it).
+	void DispatchEvent(FDomEvent& Event);             // production: build the JS Event object + invoke via 007 FCallableHandle
+	void DispatchKeyboardEvent(FDomKeyboardEvent& Event); // production: a KeyboardEvent object (key/code) over the base
 	void DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker); // the testable dispatch algorithm
 
 	// Observation reads (Slice 5) — OFF the author surface (not in the .d.ts, no flag); backed by 005.
@@ -174,7 +195,7 @@ private:
 	FDomNodeId ParentId = INDEX_NONE;  // NON-OWNING parent back-ref (resolved via the index)
 	TArray<FJsValue> Children;         // OWNING JS refs to child WRAPPERS (Model A; gc_mark-marked) — NOT FDomNode*
 	TMap<FString, FString> Attributes; // plain STRING data (the bounded surface is string-valued) — NOT held JS refs
-	TArray<TPair<FString, FJsValue>> Listeners; // (type, held JS function) — HELD JS refs, gc_mark-marked (the
+	TArray<FDomEventListener> Listeners;        // (type, held JS function, capture) — HELD JS refs, gc_mark-marked (the
 	                                            // node<->listener cycle, THE Model-A hazard); FreeRT'd in the finalizer
 
 	// Sprint 012 slice 2: a NON-OWNING (borrowed, never JS_DupValue'd) reverse-lookup ref to THIS node's OWN
@@ -299,6 +320,18 @@ CATHODEDOM_API JSClassID RegisterDomDocumentClass(INativeClassRegistry& Registry
 // The FDomDocument declared-member DESCRIPTOR, emitted from GDomDocumentMembers via the SAME
 // EnumerateBoundMembersJson (the 011<->012 lockstep, PER CLASS — reconciled vs the live document proto).
 CATHODEDOM_API FString GetDomDocumentDescriptorJson();
+
+// Register the Event + KeyboardEvent JS classes (sprint 012 events) — NEW bound classes via the SAME mechanism
+// (GEventMembers / GKeyboardEventMembers through InstallBoundMembers, crit-1). The dispatch wraps the live shared
+// FDomEvent in an Event object passed to listeners. CreateDomDocument calls this; the optional out-params hand
+// back the class ids (the lockstep test builds the Event/KeyboardEvent proto probes from them).
+CATHODEDOM_API void RegisterDomEventClasses(INativeClassRegistry& Registry, JSContext* Context,
+	JSClassID* OutEventClassId = nullptr, JSClassID* OutKeyboardEventClassId = nullptr);
+
+// The Event + KeyboardEvent declared-member DESCRIPTORS, from their tables via EnumerateBoundMembersJson (the
+// lockstep, per class — reconciled vs the live Event / KeyboardEvent protos).
+CATHODEDOM_API FString GetDomEventDescriptorJson();
+CATHODEDOM_API FString GetDomKeyboardEventDescriptorJson();
 
 // Construct a DOM document over 007's runtime/registry (for wrapping + lifetime) and 005's layout engine
 // (for the handshake). Composes the siblings; stands up no second runtime, builds no layout. (Body Slice 2+.)

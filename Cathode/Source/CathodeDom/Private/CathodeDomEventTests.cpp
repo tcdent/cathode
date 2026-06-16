@@ -556,4 +556,425 @@ bool FCathodeDomReflectedPropTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// =====================================================================================================================
+// Sprint 012 events (the event mechanism) — DISPATCH-CORRECTNESS through the REAL JS bindings.
+//
+// The 008 tests above drive the C++ DispatchEvent algorithm with a recording INVOKER (the marshaling was deferred).
+// These NEW tests drive the WHOLE path: real JS listeners installed via the bound addEventListener, fired by a
+// C++-synthetic keydown (the production DispatchKeyboardEvent that builds the LIVE shared Event object), asserting
+// the marshaled Event surface (type/target/currentTarget/eventPhase/key/code/isExtensible) and the exact ordering.
+// =====================================================================================================================
+
+// PROOF 1 — exact firing order + the live-shared, extensible Event object. A 3-level tree (gp > p > target);
+// capture + bubble listeners at every level; AtTarget has TWO listeners (registration order). One synthetic keydown
+// at the target. Asserts: order = [gp-cap, p-cap, t1, t2, p-bub, gp-bub]; currentTarget ADVANCES per node (===
+// identity); target STAYS the dispatch target; eventPhase tracks 1/2/3; e.key/e.code marshal; isExtensible===true.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomEventJsDispatchTest,
+	"Cathode.Dom.Event.JsDispatchOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomEventJsDispatchTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	FJsValue GpW = Doc->CreateElement(TEXT("gp"));
+	FJsValue PW = Doc->CreateElement(TEXT("p"));
+	FJsValue TW = Doc->CreateElement(TEXT("target"));
+	FDomNode* Gp = Doc->NodeFromWrapper(GpW);
+	FDomNode* P = Doc->NodeFromWrapper(PW);
+	FDomNode* T = Doc->NodeFromWrapper(TW);
+	Gp->AppendChild(PW);
+	P->AppendChild(TW);
+
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__gp", JS_DupValue(Context, GpW.GetValue()));
+	JS_SetPropertyStr(Context, Global, "__p", JS_DupValue(Context, PW.GetValue()));
+	JS_SetPropertyStr(Context, Global, "__t", JS_DupValue(Context, TW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	// Each listener records its tag (order) + a SNAPSHOT of the live event read THROUGH the bound getters.
+	const char* Setup =
+		"globalThis.order = [];"
+		"globalThis.cap = {};"
+		"function rec(tag){ return function(e){"
+		"  globalThis.order.push(tag);"
+		"  globalThis.cap[tag] = { ctIsGp: e.currentTarget===__gp, ctIsP: e.currentTarget===__p,"
+		"    ctIsT: e.currentTarget===__t, tgtIsT: e.target===__t, phase: e.eventPhase, type: e.type,"
+		"    key: e.key, code: e.code, ext: Object.isExtensible(e) };"
+		"};}"
+		"__gp.addEventListener('keydown', rec('gp-cap'), true);"
+		"__p.addEventListener('keydown', rec('p-cap'), true);"
+		"__t.addEventListener('keydown', rec('t1'), false);"
+		"__t.addEventListener('keydown', rec('t2'), false);"
+		"__p.addEventListener('keydown', rec('p-bub'), false);"
+		"__gp.addEventListener('keydown', rec('gp-bub'), false);";
+	{
+		JSValue R = Eval(Context, Setup);
+		const bool bThrew = JS_IsException(R);
+		JS_FreeValue(Context, R);
+		if (bThrew) { AddError(TEXT("listener setup threw")); return false; }
+	}
+
+	// THE PRIMITIVE: a C++-synthetic keydown at the target (production KeyboardEvent path → live Event object).
+	FDomKeyboardEvent Kbd;
+	Kbd.Event.Type = TEXT("keydown");
+	Kbd.Event.bBubbles = true;
+	Kbd.Key = TEXT("Enter");
+	Kbd.Code = TEXT("Enter");
+	T->DispatchKeyboardEvent(Kbd);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+	auto EvalStr = [&](const char* Expr) -> FString
+	{
+		JSValue R = Eval(Context, Expr);
+		FString S;
+		UnmarshalString(Context, R, S);
+		JS_FreeValue(Context, R);
+		return S;
+	};
+
+	// EXACT phase order: capture top-down (gp,p) → AtTarget reg order (t1,t2) → bubble bottom-up (p,gp).
+	TestEqual(TEXT("exact firing order across capture/AtTarget/bubble"),
+		EvalStr("globalThis.order.join(',')"), FString(TEXT("gp-cap,p-cap,t1,t2,p-bub,gp-bub")));
+
+	// currentTarget ADVANCES per node (=== identity), target STAYS the dispatch target.
+	TestTrue(TEXT("gp capture: currentTarget === gp"), EvalBool("globalThis.cap['gp-cap'].ctIsGp"));
+	TestTrue(TEXT("target: currentTarget === target"), EvalBool("globalThis.cap['t1'].ctIsT"));
+	TestTrue(TEXT("p bubble: currentTarget === p"), EvalBool("globalThis.cap['p-bub'].ctIsP"));
+	TestTrue(TEXT("target stays the target at gp capture"), EvalBool("globalThis.cap['gp-cap'].tgtIsT"));
+	TestTrue(TEXT("target stays the target at gp bubble"), EvalBool("globalThis.cap['gp-bub'].tgtIsT"));
+
+	// eventPhase tracks 1 (capturing) / 2 (AtTarget) / 3 (bubbling).
+	TestTrue(TEXT("eventPhase===1 (capturing) at gp capture"), EvalBool("globalThis.cap['gp-cap'].phase===1"));
+	TestTrue(TEXT("eventPhase===2 (AtTarget) at target"), EvalBool("globalThis.cap['t1'].phase===2"));
+	TestTrue(TEXT("eventPhase===3 (bubbling) at gp bubble"), EvalBool("globalThis.cap['gp-bub'].phase===3"));
+
+	// type + KeyboardEvent key/code marshal; the event object is EXTENSIBLE (a frozen event would REJECT).
+	TestTrue(TEXT("e.type === 'keydown'"), EvalBool("globalThis.cap['t1'].type==='keydown'"));
+	TestTrue(TEXT("e.key === 'Enter' (KeyboardEvent)"), EvalBool("globalThis.cap['t1'].key==='Enter'"));
+	TestTrue(TEXT("e.code === 'Enter' (KeyboardEvent)"), EvalBool("globalThis.cap['t1'].code==='Enter'"));
+	TestTrue(TEXT("Object.isExtensible(event) === true (not frozen)"), EvalBool("globalThis.cap['t1'].ext===true"));
+
+	return true;
+}
+
+// PROOF 2 — LIVE-SHARED stopPropagation (same-node-remaining) + preventDefault, all via the bound methods. The
+// first AtTarget listener calls e.stopPropagation() + e.preventDefault(); the SECOND same-node listener STILL
+// fires and reads e.defaultPrevented===true back off the SAME live object (live-shared); the bubble phase does
+// NOT fire (ascent halted). The C++ event records bPropagationStopped + bDefaultPrevented after dispatch.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomEventJsStopPreventTest,
+	"Cathode.Dom.Event.JsStopAndPrevent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomEventJsStopPreventTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	FJsValue GpW = Doc->CreateElement(TEXT("gp"));
+	FJsValue PW = Doc->CreateElement(TEXT("p"));
+	FJsValue TW = Doc->CreateElement(TEXT("target"));
+	FDomNode* Gp = Doc->NodeFromWrapper(GpW);
+	FDomNode* P = Doc->NodeFromWrapper(PW);
+	FDomNode* T = Doc->NodeFromWrapper(TW);
+	Gp->AppendChild(PW);
+	P->AppendChild(TW);
+
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__gp", JS_DupValue(Context, GpW.GetValue()));
+	JS_SetPropertyStr(Context, Global, "__p", JS_DupValue(Context, PW.GetValue()));
+	JS_SetPropertyStr(Context, Global, "__t", JS_DupValue(Context, TW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	const char* Setup =
+		"globalThis.order = [];"
+		"globalThis.dpSeenByT2 = null;"
+		"__gp.addEventListener('keydown', function(e){ globalThis.order.push('gp-cap'); }, true);"
+		"__p.addEventListener('keydown', function(e){ globalThis.order.push('p-cap'); }, true);"
+		"__t.addEventListener('keydown', function(e){ globalThis.order.push('t1'); e.stopPropagation(); e.preventDefault(); }, false);"
+		"__t.addEventListener('keydown', function(e){ globalThis.order.push('t2'); globalThis.dpSeenByT2 = e.defaultPrevented; }, false);"
+		"__p.addEventListener('keydown', function(e){ globalThis.order.push('p-bub'); }, false);"
+		"__gp.addEventListener('keydown', function(e){ globalThis.order.push('gp-bub'); }, false);";
+	{
+		JSValue R = Eval(Context, Setup);
+		const bool bThrew = JS_IsException(R);
+		JS_FreeValue(Context, R);
+		if (bThrew) { AddError(TEXT("listener setup threw")); return false; }
+	}
+
+	FDomKeyboardEvent Kbd;
+	Kbd.Event.Type = TEXT("keydown");
+	Kbd.Event.bBubbles = true;
+	Kbd.Key = TEXT("Enter");
+	Kbd.Code = TEXT("Enter");
+	T->DispatchKeyboardEvent(Kbd);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+	auto EvalStr = [&](const char* Expr) -> FString
+	{
+		JSValue R = Eval(Context, Expr);
+		FString S;
+		UnmarshalString(Context, R, S);
+		JS_FreeValue(Context, R);
+		return S;
+	};
+
+	// stopPropagation halts the ASCENT but NOT the same-node remaining listener: capture (gp,p) + AtTarget (t1,t2),
+	// then NO bubble. t2 (same node, after t1's stopPropagation) STILL fires.
+	TestEqual(TEXT("stopPropagation halts ascent; same-node remaining still fires"),
+		EvalStr("globalThis.order.join(',')"), FString(TEXT("gp-cap,p-cap,t1,t2")));
+
+	// LIVE-SHARED: t2 read defaultPrevented===true back off the SAME event object t1 mutated.
+	TestTrue(TEXT("t2 sees defaultPrevented===true off the live shared event"), EvalBool("globalThis.dpSeenByT2===true"));
+
+	// The C++ event records both flags after dispatch.
+	TestTrue(TEXT("C++ event: bPropagationStopped after stopPropagation()"), Kbd.Event.bPropagationStopped);
+	TestTrue(TEXT("C++ event: bDefaultPrevented after preventDefault()"), Kbd.Event.bDefaultPrevented);
+
+	return true;
+}
+
+// PROOF 3 — removeEventListener IDENTITY (all 4 cases) + DOM dedup, all via the bound add/remove. The identity key
+// is the (type, fn-object, capture) triple. Each sub-case uses a FRESH element so listener sets never bleed.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomEventJsIdentityTest,
+	"Cathode.Dom.Event.RemoveListenerIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomEventJsIdentityTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+
+	// Each case: a fresh element exposed at the given global; run the add/remove JS; fire a synthetic keydown of
+	// the given type; read the resulting count off globalThis.
+	auto RunCase = [&](const TCHAR* Label, const char* GlobalName, const char* SetupJs, const TCHAR* FireType,
+		const char* CountExpr)
+	{
+		FJsValue ElW = Doc->CreateElement(TEXT("div"));
+		FDomNode* El = Doc->NodeFromWrapper(ElW);
+		JSValue G = JS_GetGlobalObject(Context);
+		JS_SetPropertyStr(Context, G, GlobalName, JS_DupValue(Context, ElW.GetValue()));
+		JS_FreeValue(Context, G);
+		{
+			JSValue R = Eval(Context, SetupJs);
+			if (JS_IsException(R)) { AddError(FString::Printf(TEXT("%s: setup threw"), Label)); }
+			JS_FreeValue(Context, R);
+		}
+		FDomKeyboardEvent Kbd;
+		Kbd.Event.Type = FireType;
+		Kbd.Event.bBubbles = false;
+		Kbd.Key = TEXT("Enter");
+		Kbd.Code = TEXT("Enter");
+		El->DispatchKeyboardEvent(Kbd);
+		TestTrue(Label, EvalBool(CountExpr)); // the expected count is encoded in CountExpr (=== N)
+	};
+
+	// CASE 1 (positive triple) — add F(type x, capture false), remove the SAME triple → F gone → 0 fires.
+	RunCase(TEXT("positive: matching (type,fn,capture) removed → 0 fires"), "__e1",
+		"globalThis.c1=0; var F1=function(){globalThis.c1++;};"
+		"__e1.addEventListener('x', F1, false); __e1.removeEventListener('x', F1, false);",
+		TEXT("x"), "globalThis.c1===0");
+
+	// CASE 2 (capture mismatch) — added with capture=false, removed with capture=TRUE → NO-OP → 1 fire.
+	RunCase(TEXT("capture mismatch: removeEventListener is a NO-OP → 1 fire"), "__e2",
+		"globalThis.c2=0; var F2=function(){globalThis.c2++;};"
+		"__e2.addEventListener('x', F2, false); __e2.removeEventListener('x', F2, true);",
+		TEXT("x"), "globalThis.c2===1");
+
+	// CASE 3 (type mismatch) — added on 'x', removed on 'y' → NO-OP → 1 fire on 'x'.
+	RunCase(TEXT("type mismatch: removeEventListener is a NO-OP → 1 fire"), "__e3",
+		"globalThis.c3=0; var F3=function(){globalThis.c3++;};"
+		"__e3.addEventListener('x', F3, false); __e3.removeEventListener('y', F3, false);",
+		TEXT("x"), "globalThis.c3===1");
+
+	// CASE 4 (fn mismatch) — added F, removed a DIFFERENT fn G (same type+capture) → NO-OP → F fires → 1.
+	RunCase(TEXT("fn mismatch: removeEventListener is a NO-OP → 1 fire"), "__e4",
+		"globalThis.c4=0; var F4=function(){globalThis.c4++;}; var G4=function(){};"
+		"__e4.addEventListener('x', F4, false); __e4.removeEventListener('x', G4, false);",
+		TEXT("x"), "globalThis.c4===1");
+
+	// DEDUP — the SAME (type,fn,capture) triple added TWICE registers ONCE → 1 fire (DOM dedup).
+	RunCase(TEXT("dedup: same triple added twice fires ONCE"), "__e5",
+		"globalThis.c5=0; var F5=function(){globalThis.c5++;};"
+		"__e5.addEventListener('x', F5, false); __e5.addEventListener('x', F5, false);",
+		TEXT("x"), "globalThis.c5===1");
+
+	// DISTINCT-CAPTURE NOT DEDUP — same (type,fn) but DIFFERENT capture are TWO listeners → both fire (one in
+	// capture phase, one in bubble) → 2. (Guards that dedup keys on capture too, not just type+fn.)
+	RunCase(TEXT("distinct capture is NOT dedup: both fire → 2"), "__e6",
+		"globalThis.c6=0; var F6=function(){globalThis.c6++;};"
+		"__e6.addEventListener('x', F6, true); __e6.addEventListener('x', F6, false);",
+		TEXT("x"), "globalThis.c6===2");
+
+	return true;
+}
+
+// PROOF 4a (gc_mark fold-in) — a REAL JS listener installed via addEventListener that CLOSES OVER its own node
+// wrapper forms the node↔listener cycle ENTIRELY through the bound API (distinct from the C++-seam JS_SetPropertyStr
+// cycle in FCathodeDomCyclicGcReclaimTest — NOT "covered by T4"). The node is standalone (NOT in the document graph),
+// so once every external handle is dropped only the cycle holds the wrapper; a single real JS_RunGC RECLAIMS it
+// (FindNode 1→0). This is the node gc_mark reporting the listener edge → the cycle collector frees the cycle.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomEventJsClosureReclaimTest,
+	"Cathode.Dom.Event.JsListenerClosureReclaim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomEventJsClosureReclaimTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	JSRuntime* Rt = JS_GetRuntime(Context);
+
+	FDomNodeId NodeId = INDEX_NONE;
+	{
+		FJsValue NodeW = Doc->CreateElement(TEXT("div"));
+		FDomNode* Node = Doc->NodeFromWrapper(NodeW);
+		if (!Node) { AddError(TEXT("node wrapper did not resolve to a native node")); return false; }
+		NodeId = Node->GetNodeId();
+
+		JSValue Global = JS_GetGlobalObject(Context);
+		JS_SetPropertyStr(Context, Global, "__node", JS_DupValue(Context, NodeW.GetValue()));
+		JS_FreeValue(Context, Global);
+
+		// The listener CLOSES OVER the node wrapper (var n = __node) and is installed via the REAL addEventListener
+		// (the node natively holds it). Then drop the only external handle (globalThis.__node) — the cycle
+		// node-wrapper → native → listener → closure(n) → node-wrapper is all that remains.
+		JSValue R = Eval(Context,
+			"(function(){ var n = __node; __node.addEventListener('click', function(e){ return n; }, false); })();"
+			"delete globalThis.__node;");
+		const bool bThrew = JS_IsException(R);
+		JS_FreeValue(Context, R);
+		if (bThrew) { AddError(TEXT("closure listener setup threw")); return false; }
+	} // NodeW destructs here → only the cycle holds the wrapper
+
+	const bool bLiveBeforeGc = Doc->FindNode(NodeId) != nullptr;
+	TestTrue(TEXT("before GC the addEventListener-closure cycle leaks (refcount cycle)"), bLiveBeforeGc);
+
+	JS_RunGC(Rt);
+
+	const bool bReclaimedAfterGc = Doc->FindNode(NodeId) == nullptr;
+	TestTrue(TEXT("after JS_RunGC the addEventListener-closure cycle is RECLAIMED (node dropped 1→0)"), bReclaimedAfterGc);
+	TestTrue(TEXT("measured reclaim across the real GC (distinct from T4 gc_mark visibility)"),
+		bLiveBeforeGc && bReclaimedAfterGc);
+
+	return true;
+}
+
+// PROOF 4b (gc_mark fold-in) — the SAFE branch that proves document.gc_mark STAYS REMOVED. A node appended to the
+// document graph carries a listener that CLOSES OVER globalThis.document (the listener→document-wrapper cycle the
+// event API makes formable). Dropping globalThis.document while the C++ FDomDocument stays alive does NOT collect
+// the document: the C++-owning RootWrapper (null finalizer, NOT an in-graph gc_mark edge) pins the document graph,
+// so the node SURVIVES the GC (FindNode != null) — benign over-retention, NO premature collection, NO UAF. This is
+// EXACTLY the cycle that, were document.gc_mark (unsafely) re-added, would let the collector free the C++-owned root
+// out from under the live RootWrapper. We assert the safe behavior; we do NOT re-add gc_mark. (COVERAGE.md: the
+// event API INVERTS the S5 prediction — re-add UNSAFE, not needed.)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomEventDocOverRetentionTest,
+	"Cathode.Dom.Event.ListenerDocumentOverRetention",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomEventDocOverRetentionTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	JSRuntime* Rt = JS_GetRuntime(Context);
+
+	Doc->InstallAsGlobal(); // globalThis.document = the doc wrapper (RootWrapper-owned, null finalizer)
+
+	FDomNodeId NodeId = INDEX_NONE;
+	{
+		FJsValue NodeW = Doc->CreateElement(TEXT("div"));
+		FDomNode* Node = Doc->NodeFromWrapper(NodeW);
+		if (!Node) { AddError(TEXT("node wrapper did not resolve to a native node")); return false; }
+		NodeId = Node->GetNodeId();
+
+		// Append to the document root → the C++ RootWrapper graph reaches the node (the over-retention anchor).
+		FDomNode* Root = Doc->FindNode(Doc->GetRootNodeId());
+		if (!Root) { AddError(TEXT("document root did not resolve")); return false; }
+		Root->AppendChild(NodeW);
+
+		JSValue Global = JS_GetGlobalObject(Context);
+		JS_SetPropertyStr(Context, Global, "__node", JS_DupValue(Context, NodeW.GetValue()));
+		JS_FreeValue(Context, Global);
+
+		// Listener closes over globalThis.document → a listener→document-wrapper cycle. Drop BOTH JS handles
+		// (globalThis.document + globalThis.__node) while the C++ FDomDocument (Doc) stays alive.
+		JSValue R = Eval(Context,
+			"(function(){ var d = globalThis.document; __node.addEventListener('click', function(e){ return d; }, false); })();"
+			"delete globalThis.document; delete globalThis.__node;");
+		const bool bThrew = JS_IsException(R);
+		JS_FreeValue(Context, R);
+		if (bThrew) { AddError(TEXT("document-closure listener setup threw")); return false; }
+	}
+
+	JS_RunGC(Rt);
+
+	// SAFE BRANCH: document.gc_mark is REMOVED → the collector does NOT treat the C++-owned root as collectible →
+	// the RootWrapper pins the document graph → the node SURVIVES (no premature collection, no UAF).
+	const bool bSurvives = Doc->FindNode(NodeId) != nullptr;
+	TestTrue(TEXT("listener→document cycle is benignly OVER-RETAINED across GC (root survives, no UAF)"), bSurvives);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

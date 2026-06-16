@@ -410,6 +410,26 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
+	// Sprint 012 events: the 3rd + 4th classes — Event + KeyboardEvent. Same per-class pattern (probe vs descriptor).
+	JSClassID EventClassId = 0;
+	JSClassID KeyboardEventClassId = 0;
+	RegisterDomEventClasses(*Registry, Context, &EventClassId, &KeyboardEventClassId);
+	JSValue EventProto = JS_GetClassProto(Context, EventClassId);
+	JSValue EventProbe = JS_NewObjectProto(Context, EventProto);
+	JS_FreeValue(Context, EventProto);
+	JSValue KeyboardProto = JS_GetClassProto(Context, KeyboardEventClassId);
+	JSValue KeyboardProbe = JS_NewObjectProto(Context, KeyboardProto);
+	JS_FreeValue(Context, KeyboardProto);
+	if (JS_IsException(EventProbe) || JS_IsNull(EventProbe) || JS_IsException(KeyboardProbe) || JS_IsNull(KeyboardProbe))
+	{
+		AddError(TEXT("could not build the Event / KeyboardEvent proto probes (RegisterDomEventClasses)"));
+		JS_FreeValue(Context, NodeProbe);
+		JS_FreeValue(Context, DocProbe);
+		JS_FreeValue(Context, EventProbe);
+		JS_FreeValue(Context, KeyboardProbe);
+		return false;
+	}
+
 	// Drive the faculty with a DECLARED descriptor + the real node probe; read back surface.dom.drift.
 	auto RunReconcile = [&](JSValue Probe, const FString& DescriptorJson, TSet<FString>& OutMissing, TSet<FString>& OutExtra,
 		int32& OutDeclaredCount, int32& OutExposedCount, FString& OutIfaceAxis) -> bool
@@ -564,10 +584,39 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("document A3: nothing extra"), Extra.Num(), 0);
 	}
 
+	// CASES 5-8 (EVENT + KEYBOARDEVENT) — the 3rd + 4th classes reconcile per class (near-empty vs their OWN proto
+	// + a per-class omit-case), no conflation with node/document. The lockstep now spans 4 classes.
+	auto CheckClass = [&](const TCHAR* Label, JSValue Probe, const FString& Descriptor, const FString& BogusName) -> bool
+	{
+		{
+			TSet<FString> Missing, Extra; int32 DeclaredCount = 0, ExposedCount = 0; FString IfaceAxis;
+			if (!RunReconcile(Probe, Descriptor, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis)) { return false; }
+			TestTrue(FString::Printf(TEXT("%s: faculty consumed the descriptor (declaredCount>0)"), Label), DeclaredCount > 0);
+			TestTrue(FString::Printf(TEXT("%s: exposed from the REAL proto (exposedCount>0)"), Label), ExposedCount > 0);
+			TestEqual(FString::Printf(TEXT("%s: near-empty drift — nothing missing (no node/document member leaks in)"), Label), Missing.Num(), 0);
+			TestEqual(FString::Printf(TEXT("%s: near-empty drift — nothing extra"), Label), Extra.Num(), 0);
+		}
+		{
+			const FString BogusEntry = FString::Printf(TEXT(",{\"iface\":\"Event\",\"name\":\"%s\",\"kind\":\"method\"}"), *BogusName);
+			FString WithBogus = Descriptor;
+			WithBogus.ReplaceInline(TEXT("],\"globals\":["), *(BogusEntry + TEXT("],\"globals\":[")));
+			TSet<FString> Missing, Extra; int32 DeclaredCount = 0, ExposedCount = 0; FString IfaceAxis;
+			if (!RunReconcile(Probe, WithBogus, Missing, Extra, DeclaredCount, ExposedCount, IfaceAxis)) { return false; }
+			TestTrue(FString::Printf(TEXT("%s A3: a declared-but-not-installed member drifts MISSING"), Label), Missing.Contains(BogusName));
+			TestEqual(FString::Printf(TEXT("%s A3: ONLY the bogus member is missing"), Label), Missing.Num(), 1);
+			TestEqual(FString::Printf(TEXT("%s A3: nothing extra"), Label), Extra.Num(), 0);
+		}
+		return true;
+	};
+	const bool bEventOk = CheckClass(TEXT("Event"), EventProbe, GetDomEventDescriptorJson(), TEXT("__bogusEvtNotInstalled"));
+	const bool bKeyboardOk = CheckClass(TEXT("KeyboardEvent"), KeyboardProbe, GetDomKeyboardEventDescriptorJson(), TEXT("__bogusKbdNotInstalled"));
+
 	JS_FreeValue(Context, NodeProbe);
 	JS_FreeValue(Context, DocProbe);
+	JS_FreeValue(Context, EventProbe);
+	JS_FreeValue(Context, KeyboardProbe);
 	GVerifyEmittedReports.Reset();
-	return true;
+	return bEventOk && bKeyboardOk;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS

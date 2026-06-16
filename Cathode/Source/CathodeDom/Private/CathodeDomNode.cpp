@@ -31,6 +31,14 @@ FDomNode::FDomNode(FDomDocument& InDocument, FDomNodeId InNodeId, EDomNodeType I
 {
 }
 
+namespace
+{
+// Sprint 012 events: the Event / KeyboardEvent JS class ids, set at RegisterDomEventClasses (below). The dispatch
+// wraps the live FDomEvent in an event object via these; the event member thunks recover the native via them.
+JSClassID GEventClassId = 0;
+JSClassID GKeyboardEventClassId = 0;
+} // namespace
+
 FDomNode::~FDomNode()
 {
 	// Finalizer-driven (FinalizeNativeObject<FDomNode> -> delete), or the document-dtor cascade. De-register
@@ -47,9 +55,9 @@ FDomNode::~FDomNode()
 	{
 		Child.FreeRT(Runtime);
 	}
-	for (TPair<FString, FJsValue>& Listener : Listeners)
+	for (FDomEventListener& Listener : Listeners)
 	{
-		Listener.Value.FreeRT(Runtime);
+		Listener.Listener.FreeRT(Runtime);
 	}
 }
 
@@ -62,9 +70,9 @@ void FDomNode::MarkHeldRefs(JSRuntime* InRuntime, JS_MarkFunc* MarkFunc) const
 	{
 		Child.Mark(InRuntime, MarkFunc);
 	}
-	for (const TPair<FString, FJsValue>& Listener : Listeners)
+	for (const FDomEventListener& Listener : Listeners)
 	{
-		Listener.Value.Mark(InRuntime, MarkFunc);
+		Listener.Listener.Mark(InRuntime, MarkFunc);
 	}
 }
 
@@ -392,65 +400,147 @@ FDomDocument* FDomNode::GetOwningDocument() const
 
 // --- Event system (S6) — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
 
-void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener)
+void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture)
 {
-	// Hold the listener function (a JS ref) keyed by type. gc_mark marks it (cycle visibility); the finalizer
-	// FreeRTs it; removeEventListener drops it.
-	Listeners.Add(TPair<FString, FJsValue>(EventType, MoveTemp(Listener)));
+	// DOM DEDUP: the same (type, fn, capture) triple registers ONCE. Hold the listener function (an OWNING JS ref)
+	// keyed by (type, capture); gc_mark marks it (the node<->listener cycle visibility); the finalizer FreeRTs it;
+	// removeEventListener drops the matching triple.
+	for (const FDomEventListener& Existing : Listeners)
+	{
+		if (Existing.Type == EventType && Existing.bCapture == bCapture
+			&& SameJsObject(Existing.Listener, Listener.GetValue()))
+		{
+			return; // already registered -> no-op (the held Listener arg's destructor frees its ref)
+		}
+	}
+	Listeners.Add(FDomEventListener{ EventType, MoveTemp(Listener), bCapture });
 }
 
-void FDomNode::RemoveEventListener(const FString& EventType, JSValueConst ListenerFn)
+void FDomNode::RemoveEventListener(const FString& EventType, JSValueConst ListenerFn, bool bCapture)
 {
-	// Reference-DROP: remove the (type, fn-by-identity) listener; the removed FJsValue's destructor frees the
-	// held ref (ctx-based — removeEventListener is a normal-op call, runtime alive).
-	Listeners.RemoveAll([&EventType, ListenerFn](const TPair<FString, FJsValue>& Listener)
+	// Reference-DROP: remove the matching (type, fn-by-identity, capture) TRIPLE only — a mismatch on ANY of the
+	// three (different fn, type, OR capture) is a no-op. The removed FJsValue's destructor frees the held ref.
+	Listeners.RemoveAll([&EventType, ListenerFn, bCapture](const FDomEventListener& Listener)
 	{
-		return Listener.Key == EventType && SameJsObject(Listener.Value, ListenerFn);
+		return Listener.Type == EventType && Listener.bCapture == bCapture
+			&& SameJsObject(Listener.Listener, ListenerFn);
 	});
 }
 
 void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker)
 {
-	// The dispatch ALGORITHM: AtTarget (this node), then bubble up the parentNode chain (if Event.bBubbles).
-	// At each node, invoke its type-matching listeners in registration order. stopPropagation halts the ASCENT
-	// (same-node remaining listeners still run, per DOM); preventDefault is a flag the caller reads afterwards.
+	// The dispatch ALGORITHM (extends 008's AtTarget+bubble with the CAPTURE phase): CAPTURE (ancestors top-down,
+	// capture listeners) -> AT-TARGET (the target, ALL its listeners in registration order) -> BUBBLE (ancestors
+	// bottom-up, non-capture listeners, if bBubbles). ONE shared Event walks the tree (CurrentTarget/Phase
+	// advance). The (type, capture) tuple selects per phase. stopPropagation halts the REST of the walk; the SAME
+	// node's remaining listeners still run (DOM, not stopImmediate). preventDefault is a flag read afterwards.
 	if (Document == nullptr)
 	{
 		return;
 	}
 	Event.Target = NodeId;
-	FDomNode* Current = this;
-	EDomEventPhase Phase = EDomEventPhase::AtTarget;
-	while (Current != nullptr)
+	Event.Document = Document; // so the JS event object's target/currentTarget resolve node wrappers
+
+	// The ancestor path target -> root (Path[0] = target, Path[Last] = root).
+	TArray<FDomNode*> Path;
+	for (FDomNode* N = this; N != nullptr; N = (N->ParentId != INDEX_NONE) ? Document->FindNode(N->ParentId) : nullptr)
 	{
-		Event.CurrentTarget = Current->NodeId;
-		Event.Phase = Phase;
-		for (const TPair<FString, FJsValue>& Listener : Current->Listeners)
+		Path.Add(N);
+	}
+
+	// Fire a node's matching listeners for a phase; returns false to HALT the walk (stopPropagation seen).
+	auto FireAt = [&Event, &Invoker](FDomNode* Node, EDomEventPhase Ph, bool bCapturePhase) -> bool
+	{
+		Event.CurrentTarget = Node->NodeId;
+		Event.Phase = Ph;
+		for (const FDomEventListener& Listener : Node->Listeners)
 		{
-			if (Listener.Key == Event.Type)
+			if (Listener.Type != Event.Type)
 			{
-				Invoker(Listener.Value, Event); // a listener may set bPropagationStopped / bDefaultPrevented
+				continue;
+			}
+			// AtTarget fires BOTH capture + bubble listeners (reg order); capture phase fires capture-only; bubble
+			// phase fires non-capture-only.
+			const bool bSelected = (Ph == EDomEventPhase::AtTarget)
+				|| (bCapturePhase ? Listener.bCapture : !Listener.bCapture);
+			if (bSelected)
+			{
+				Invoker(Listener.Listener, Event); // a listener may set bPropagationStopped / bDefaultPrevented
 			}
 		}
-		if (Event.bPropagationStopped || !Event.bBubbles)
+		return !Event.bPropagationStopped; // same-node remaining already ran; halt the REST of the walk
+	};
+
+	// CAPTURE: root -> ... -> parent (top-down ancestors).
+	for (int32 Index = Path.Num() - 1; Index >= 1; --Index)
+	{
+		if (!FireAt(Path[Index], EDomEventPhase::Capturing, /*bCapturePhase*/ true))
 		{
-			break; // stopPropagation halts ascent; a non-bubbling event fires AtTarget only
+			return;
 		}
-		Current = (Current->ParentId != INDEX_NONE) ? Document->FindNode(Current->ParentId) : nullptr;
-		Phase = EDomEventPhase::Bubbling;
+	}
+	// AT-TARGET: the target.
+	if (!FireAt(Path[0], EDomEventPhase::AtTarget, /*bCapturePhase*/ false))
+	{
+		return;
+	}
+	// BUBBLE: parent -> ... -> root (bottom-up ancestors), only if the event bubbles.
+	if (!Event.bBubbles)
+	{
+		return;
+	}
+	for (int32 Index = 1; Index < Path.Num(); ++Index)
+	{
+		if (!FireAt(Path[Index], EDomEventPhase::Bubbling, /*bCapturePhase*/ false))
+		{
+			return;
+		}
 	}
 }
 
 void FDomNode::DispatchEvent(FDomEvent& Event)
 {
-	// Production: invoke each selected listener via a transient 007 FCallableHandle. The FDomEvent -> JS Event
-	// object marshaling (the event arg) follows the generate-from-interface deferral — the listener is invoked
-	// here but does not yet receive a marshaled Event object.
-	DispatchEvent(Event, [](const FJsValue& ListenerFn, FDomEvent& /*Event*/)
+	// Production: build the LIVE shared Event JS object (NON-owning — its opaque is the caller's FDomEvent; the
+	// dispatch advances CurrentTarget/Phase + a listener's preventDefault/stopPropagation MUTATE it, all read by
+	// the same object's getters) and invoke each selected listener via a transient 007 FCallableHandle with it.
+	if (Document == nullptr)
 	{
-		FCallableHandle Handle(ListenerFn); // transient: copies (dups) the held listener, frees on destruction
-		Handle.Call(JS_UNDEFINED, TArrayView<const JSValue>());
+		return;
+	}
+	FJsValue EventObj = Document->Registry.CreateWrappedObject(GEventClassId, &Event);
+	DispatchEvent(Event, [&EventObj](const FJsValue& ListenerFn, FDomEvent& /*Event*/)
+	{
+		FCallableHandle Handle(ListenerFn);
+		JSValue Arg = EventObj.GetValue();
+		Handle.Call(JS_UNDEFINED, MakeArrayView(&Arg, 1));
 	});
+	// The FDomEvent is the caller's stack — invalidate the wrapper so a listener that STORED it reads safely
+	// (its getters return defaults) instead of dereferencing a dangling opaque after dispatch.
+	if (EventObj.IsValid())
+	{
+		JS_SetOpaque(EventObj.GetValue(), nullptr);
+	}
+}
+
+void FDomNode::DispatchKeyboardEvent(FDomKeyboardEvent& Keyboard)
+{
+	// As DispatchEvent, but the live object is a KeyboardEvent (key/code) over the FDomKeyboardEvent; the walk
+	// runs on its base FDomEvent (Keyboard.Event).
+	if (Document == nullptr)
+	{
+		return;
+	}
+	FJsValue EventObj = Document->Registry.CreateWrappedObject(GKeyboardEventClassId, &Keyboard);
+	DispatchEvent(Keyboard.Event, [&EventObj](const FJsValue& ListenerFn, FDomEvent& /*Event*/)
+	{
+		FCallableHandle Handle(ListenerFn);
+		JSValue Arg = EventObj.GetValue();
+		Handle.Call(JS_UNDEFINED, MakeArrayView(&Arg, 1));
+	});
+	if (EventObj.IsValid())
+	{
+		JS_SetOpaque(EventObj.GetValue(), nullptr);
+	}
 }
 
 // --- Observation reads (S5) — OFF the author surface; COMPOSE 005's geometry/style by NodeId ---
@@ -748,6 +838,129 @@ JSValue ReflectedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst 
 	Self->SetAttribute(FString(ANSI_TO_TCHAR(AttrName)), In); // write the live attribute store (no cached field)
 	return JS_UNDEFINED;
 }
+
+// === Sprint 012 events: the node event members + the live Event/KeyboardEvent object thunks ===
+
+// addEventListener(type, fn, useCapture?) — function-marshaling: VALIDATE a JS function, hold an OWNING dup keyed
+// by (type, capture) (008's store; dedup + identity in FDomNode). useCapture is the optional 3rd arg.
+JSValue AddEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Type;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Type) || !JS_IsFunction(Ctx, Argv[1]))
+	{
+		return JS_ThrowTypeError(Ctx, "addEventListener(type: string, listener: function, useCapture?: boolean)");
+	}
+	const bool bCapture = (Argc >= 3) && (JS_ToBool(Ctx, Argv[2]) != 0);
+	Self->AddEventListener(Type, FJsValue(Ctx, JS_DupValue(Ctx, Argv[1])), bCapture);
+	return JS_UNDEFINED;
+}
+
+JSValue RemoveEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Type;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Type) || !JS_IsFunction(Ctx, Argv[1]))
+	{
+		return JS_ThrowTypeError(Ctx, "removeEventListener(type: string, listener: function, useCapture?: boolean)");
+	}
+	const bool bCapture = (Argc >= 3) && (JS_ToBool(Ctx, Argv[2]) != 0);
+	Self->RemoveEventListener(Type, Argv[1], bCapture); // identity match: SameJsObject(fn) AND type AND capture
+	return JS_UNDEFINED;
+}
+
+// --- The live Event / KeyboardEvent object (#2: extensible, mutated through the walk) ---
+// Recover the base FDomEvent* from an Event OR KeyboardEvent wrapper (FDomKeyboardEvent's first member is the
+// FDomEvent, offset 0). After dispatch the wrapper's opaque is NULLED -> nullptr -> the getters return safe
+// defaults (a stored event reads safely, no dangling deref).
+FDomEvent* EventBaseFrom(JSValueConst ThisVal)
+{
+	JSClassID ClassId = 0;
+	void* Opaque = JS_GetAnyOpaque(ThisVal, &ClassId);
+	if (Opaque == nullptr || (ClassId != GEventClassId && ClassId != GKeyboardEventClassId))
+	{
+		return nullptr;
+	}
+	return static_cast<FDomEvent*>(Opaque);
+}
+
+FDomKeyboardEvent* KeyboardFrom(JSValueConst ThisVal)
+{
+	JSClassID ClassId = 0;
+	void* Opaque = JS_GetAnyOpaque(ThisVal, &ClassId);
+	return (Opaque != nullptr && ClassId == GKeyboardEventClassId) ? static_cast<FDomKeyboardEvent*>(Opaque) : nullptr;
+}
+
+JSValue EventTypeGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	return MarshalString(Ctx, E ? E->Type : FString()).Release();
+}
+JSValue EventTargetGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	return (E != nullptr) ? MarshalNode(Ctx, E->Document, E->Target) : JS_NULL; // target stays the dispatch target
+}
+JSValue EventCurrentTargetGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	return (E != nullptr) ? MarshalNode(Ctx, E->Document, E->CurrentTarget) : JS_NULL; // ADVANCES per node
+}
+JSValue EventPhaseGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	double Phase = 0.0; // NONE
+	if (E != nullptr)
+	{
+		Phase = (E->Phase == EDomEventPhase::Capturing) ? 1.0 : (E->Phase == EDomEventPhase::AtTarget) ? 2.0 : 3.0;
+	}
+	return MarshalNumber(Ctx, Phase).Release();
+}
+JSValue EventBubblesGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	return MarshalBool(Ctx, E != nullptr && E->bBubbles).Release();
+}
+JSValue EventDefaultPreventedGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomEvent* E = EventBaseFrom(ThisVal);
+	return MarshalBool(Ctx, E != nullptr && E->bDefaultPrevented).Release(); // a LATER listener reads this back
+}
+JSValue EventPreventDefaultMethod(JSContext* Ctx, JSValueConst ThisVal, int /*Argc*/, JSValueConst* /*Argv*/)
+{
+	if (FDomEvent* E = EventBaseFrom(ThisVal)) { E->bDefaultPrevented = true; } // MUTATE the shared event
+	return JS_UNDEFINED;
+}
+JSValue EventStopPropagationMethod(JSContext* Ctx, JSValueConst ThisVal, int /*Argc*/, JSValueConst* /*Argv*/)
+{
+	if (FDomEvent* E = EventBaseFrom(ThisVal)) { E->bPropagationStopped = true; } // halts the REST of the walk
+	return JS_UNDEFINED;
+}
+JSValue KeyboardKeyGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomKeyboardEvent* K = KeyboardFrom(ThisVal);
+	return MarshalString(Ctx, K ? K->Key : FString()).Release();
+}
+JSValue KeyboardCodeGetter(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomKeyboardEvent* K = KeyboardFrom(ThisVal);
+	return MarshalString(Ctx, K ? K->Code : FString()).Release();
+}
+
+// dispatchEvent(event): re-dispatch a (still-live) Cathode Event object through the production walk; returns
+// !defaultPrevented. (Cathode-synthetic events are dispatched C++-side via DispatchEvent/DispatchKeyboardEvent.)
+JSValue DispatchEventThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	if (Argc < 1) { return JS_ThrowTypeError(Ctx, "dispatchEvent(event)"); }
+	FDomEvent* E = EventBaseFrom(Argv[0]);
+	if (E == nullptr) { return JS_ThrowTypeError(Ctx, "dispatchEvent expects a live Cathode Event"); }
+	Self->DispatchEvent(*E);
+	return MarshalBool(Ctx, !E->bDefaultPrevented).Release();
+}
 } // namespace
 
 // Each macro emits the thunk (template instantiation) + the table entry from ONE declaration. A getter thunk is
@@ -832,6 +1045,10 @@ static const FBoundMember GDomNodeMembers[] =
 	// no backing field). className reflects the 'class' attribute (the name translation).
 	CATHODE_BIND_REFLECTED("id", "Element", "reflected", "string", ReflectAttrId),
 	CATHODE_BIND_REFLECTED("className", "Element", "reflected", "string", ReflectAttrClass),
+	// EventTarget — the event surface (sprint 012 events): function-marshaling listener registry + dispatch.
+	CATHODE_BIND_METHOD_FN("addEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", AddEventListenerThunk),
+	CATHODE_BIND_METHOD_FN("removeEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", RemoveEventListenerThunk),
+	CATHODE_BIND_METHOD_FN("dispatchEvent", "EventTarget", "margin", "(event: Event) -> boolean", DispatchEventThunk),
 };
 
 #undef CATHODE_BIND_GETTER
@@ -881,6 +1098,81 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Contex
 	// mint typed snapshots. Idempotent (no-op if already present on this context's global).
 	InstallNodeListType(Context);
 	return ClassId;
+}
+
+// === Sprint 012 events: the Event + KeyboardEvent JS classes (NEW bound classes via the ONE mechanism) ===
+
+namespace
+{
+#define CATHODE_EVENT_GETTER(JsName, Iface, Tag, Sig, GetterFn) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, reinterpret_cast<JSCFunction*>(&GetterFn), nullptr }
+#define CATHODE_EVENT_METHOD(JsName, Iface, Tag, Sig, MethodFn) \
+	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &MethodFn, nullptr, nullptr }
+
+// The base Event members. The same getter/method thunks serve a KeyboardEvent instance too (its opaque's first
+// member is the FDomEvent) — KeyboardEvent is STANDALONE (its proto carries the base members + key/code), so the
+// per-class lockstep reconciles each proto against its OWN descriptor with no conflation.
+static const FBoundMember GEventMembers[] =
+{
+	CATHODE_EVENT_GETTER("type", "Event", "required", "string", EventTypeGetter),
+	CATHODE_EVENT_GETTER("target", "Event", "required", "EventTarget | null", EventTargetGetter),
+	CATHODE_EVENT_GETTER("currentTarget", "Event", "margin", "EventTarget | null", EventCurrentTargetGetter),
+	CATHODE_EVENT_GETTER("eventPhase", "Event", "obs", "number", EventPhaseGetter),
+	CATHODE_EVENT_GETTER("bubbles", "Event", "required", "boolean", EventBubblesGetter),
+	CATHODE_EVENT_GETTER("defaultPrevented", "Event", "obs", "boolean", EventDefaultPreventedGetter),
+	CATHODE_EVENT_METHOD("preventDefault", "Event", "required", "() -> void", EventPreventDefaultMethod),
+	CATHODE_EVENT_METHOD("stopPropagation", "Event", "required", "() -> void", EventStopPropagationMethod),
+};
+
+static const FBoundMember GKeyboardEventMembers[] =
+{
+	CATHODE_EVENT_GETTER("type", "KeyboardEvent", "required", "string", EventTypeGetter),
+	CATHODE_EVENT_GETTER("target", "KeyboardEvent", "required", "EventTarget | null", EventTargetGetter),
+	CATHODE_EVENT_GETTER("currentTarget", "KeyboardEvent", "margin", "EventTarget | null", EventCurrentTargetGetter),
+	CATHODE_EVENT_GETTER("eventPhase", "KeyboardEvent", "obs", "number", EventPhaseGetter),
+	CATHODE_EVENT_GETTER("bubbles", "KeyboardEvent", "required", "boolean", EventBubblesGetter),
+	CATHODE_EVENT_GETTER("defaultPrevented", "KeyboardEvent", "obs", "boolean", EventDefaultPreventedGetter),
+	CATHODE_EVENT_METHOD("preventDefault", "KeyboardEvent", "required", "() -> void", EventPreventDefaultMethod),
+	CATHODE_EVENT_METHOD("stopPropagation", "KeyboardEvent", "required", "() -> void", EventStopPropagationMethod),
+	CATHODE_EVENT_GETTER("key", "KeyboardEvent", "required", "string", KeyboardKeyGetter),
+	CATHODE_EVENT_GETTER("code", "KeyboardEvent", "margin", "string", KeyboardCodeGetter),
+};
+#undef CATHODE_EVENT_GETTER
+#undef CATHODE_EVENT_METHOD
+} // namespace
+
+void RegisterDomEventClasses(INativeClassRegistry& Registry, JSContext* Context,
+	JSClassID* OutEventClassId, JSClassID* OutKeyboardEventClassId)
+{
+	// NON-OWNING event wrappers (the FDomEvent is the dispatch's stack; the dispatch NULLs the opaque after) ->
+	// NULL finalizer; NO gc_mark (the event holds no JS refs of its own — target/currentTarget resolve via the
+	// document, not held). The members install from the one table (crit-1).
+	FNativeClassDef EventDef;
+	EventDef.Name = "CathodeDomEvent";
+	EventDef.Finalizer = nullptr;
+	EventDef.GcMark = nullptr;
+	GEventClassId = Registry.RegisterClass(EventDef);
+	InstallBoundMembers(Context, GEventClassId, GEventMembers, UE_ARRAY_COUNT(GEventMembers));
+
+	FNativeClassDef KeyboardDef;
+	KeyboardDef.Name = "CathodeDomKeyboardEvent";
+	KeyboardDef.Finalizer = nullptr;
+	KeyboardDef.GcMark = nullptr;
+	GKeyboardEventClassId = Registry.RegisterClass(KeyboardDef);
+	InstallBoundMembers(Context, GKeyboardEventClassId, GKeyboardEventMembers, UE_ARRAY_COUNT(GKeyboardEventMembers));
+
+	if (OutEventClassId != nullptr) { *OutEventClassId = GEventClassId; }
+	if (OutKeyboardEventClassId != nullptr) { *OutKeyboardEventClassId = GKeyboardEventClassId; }
+}
+
+FString GetDomEventDescriptorJson()
+{
+	return EnumerateBoundMembersJson(GEventMembers, UE_ARRAY_COUNT(GEventMembers));
+}
+
+FString GetDomKeyboardEventDescriptorJson()
+{
+	return EnumerateBoundMembersJson(GKeyboardEventMembers, UE_ARRAY_COUNT(GKeyboardEventMembers));
 }
 
 } // namespace Cathode

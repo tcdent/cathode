@@ -275,6 +275,8 @@ TUniquePtr<FDomDocument> CreateDomDocument(
 	// sprint 012 slice 5: register the FDomDocument JS class (the 2nd class via the one mechanism) + install its
 	// members, so the document can be wrapped + exposed as the `document` global (InstallAsGlobal).
 	RegisterDomDocumentClass(Registry, Context);
+	// sprint 012 events: register the Event + KeyboardEvent classes (the dispatch wraps the live FDomEvent in one).
+	RegisterDomEventClasses(Registry, Context);
 	return MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
 }
 
