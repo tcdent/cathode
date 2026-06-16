@@ -60,10 +60,10 @@ bool FCathodeDomAttributeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("getAttribute returns the set value"), El->GetAttribute(TEXT("id"), Out) && Out == FString(TEXT("x")));
 	TestFalse(TEXT("getAttribute on a missing attr returns false"), El->GetAttribute(TEXT("missing"), Out));
 
-	// 'value' (get) backed by the value attribute
+	// 'value' (get): reflects the value attribute (= defaultValue) when NOT dirtied — the forms dirty-value model.
+	// GetValue() now returns the live-or-default FString; the full live-vs-attribute behavior is in CathodeDomFormsTests.
 	El->SetAttribute(TEXT("value"), TEXT("hello"));
-	FString Val;
-	TestTrue(TEXT("value getter reads the value attribute"), El->GetValue(Val) && Val == FString(TEXT("hello")));
+	TestEqual(TEXT("value getter reflects the value attribute (defaultValue) when not dirtied"), El->GetValue(), FString(TEXT("hello")));
 
 	// remove
 	El->RemoveAttribute(TEXT("id"));

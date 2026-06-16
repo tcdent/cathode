@@ -263,10 +263,38 @@ void FDomNode::RemoveAttribute(const FString& Name)
 	}
 }
 
-bool FDomNode::GetValue(FString& OutValue) const
+// Form LIVE state (sprint 012 forms) — the dirty-value model: el.value/checked are the LIVE state, distinct from the
+// value/checked ATTRIBUTES (= defaultValue/defaultChecked). The getter returns the live state once dirtied, else the
+// attribute default; the setter writes the live state only (the attribute is untouched -> getAttribute stays the default).
+
+FString FDomNode::GetValue() const
 {
-	// 'value' is backed by the value attribute in the bounded scaffold (get-only per the freeze).
-	return GetAttribute(TEXT("value"), OutValue);
+	if (LiveValue.IsSet())
+	{
+		return LiveValue.GetValue(); // dirtied -> the live value wins over the attribute default
+	}
+	FString AttrValue;
+	return GetAttribute(TEXT("value"), AttrValue) ? AttrValue : FString(); // not-yet-dirty -> reflect defaultValue ("" if none)
+}
+
+void FDomNode::SetValue(const FString& Value)
+{
+	LiveValue = Value; // dirty: el.value = x sets the LIVE value; the 'value' attribute is NOT touched
+}
+
+bool FDomNode::GetChecked() const
+{
+	if (LiveChecked.IsSet())
+	{
+		return LiveChecked.GetValue(); // dirtied -> the live checked wins
+	}
+	FString Unused;
+	return GetAttribute(TEXT("checked"), Unused); // not-yet-dirty -> the 'checked' attribute presence (defaultChecked)
+}
+
+void FDomNode::SetChecked(bool bChecked)
+{
+	LiveChecked = bChecked; // dirty: el.checked = b sets the LIVE checked; the 'checked' attribute is NOT touched
 }
 
 FString FDomNode::GetTextContent() const
@@ -1208,6 +1236,24 @@ JSValue AttributesGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 	Self->GetAttributesSnapshot(Attrs);
 	return MarshalNamedNodeMap(Ctx, Attrs).Release();
 }
+
+// checked (Element, get/set, sprint 012 forms): the LIVE checked state (dirty-value model). The getter reads the
+// live-or-default; the setter coerces to boolean (spec) and writes the LIVE state — the attribute is untouched.
+JSValue CheckedGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	return MarshalBool(Ctx, Self->GetChecked()).Release();
+}
+JSValue CheckedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst Val)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	const int Truthy = JS_ToBool(Ctx, Val); // el.checked coerces to boolean per spec
+	if (Truthy < 0) { return JS_EXCEPTION; }
+	Self->SetChecked(Truthy != 0);
+	return JS_UNDEFINED;
+}
 } // namespace
 
 // Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
@@ -1276,6 +1322,11 @@ JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArr
 	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
 	  reinterpret_cast<JSCFunction*>(&ReflectedGetterThunk<AttrConst>), \
 	  reinterpret_cast<JSCFunction*>(&ReflectedSetterThunk<AttrConst>) }
+// Sprint 012 forms — a read/write PROPERTY with CUSTOM getter/setter thunks (NOT attribute-reflected): for `checked`,
+// whose live-state get/set + boolean coercion the templated string macros don't cover.
+#define CATHODE_BIND_PROP_FN(JsName, Iface, Tag, Sig, GetterFn, SetterFn) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
+	  reinterpret_cast<JSCFunction*>(&GetterFn), reinterpret_cast<JSCFunction*>(&SetterFn) }
 
 // THE ONE binding-definition table for the DOM node. INSTALL (InstallBoundMembers) + ENUMERATE
 // (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. The
@@ -1322,6 +1373,10 @@ static const FBoundMember GDomNodeMembers[] =
 	// Element — snapshot-returns (sprint 012): attributes -> NamedNodeMap snapshot; getBoundingClientRect -> DOMRect value.
 	CATHODE_BIND_GETTER_FN("attributes", "Element", "obs", "NamedNodeMap", AttributesGetterThunk),
 	CATHODE_BIND_METHOD_FN("getBoundingClientRect", "Element", "obs", "() -> DOMRect", GetBoundingClientRectThunk),
+	// HTMLInputElement — forms LIVE state (sprint 012): value/checked are the live input state (dirty-value model),
+	// DISTINCT from the value/checked attributes — so they route to the live-state get/set, NOT CATHODE_BIND_REFLECTED.
+	CATHODE_BIND_STR_RW("value", "HTMLInputElement", "reflected", "string", GetValue, SetValue),
+	CATHODE_BIND_PROP_FN("checked", "HTMLInputElement", "reflected", "boolean", CheckedGetterThunk, CheckedSetterThunk),
 };
 
 #undef CATHODE_BIND_GETTER
@@ -1338,6 +1393,7 @@ static const FBoundMember GDomNodeMembers[] =
 #undef CATHODE_BIND_NODE_METHOD
 #undef CATHODE_BIND_METHOD_FN
 #undef CATHODE_BIND_REFLECTED
+#undef CATHODE_BIND_PROP_FN
 
 FString GetDomNodeDescriptorJson()
 {

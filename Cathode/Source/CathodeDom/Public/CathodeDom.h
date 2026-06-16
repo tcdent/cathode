@@ -138,7 +138,14 @@ public:
 	bool GetAttribute(const FString& Name, FString& OutValue) const;
 	void SetAttribute(const FString& Name, const FString& Value);
 	void RemoveAttribute(const FString& Name);
-	bool GetValue(FString& OutValue) const;          // form value (get) — FROZEN in
+	// Form LIVE state (sprint 012 forms) — value/checked are the LIVE input state, DISTINCT from the value/checked
+	// ATTRIBUTES (= defaultValue/defaultChecked). The dirty-value model: the getter returns the live state once set,
+	// else the attribute default; the setter writes the LIVE state and does NOT touch the attribute. NOT serialized
+	// (runtime DOM state; SerializeNode emits the attribute defaults). See LiveValue/LiveChecked below.
+	FString GetValue() const;                         // el.value: LiveValue if set, else the 'value' attribute ("" if none)
+	void SetValue(const FString& Value);              // el.value = x: sets the LIVE value (dirty); attribute untouched
+	bool GetChecked() const;                          // el.checked: LiveChecked if set, else the 'checked' attribute presence
+	void SetChecked(bool bChecked);                   // el.checked = b: sets the LIVE checked (dirty); attribute untouched
 	FString GetTextContent() const;                   // bulk textContent (get) — FROZEN in
 	void SetTextContent(const FString& Text);         // bulk textContent (set) — FROZEN in
 
@@ -209,6 +216,11 @@ private:
 	FDomNodeId ParentId = INDEX_NONE;  // NON-OWNING parent back-ref (resolved via the index)
 	TArray<FJsValue> Children;         // OWNING JS refs to child WRAPPERS (Model A; gc_mark-marked) — NOT FDomNode*
 	TMap<FString, FString> Attributes; // plain STRING data (the bounded surface is string-valued) — NOT held JS refs
+	// Form LIVE state (sprint 012 forms), DISTINCT from the value/checked attributes (= defaultValue/defaultChecked).
+	// Unset (TOptional empty) = not-yet-dirty -> el.value/checked reflect the attribute default; set = dirty -> the
+	// live state wins. RUNTIME-only (NOT serialized — SerializeNode emits the attributes, not these).
+	TOptional<FString> LiveValue;      // el.value live state (the dirty-value-flag); unset -> the 'value' attribute
+	TOptional<bool> LiveChecked;       // el.checked live state; unset -> the 'checked' attribute presence (defaultChecked)
 	TArray<FDomEventListener> Listeners;        // (type, held JS function, capture) — HELD JS refs, gc_mark-marked (the
 	                                            // node<->listener cycle, THE Model-A hazard); FreeRT'd in the finalizer
 
