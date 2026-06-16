@@ -112,6 +112,14 @@ authored screens inside what the engine supports and makes them debuggable; it i
 distinct from the runtime. *Ground:* the TypeScript compiler is the DOM/JS gate; the manifest is
 asserted against the registered bindings at engine build.
 
+**Runtime Verification.** A built-in capability that, at runtime, introspects the surface the engine
+*actually* exposes (reconciled against the declared contract) and verifies the real primitives
+*actually* function — emitting a structured, machine-readable self-report. *Why:* the build gate is
+static (author code ⊆ declared surface); this is its runtime counterpart (declared == actually-exposed-
+and-working), and the machine-perception surface for the AI dev loop. Folds in the `observe/` harness
+(browse-owned) as its in-engine home. *Ground:* the `observe/observer.js` introspect-and-emit lineage +
+the capability-probe pattern (obs-browser/UE-Uranium); see `components-runtime-verification.md`.
+
 **Plugin Shell & Build.** The Unreal plugin packaging: the `.uplugin`, `Build.cs`, ThirdParty
 vendoring of the four libraries (plus AsmJit alongside Blend2D), module wiring, and project
 enablement. *Why:* it makes Cathode a buildable, reusable Unreal plugin following the repo's

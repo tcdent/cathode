@@ -24,6 +24,18 @@ today; the controller's semantic events follow the same path). *Why:* author cod
 standard web event model. (The controller component owns the *source* of semantic events; this
 component owns getting them to the right surface and element.)
 
+The ratified semantic set (see `components-controller.md`) is **six discrete intents** —
+`Up` / `Down` / `Left` / `Right` / `Accept` / `Back` (no analog axis) — which this component
+**delivers as standard synthetic `keydown` `KeyboardEvent`s** on the active surface's `document`,
+the intents mapped to canonical `e.key` values (`Up`→`ArrowUp`, `Down`→`ArrowDown`,
+`Left`→`ArrowLeft`, `Right`→`ArrowRight`, `Accept`→`Enter`, `Back`→`Escape`). Focus movement and
+activation are then the panel's own stock `keydown` handlers plus our focus model — not a
+Cathode-specific event. This is the consume side of the player `SurfaceFocus` handshake's
+`DeliverSemanticEvent` (`docs/teams/player/006-surface-handshake-gap-analysis.md`): the player
+resolves physical input to one discrete intent; Input Routing turns it into the standard keyboard
+event the focused surface already expects. No `NavAxis` to discretize — the intent arrives already
+discrete.
+
 ## Key concern — focus and the active surface
 
 With positional input gone, the real work is "which surface is active, and which element within it

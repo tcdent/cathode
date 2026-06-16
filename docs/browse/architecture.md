@@ -163,9 +163,10 @@ three axes, and the build **hard-fails** on anything outside them — an unsuppo
 build error, not a runtime surprise.
 
 1. **DOM** — a deliberately small surface: element creation/insertion/removal, attribute and
-   property access, a minimal `Event` with bubbling, tree reads, the scheduler
+   property access, an `Event` with **bubble + capture** dispatch, tree reads, the scheduler
    (`Promise`, timers, `requestAnimationFrame`), and a document/mount root. The surface is
-   intentionally bounded; it is the firewall against accidentally rebuilding a browser.
+   intentionally bounded; it is the firewall against accidentally rebuilding a browser. (The
+   authoritative member list is `components-dom-surface.md`.)
 2. **CSS** — litehtml's coverage (CSS 2/3, flexbox; no grid; partial CSS3), extended only where
    Cathode forks litehtml for a specific need. This is where authoring constraints are concrete and
    documented.

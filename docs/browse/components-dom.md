@@ -12,10 +12,14 @@ browser.
 *Why:* it is the live document JS mutates and the input layout consumes; it must persist between
 ticks, not be re-parsed.
 
-**Expose the bounded DOM API.** The documented surface — element create/insert/remove, attribute
-and property access, tree reads — and nothing more. *Why:* it's what authors program against;
-holding the line on the surface is what keeps Cathode from growing into a browser. *Ground:* the
-contract's DOM axis.
+**Expose the DOM interface.** The C++ DOM interface we author — element create/insert/remove,
+attribute and property access, tree reads, events — and nothing we didn't deliberately implement.
+*Why:* it's what authors program against, and the authoring contract (`.d.ts` + gate) is
+**generated from this interface**, not a hand-maintained string allow-list or a parallel
+registration — one source of truth, no drift. *Firewall:* the line against "accidentally a
+browser" now lives at the **implement-or-not decision** — a method is on the surface because we
+chose to implement it, never because litehtml happened to expose it. Don't reflect litehtml's raw
+surface wholesale; the interface is deliberate.
 
 **Run the event system.** The `Event` object, `add`/`removeEventListener`, and dispatch with
 bubbling. *Why:* interaction is the whole point of in-page JS, and event delegation depends on
@@ -42,10 +46,15 @@ component's main risk.
 ## Boundaries
 
 Owns the tree, the API surface, and events. Delegates layout to Layout & Style,
-and the cross-heap lifetime mechanism to JS↔Native Bridge. Its surface definition feeds the
-Authoring Contract & Gate (the `.d.ts`).
+and the cross-heap lifetime mechanism to JS↔Native Bridge. The interface it implements **is** the
+source the Authoring Contract & Gate generates the `.d.ts`/gate from — not a separate string list.
 
 ## Open / deferred (team's call)
 
-- Freeze the canonical DOM surface (the draft list is canonical until updated): the `Event` shape,
-  `value`/`checked` getters, and whether `DocumentFragment`/`classList`/bulk `textContent` are in.
+- The canonical surface is no longer a list to *freeze* — it **is** the implemented interface (the
+  `.d.ts`/gate generate from it), and its authoritative member list now lives in
+  `components-dom-surface.md`. The edges once open here are **resolved** (2026-06-14): the `Event`
+  shape is `type`/`target`/`currentTarget`/`preventDefault`/`stopPropagation` + `KeyboardEvent.key`,
+  with **bubble + capture** dispatch; `value`/`checked` are reflected get/set; `textContent` is an
+  out-of-the-box margin member (text *updates* go through `Text.data`); `DocumentFragment` and
+  `classList` are **out**.

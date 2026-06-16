@@ -30,7 +30,7 @@ Cathode is the binding constraint.
 
 Per rendered node: tag, attributes, computed box geometry, the contract's computed CSS properties,
 text. It is app-agnostic — anything that renders a DOM can be observed against it — and it is the
-**runtime twin** of the static contract (`lib.cathode.d.ts` + `css-subset.json`): the same
+**runtime twin** of the static contract (`lib.cathode.d.ts` + Cathode's own CSS declaration): the same
 supported surface, observed instead of declared.
 
 ## The reads it needs are just part of the engine

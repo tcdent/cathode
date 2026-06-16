@@ -17,10 +17,15 @@ the world. *Ground:* the TypeScript compiler is the DOM/JS gate (compile against
 without the standard DOM lib); a small linter checks CSS against a manifest; the bundler target
 pins the JS syntax level.
 
-**Hold one source of truth.** A capability manifest that generates the type definitions and the CSS
-allow-list, asserted at engine build against the actually-registered bindings and litehtml config.
-*Why:* the gate must provably match the engine; a contract that drifts from reality is worse than
-none.
+**Generate the contract from the engine, not a parallel list.** The DOM/JS `.d.ts` is **generated
+from the engine's own interfaces** — the authored DOM interface plus the `game.*` host bridge — so
+it matches the engine by construction; there is no hand-maintained string list or separate
+registration to drift, and nothing to "assert manifest == bindings" because the interface *is* the
+bindings. The CSS allow-list is **Cathode's own declaration, authored from litehtml's actual coverage** (in
+`Authoring/`) — not panels' `css-subset.json` (the panels team's separate guard; Cathode authors its
+own conformant equivalent, never couples to another dev's area). *Why:*
+the gate must provably match the engine, and the cheapest guarantee is to *be* the engine's
+interface rather than a copy asserted to equal it.
 
 **Provide the runtime backstop.** Throw a clear, sourced error on dynamic access the static gate
 can't see (`el[name]`, `globalThis[x]`), surfaced to a developer overlay. *Why:* static checking
@@ -36,5 +41,9 @@ Not in the runtime hot path.
 ## Open / deferred (team's call)
 
 - TypeScript-first vs plain-JS authoring (the type gate is free either way; TS gives it directly).
-- The capability-manifest format and the generation pipeline.
 - Developer-overlay scope.
+
+*(Settled 2026-06-14 — no longer open: the `.d.ts` is one output of the **single
+generate-from-interface projection** — one extraction over the C++ binding-interface → quickjs
+bindings + `.d.ts` + the runtime-verification descriptor. Built in the **Host Bridge /
+generate-from-interface sprint**; not an open design question. See `components-host-bridge.md`.)*
