@@ -146,6 +146,10 @@ public:
 	void SetValue(const FString& Value);              // el.value = x: sets the LIVE value (dirty); attribute untouched
 	bool GetChecked() const;                          // el.checked: LiveChecked if set, else the 'checked' attribute presence
 	void SetChecked(bool bChecked);                   // el.checked = b: sets the LIVE checked (dirty); attribute untouched
+	// Focus (sprint 012 DOM-completion, HTMLElement) — sets/clears the DOCUMENT's focus STATE (runtime, not serialized;
+	// the C++ input router is the future consumer). focus() -> document.activeElement; blur() clears it if this node holds it.
+	void Focus();
+	void Blur();
 	FString GetTextContent() const;                   // bulk textContent (get) — FROZEN in
 	void SetTextContent(const FString& Text);         // bulk textContent (set) — FROZEN in
 
@@ -191,6 +195,11 @@ public:
 	// the source for the Element.attributes NamedNodeMap SNAPSHOT (minimal { name, value } items, no Attr class).
 	void GetAttributesSnapshot(TArray<TPair<FString, FString>>& OutAttributes) const;
 
+	// Sprint 012 DOM-completion: Node.namespaceURI — the element's namespace (the slice-5 createElementNS come-due:
+	// the ns is now STORED at creation). Elements -> the HTML ns (createElement) or the passed ns (createElementNS);
+	// text nodes -> false (JS null). The come-due-is-the-missing-primitive reversal.
+	bool GetNamespaceURI(FString& OutValue) const;
+
 	// --- Internal mechanism (Model A) — not the author surface ---
 	// Finalizer-driven (FinalizeNativeObject<FDomNode> -> delete): de-register from the document's NON-OWNING
 	// index via the back-ref (if still valid), then FreeRT held refs (rt-based — a finalizer has no ctx).
@@ -211,6 +220,7 @@ private:
 	EDomNodeType Type = EDomNodeType::Element;
 	FString TagName;                   // element only
 	FString TextData;                  // text node only
+	FString NamespaceURI;              // element ns (012 come-due): HTML ns (createElement) / passed ns (createElementNS)
 	FDomDocument* Document = nullptr;  // NON-OWNING back-ref (de-register/context/dirty-mark); NULLED if orphaned
 	JSRuntime* Runtime = nullptr;      // for FreeRT on the finalizer path (no ctx available there)
 	FDomNodeId ParentId = INDEX_NONE;  // NON-OWNING parent back-ref (resolved via the index)
@@ -262,6 +272,8 @@ public:
 	// index. Returns the OWNING WRAPPER (FJsValue): the caller holds the lifetime handle (as JS holds a
 	// createElement result). A node never holds its own wrapper (that would self-root it = Model B).
 	FJsValue CreateElement(const FString& TagName);
+	// createElementNS (012 come-due): like CreateElement but STORES the passed namespace (-> Node.namespaceURI).
+	FJsValue CreateElementNS(const FString& Namespace, const FString& QualifiedName);
 	FJsValue CreateTextNode(const FString& Data);
 
 	FDomNodeId GetRootNodeId() const;
@@ -280,6 +292,16 @@ public:
 	// from the root checking GetAttribute("id"). Returns the matching node id, INDEX_NONE if none. The JS binding
 	// marshals the result via GetWrapperForNode so it is the SAME wrapper (S2 identity ===).
 	FDomNodeId FindElementById(const FString& ElementId) const;
+
+	// Sprint 012 DOM-completion: document.body — the first <body> element in document order (a pre-order tree walk
+	// by tag, like FindElementById; no stored ref). INDEX_NONE if none (-> JS null). On the document, like getElementById.
+	FDomNodeId FindBody() const;
+
+	// Focus STATE (sprint 012, runtime — NOT serialized): the focused node (document.activeElement). focus() sets it,
+	// blur() clears it (only if the given node currently holds focus). The C++ input router is the future consumer.
+	void SetFocusedNode(FDomNodeId NodeId);
+	void BlurNode(FDomNodeId NodeId);
+	FDomNodeId GetFocusedNode() const;
 
 	// Expose THIS document as the JS `document` global on its own context: wrap it via the document JS class (007
 	// CreateWrappedObject — NON-OWNING: the document is C++/TUniquePtr-owned, the wrapper never deletes it) and set
@@ -329,6 +351,7 @@ private:
 	TMap<FDomNodeId, FDomNode*> NodeIndex; // NON-OWNING index (Model A): the wrapper graph owns; this only looks up
 	FJsValue RootWrapper;                  // the document's OWNING ref to the root node's wrapper (the GC root)
 	FDomNodeId RootNodeId = INDEX_NONE;
+	FDomNodeId FocusedNodeId = INDEX_NONE; // 012 focus state (document.activeElement); runtime, not serialized
 	FLayoutResult LastLayout;              // the last Relayout result; the observation reads compose its geometry/style
 };
 

@@ -253,11 +253,20 @@ FJsValue FDomDocument::GetWrapperForNode(FDomNodeId InNodeId) const
 	return FJsValue(Context, JS_DupValue(Context, Node->WrapperBorrow));
 }
 
+// The HTML namespace — the default for createElement + Preact's universal createElementNS(HTML ns, ...).
+static const TCHAR* const HtmlNamespace = TEXT("http://www.w3.org/1999/xhtml");
+
 FJsValue FDomDocument::CreateElement(const FString& TagName)
+{
+	return CreateElementNS(HtmlNamespace, TagName); // createElement defaults to the HTML ns (012 come-due)
+}
+
+FJsValue FDomDocument::CreateElementNS(const FString& Namespace, const FString& QualifiedName)
 {
 	const FDomNodeId Id = NextNodeId++;
 	FDomNode* Node = new FDomNode(*this, Id, EDomNodeType::Element);
-	Node->TagName = TagName;
+	Node->TagName = QualifiedName;
+	Node->NamespaceURI = Namespace;                               // STORE the ns (the slice-5 come-due reversal)
 	NodeIndex.Add(Id, Node);                                       // NON-OWNING index entry
 	FJsValue Wrapper = Registry.CreateWrappedObject(NodeClassId, Node); // OWNING wrapper -> the caller
 	Node->SetWrapperBorrow(Wrapper.GetValue());                   // S2: NON-OWNING reverse-lookup borrow (set once)
@@ -383,22 +392,42 @@ JSValue DocCreateTextNodeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, J
 	return Self->CreateTextNode(Data).Release();
 }
 
-// createElementNS(namespace, qualifiedName) -> a real element. Preact calls this UNIVERSALLY with the HTML ns;
-// the ns is ACCEPTED but NOT stored this slice (no namespaceURI consumer; SVG ns deferred) — create by the
-// qualifiedName.
+// createElementNS(namespace, qualifiedName) -> a real element with the ns STORED (sprint 012 come-due: slice 5
+// accepted-but-dropped the ns "to namespaceURI's arrival"; namespaceURI IS that arrival). Preact calls this
+// universally with the HTML ns; createElement defaults to the HTML ns. The stored ns backs Node.namespaceURI.
 JSValue DocCreateElementNSThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
 	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
 	if (Self == nullptr) { return JS_EXCEPTION; }
 	FString QualifiedName;
 	if (Argc < 2 || !UnmarshalString(Ctx, Argv[1], QualifiedName)) { return JS_ThrowTypeError(Ctx, "expected (namespace, qualifiedName)"); }
-	return Self->CreateElement(QualifiedName).Release();
+	FString Namespace;
+	if (!JS_IsNull(Argv[0])) { UnmarshalString(Ctx, Argv[0], Namespace); } // string | null; null -> "" -> namespaceURI null
+	return Self->CreateElementNS(Namespace, QualifiedName).Release(); // STORE the ns (the come-due reversal)
 }
+
+// body / documentElement / activeElement (Document getters, sprint 012 DOM-completion) — a node id -> its EXISTING
+// wrapper (S2 ===) or JS null. body = the <body> element; documentElement = the <html> root; activeElement = the
+// focused element (initial/cleared -> null).
+JSValue DocNodeIdGetter(JSContext* Ctx, JSValueConst ThisVal, FDomNodeId (FDomDocument::*Resolve)() const)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	const FDomNodeId Id = (Self->*Resolve)();
+	if (Id == INDEX_NONE) { return JS_NULL; }
+	FJsValue Wrapper = Self->GetWrapperForNode(Id); // the SAME wrapper (identity ===)
+	return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+}
+JSValue DocBodyGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::FindBody); }
+JSValue DocDocumentElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetRootNodeId); }
+JSValue DocActiveElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetFocusedNode); }
 
 // THE 2nd binding-definition table — install (InstallBoundMembers) + enumerate (EnumerateBoundMembersJson) BOTH
 // consume it (crit-1, now PER CLASS). Document-iface members; names distinct from the node set (no conflation).
 #define CATHODE_BIND_DOC_METHOD(JsName, Iface, Tag, Sig, ThunkFn) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
+#define CATHODE_BIND_DOC_GETTER(JsName, Iface, Tag, Sig, GetterFn) \
+	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, reinterpret_cast<JSCFunction*>(&GetterFn), nullptr }
 static const FBoundMember GDomDocumentMembers[] =
 {
 	CATHODE_BIND_DOC_METHOD("getElementById",  "Document", "required", "(elementId: string) -> Element | null", DocGetElementByIdThunk),
@@ -407,8 +436,13 @@ static const FBoundMember GDomDocumentMembers[] =
 	CATHODE_BIND_DOC_METHOD("createElement",   "Document", "margin",   "(localName: string) -> Element", DocCreateElementThunk),
 	CATHODE_BIND_DOC_METHOD("createTextNode",  "Document", "required", "(data: string) -> Text", DocCreateTextNodeThunk),
 	CATHODE_BIND_DOC_METHOD("createElementNS", "Document", "required", "(namespace: string | null, qualifiedName: string) -> Element", DocCreateElementNSThunk),
+	// Document accessors (sprint 012 DOM-completion): body / documentElement / activeElement (S2-identity getters).
+	CATHODE_BIND_DOC_GETTER("body",            "Document", "margin", "Element | null", DocBodyGetterThunk),
+	CATHODE_BIND_DOC_GETTER("documentElement", "Document", "margin", "Element | null", DocDocumentElementGetterThunk),
+	CATHODE_BIND_DOC_GETTER("activeElement",   "Document", "margin", "Element | null", DocActiveElementGetterThunk),
 };
 #undef CATHODE_BIND_DOC_METHOD
+#undef CATHODE_BIND_DOC_GETTER
 } // namespace
 
 // --- FDomDocument slice-5 backings ---
@@ -447,6 +481,56 @@ FDomNodeId FDomDocument::FindElementById(const FString& ElementId) const
 		}
 	}
 	return INDEX_NONE;
+}
+
+FDomNodeId FDomDocument::FindBody() const
+{
+	// Pre-order walk by tag (no stored body ref; document.body looks up rarely) — the FindElementById pattern.
+	TArray<FDomNodeId> Stack;
+	if (RootNodeId != INDEX_NONE)
+	{
+		Stack.Add(RootNodeId);
+	}
+	while (Stack.Num() > 0)
+	{
+		const FDomNodeId Current = Stack.Pop();
+		const FDomNode* Node = FindNode(Current);
+		if (Node == nullptr)
+		{
+			continue;
+		}
+		if (Node->GetTagName().Equals(TEXT("body"), ESearchCase::IgnoreCase))
+		{
+			return Current; // first <body> in document order
+		}
+		TArray<FDomNodeId> Children;
+		Node->GetChildNodes(Children);
+		for (int32 Index = Children.Num() - 1; Index >= 0; --Index)
+		{
+			Stack.Add(Children[Index]);
+		}
+	}
+	return INDEX_NONE;
+}
+
+// Focus STATE (012) — single-valued (one FocusedNodeId; LATEST-WINS). blur is ELEMENT-SCOPED: it clears ONLY if the
+// given node currently holds focus (el2.blur() while el1 is focused is a no-op). Initial == cleared == INDEX_NONE.
+void FDomDocument::SetFocusedNode(FDomNodeId NodeId)
+{
+	FocusedNodeId = NodeId;
+}
+
+void FDomDocument::BlurNode(FDomNodeId NodeId)
+{
+	if (FocusedNodeId == NodeId) // ONLY the active element clears focus (NOT a global clear of someone else's)
+	{
+		FocusedNodeId = INDEX_NONE;
+	}
+}
+
+FDomNodeId FDomDocument::GetFocusedNode() const
+{
+	return FocusedNodeId;
 }
 
 void FDomDocument::InstallAsGlobal()

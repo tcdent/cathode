@@ -471,6 +471,25 @@ void FDomNode::GetAttributesSnapshot(TArray<TPair<FString, FString>>& OutAttribu
 	}
 }
 
+bool FDomNode::GetNamespaceURI(FString& OutValue) const
+{
+	// Null for text nodes AND for an element created with a null/empty ns (createElementNS(null, ...)); the HTML-ns
+	// default (createElement) + the createElementNS-passed ns are non-empty -> returned.
+	if (Type != EDomNodeType::Element || NamespaceURI.IsEmpty()) { return false; }
+	OutValue = NamespaceURI;
+	return true;
+}
+
+void FDomNode::Focus()
+{
+	if (Document != nullptr) { Document->SetFocusedNode(NodeId); } // -> document.activeElement
+}
+
+void FDomNode::Blur()
+{
+	if (Document != nullptr) { Document->BlurNode(NodeId); } // clears focus only if this node holds it
+}
+
 void FDomNode::GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) const
 {
 	// Child ELEMENTS in document order. Resolve each owning child wrapper to its node; skip text nodes (they never
@@ -1237,6 +1256,16 @@ JSValue AttributesGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 	return MarshalNamedNodeMap(Ctx, Attrs).Release();
 }
 
+// namespaceURI (Node, getter, sprint 012 come-due): the element's stored namespace, or JS null for a text node.
+JSValue NamespaceURIGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
+{
+	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Ns;
+	if (!Self->GetNamespaceURI(Ns)) { return JS_NULL; } // text node -> null
+	return MarshalString(Ctx, Ns).Release();
+}
+
 // checked (Element, get/set, sprint 012 forms): the LIVE checked state (dirty-value model). The getter reads the
 // live-or-default; the setter coerces to boolean (spec) and writes the LIVE state — the attribute is untouched.
 JSValue CheckedGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
@@ -1618,6 +1647,8 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_NODETYPE_GETTER("nodeType", "Node", "required", "number", GetNodeType),
 	CATHODE_BIND_VAL_GETTER("nodeName", "Node", "obs", "string", GetNodeName),
 	CATHODE_BIND_OPT_RW("nodeValue", "Node", "obs", "string | null", GetNodeValue, SetNodeValue),
+	// Node — namespaceURI (sprint 012 come-due): the element ns (stored at createElement/createElementNS) | null (text).
+	CATHODE_BIND_GETTER_FN("namespaceURI", "Node", "margin", "string | null", NamespaceURIGetterThunk),
 	// Node — tree reads (identity-preserving)
 	CATHODE_BIND_NODE_GETTER("parentNode", "Node", "required", "Node | null", GetParentNode),
 	CATHODE_BIND_NODE_GETTER("firstChild", "Node", "required", "Node | null", GetFirstChild),
@@ -1655,6 +1686,9 @@ static const FBoundMember GDomNodeMembers[] =
 	// HTMLElement — style (sprint 012): a WRITE-THROUGH CSSStyleDeclaration over the canonical 'style' attribute.
 	// (CSSStyleDeclaration is a C++-EXOTIC class — NOT lockstep-bound; getComputedStyle is a GLOBAL, installed separately.)
 	CATHODE_BIND_GETTER_FN("style", "HTMLElement", "required", "CSSStyleDeclaration", StyleGetterThunk),
+	// HTMLElement — focus (sprint 012 DOM-completion): set/clear the document's focus state (-> document.activeElement).
+	CATHODE_BIND_VOID_METHOD("focus", "HTMLElement", "required", "() -> void", Focus),
+	CATHODE_BIND_VOID_METHOD("blur", "HTMLElement", "margin", "() -> void", Blur),
 };
 
 #undef CATHODE_BIND_GETTER
