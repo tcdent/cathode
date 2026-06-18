@@ -172,9 +172,39 @@ void FDomDocument::SerializeNode(const FDomNode* Node, FString& Out) const
 	}
 	Out += TEXT(">");
 
-	for (const FJsValue& ChildWrapper : Node->Children)
+	// FORK-2 (013 slice 3): <style> and <script> are the HTML RAW-TEXT elements — their text content must round-trip
+	// UN-escaped (a '>' in a CSS child selector, or '&', must reach litehtml's parser verbatim; HTML-entity-escaping it
+	// would corrupt the rule). Exactly {<style>, <script>}; RCDATA (<textarea>/<title>) stays escaped (the generic path).
+	// TRUSTED-CONTENT INVARIANT (assert, NOT a runtime guard/sanitize): the raw content must not contain the element's
+	// own closing-tag prefix ('</style' / '</script'), which would prematurely close it. Content is first-party/trusted;
+	// a violation is a programming error the assert surfaces -- we do not escape or sanitize around it.
+	const bool bRawText = Node->TagName.Equals(TEXT("style"), ESearchCase::IgnoreCase)
+		|| Node->TagName.Equals(TEXT("script"), ESearchCase::IgnoreCase);
+	if (bRawText)
 	{
-		SerializeNode(NodeFromWrapper(ChildWrapper), Out);
+		const FString CloseTagPrefix = FString::Printf(TEXT("</%s"), *Node->TagName.ToLower()); // </style / </script
+		for (const FJsValue& ChildWrapper : Node->Children)
+		{
+			const FDomNode* Child = NodeFromWrapper(ChildWrapper);
+			if (Child != nullptr && Child->Type == EDomNodeType::Text)
+			{
+				checkf(!Child->TextData.Contains(CloseTagPrefix, ESearchCase::IgnoreCase),
+					TEXT("SerializeNode: raw-text <%s> content contains its closing-tag prefix '%s' -- trusted-content invariant violated (it would prematurely close the element)"),
+					*Node->TagName, *CloseTagPrefix);
+				Out += Child->TextData; // RAW: un-escaped, byte-for-byte
+			}
+			else
+			{
+				SerializeNode(Child, Out); // a non-text child of <style>/<script> is unusual; serialize it normally
+			}
+		}
+	}
+	else
+	{
+		for (const FJsValue& ChildWrapper : Node->Children)
+		{
+			SerializeNode(NodeFromWrapper(ChildWrapper), Out);
+		}
 	}
 
 	Out += TEXT("</");
