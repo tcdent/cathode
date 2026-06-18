@@ -38,11 +38,149 @@ version = 0            # schema version of this manifest (placeholder)
 # globals = []         # (003) provided globals
 
 # --- CSS -------------------------------------------------------------------
-# litehtml's coverage (CSS 2/3, flexbox; NO grid; partial CSS3), extended only where
-# Cathode forks litehtml for a specific need. Generates css-allow-list.toml; the
-# linter validates author CSS against it.
+# The CSS capability declaration (013 slice 1) — the supported-property SINGLE SOURCE. SETTLED METHOD (browse-design
+# re-ratified, components-css.md): INVERTED names-minus-exclusions. The supported set is litehtml's OWN authoritative
+# CSS-property parse-name table (string_id.h:163-295, 115 names) MINUS 7 source-cited exclusions = 108 present. NOT a
+# member-filter: a name==member / prefix reconstruction silently drops shorthands whose decomposition lives in
+# litehtml's non-vendored parse() .cpp (flex-flow was one such hole; the hole-count is unknowable from headers).
+# Reading the NAME table is certifiable + fails SAFE (over-include benign under accept-and-ignore). A file-derived
+# completeness test asserts this set == string_id.h:163-295 minus the exclusions (bites on a litehtml name add/remove).
+#
+# THE 7 EXCLUSIONS (source-cited, not taste):
+#   __litehtml_border_spacing_x/y (string_id.h:182,183) — engine-internal accessors (__litehtml_ prefix).
+#   background-image-baseurl (166), list-style-image-baseurl (229) — url-resolution internals (member-backed -> pass a
+#       member-filter; excluded by name).
+#   font-variant (245), counter-reset (294), counter-increment (295) — parse names with NO computed member; litehtml
+#       interns but does not compute them. The R2 member cross-check asserts these 3 stay member-less, so a future
+#       litehtml member-add for any FLAGS the exclusion for reclassification.
+#
+# status:
+#   present             = a litehtml parse name (author-settable; cascade-real lands 013 slices 3-4).
+#   build_how_committed = Axis-3 IN, NOT a litehtml parse name; the build-how delivers it. gap/row-gap/column-gap.
+#   build_how_pending   = Axis-3 IN, NOT a litehtml parse name; DECLARED-present yet cascade-EMPTY until the build-how
+#                         lands. opacity (cascade + Blend2D alpha) + letter-spacing. Any DROP is tcdent's.
+#
+# PENDING (tcdent, exclusion-list edit only — NOT a method change): the ~14 litehtml-NONSTANDARD axis longhands
+# (background-position-x/y, border-radius-x/y, per-corner border-*-radius-x/y) are IN the 115 -> present at the
+# keep-literal default (108). If tcdent curates them to standard-names-only they JOIN the exclusions (-> ~94).
 [css]
-# properties = []      # (003) the supported-property set
+properties = [
+  # === 108 PRESENT — string_id.h:163-295 parse-names MINUS the 7 exclusions (generated from the file, each cited) ===
+  { name = "background",               litehtml = "string_id.h:163", status = "present" },
+  { name = "background-color",         litehtml = "string_id.h:164", status = "present" },
+  { name = "background-image",         litehtml = "string_id.h:165", status = "present" },
+  { name = "background-repeat",        litehtml = "string_id.h:167", status = "present" },
+  { name = "background-origin",        litehtml = "string_id.h:168", status = "present" },
+  { name = "background-clip",          litehtml = "string_id.h:169", status = "present" },
+  { name = "background-attachment",    litehtml = "string_id.h:170", status = "present" },
+  { name = "background-size",          litehtml = "string_id.h:171", status = "present" },
+  { name = "background-position",      litehtml = "string_id.h:172", status = "present" },
+  { name = "background-position-x",    litehtml = "string_id.h:173", status = "present" },
+  { name = "background-position-y",    litehtml = "string_id.h:174", status = "present" },
+  { name = "border",                   litehtml = "string_id.h:176", status = "present" },
+  { name = "border-width",             litehtml = "string_id.h:177", status = "present" },
+  { name = "border-style",             litehtml = "string_id.h:178", status = "present" },
+  { name = "border-color",             litehtml = "string_id.h:179", status = "present" },
+  { name = "border-spacing",           litehtml = "string_id.h:181", status = "present" },
+  { name = "border-left",              litehtml = "string_id.h:185", status = "present" },
+  { name = "border-right",             litehtml = "string_id.h:186", status = "present" },
+  { name = "border-top",               litehtml = "string_id.h:187", status = "present" },
+  { name = "border-bottom",            litehtml = "string_id.h:188", status = "present" },
+  { name = "border-left-style",        litehtml = "string_id.h:190", status = "present" },
+  { name = "border-right-style",       litehtml = "string_id.h:191", status = "present" },
+  { name = "border-top-style",         litehtml = "string_id.h:192", status = "present" },
+  { name = "border-bottom-style",      litehtml = "string_id.h:193", status = "present" },
+  { name = "border-left-width",        litehtml = "string_id.h:195", status = "present" },
+  { name = "border-right-width",       litehtml = "string_id.h:196", status = "present" },
+  { name = "border-top-width",         litehtml = "string_id.h:197", status = "present" },
+  { name = "border-bottom-width",      litehtml = "string_id.h:198", status = "present" },
+  { name = "border-left-color",        litehtml = "string_id.h:200", status = "present" },
+  { name = "border-right-color",       litehtml = "string_id.h:201", status = "present" },
+  { name = "border-top-color",         litehtml = "string_id.h:202", status = "present" },
+  { name = "border-bottom-color",      litehtml = "string_id.h:203", status = "present" },
+  { name = "border-radius",            litehtml = "string_id.h:205", status = "present" },
+  { name = "border-radius-x",          litehtml = "string_id.h:206", status = "present" },
+  { name = "border-radius-y",          litehtml = "string_id.h:207", status = "present" },
+  { name = "border-bottom-left-radius",  litehtml = "string_id.h:209", status = "present" },
+  { name = "border-bottom-left-radius-x",  litehtml = "string_id.h:210", status = "present" },
+  { name = "border-bottom-left-radius-y",  litehtml = "string_id.h:211", status = "present" },
+  { name = "border-bottom-right-radius",  litehtml = "string_id.h:213", status = "present" },
+  { name = "border-bottom-right-radius-x",  litehtml = "string_id.h:214", status = "present" },
+  { name = "border-bottom-right-radius-y",  litehtml = "string_id.h:215", status = "present" },
+  { name = "border-top-left-radius",   litehtml = "string_id.h:217", status = "present" },
+  { name = "border-top-left-radius-x",  litehtml = "string_id.h:218", status = "present" },
+  { name = "border-top-left-radius-y",  litehtml = "string_id.h:219", status = "present" },
+  { name = "border-top-right-radius",  litehtml = "string_id.h:221", status = "present" },
+  { name = "border-top-right-radius-x",  litehtml = "string_id.h:222", status = "present" },
+  { name = "border-top-right-radius-y",  litehtml = "string_id.h:223", status = "present" },
+  { name = "list-style",               litehtml = "string_id.h:225", status = "present" },
+  { name = "list-style-type",          litehtml = "string_id.h:226", status = "present" },
+  { name = "list-style-position",      litehtml = "string_id.h:227", status = "present" },
+  { name = "list-style-image",         litehtml = "string_id.h:228", status = "present" },
+  { name = "margin",                   litehtml = "string_id.h:231", status = "present" },
+  { name = "margin-left",              litehtml = "string_id.h:232", status = "present" },
+  { name = "margin-right",             litehtml = "string_id.h:233", status = "present" },
+  { name = "margin-top",               litehtml = "string_id.h:234", status = "present" },
+  { name = "margin-bottom",            litehtml = "string_id.h:235", status = "present" },
+  { name = "padding",                  litehtml = "string_id.h:236", status = "present" },
+  { name = "padding-left",             litehtml = "string_id.h:237", status = "present" },
+  { name = "padding-right",            litehtml = "string_id.h:238", status = "present" },
+  { name = "padding-top",              litehtml = "string_id.h:239", status = "present" },
+  { name = "padding-bottom",           litehtml = "string_id.h:240", status = "present" },
+  { name = "font",                     litehtml = "string_id.h:242", status = "present" },
+  { name = "font-family",              litehtml = "string_id.h:243", status = "present" },
+  { name = "font-style",               litehtml = "string_id.h:244", status = "present" },
+  { name = "font-weight",              litehtml = "string_id.h:246", status = "present" },
+  { name = "font-size",                litehtml = "string_id.h:247", status = "present" },
+  { name = "line-height",              litehtml = "string_id.h:248", status = "present" },
+  { name = "text-decoration",          litehtml = "string_id.h:249", status = "present" },
+  { name = "white-space",              litehtml = "string_id.h:251", status = "present" },
+  { name = "text-align",               litehtml = "string_id.h:252", status = "present" },
+  { name = "vertical-align",           litehtml = "string_id.h:253", status = "present" },
+  { name = "color",                    litehtml = "string_id.h:254", status = "present" },
+  { name = "width",                    litehtml = "string_id.h:255", status = "present" },
+  { name = "height",                   litehtml = "string_id.h:256", status = "present" },
+  { name = "min-width",                litehtml = "string_id.h:257", status = "present" },
+  { name = "min-height",               litehtml = "string_id.h:258", status = "present" },
+  { name = "max-width",                litehtml = "string_id.h:259", status = "present" },
+  { name = "max-height",               litehtml = "string_id.h:260", status = "present" },
+  { name = "position",                 litehtml = "string_id.h:261", status = "present" },
+  { name = "overflow",                 litehtml = "string_id.h:262", status = "present" },
+  { name = "display",                  litehtml = "string_id.h:263", status = "present" },
+  { name = "visibility",               litehtml = "string_id.h:264", status = "present" },
+  { name = "box-sizing",               litehtml = "string_id.h:265", status = "present" },
+  { name = "z-index",                  litehtml = "string_id.h:266", status = "present" },
+  { name = "float",                    litehtml = "string_id.h:267", status = "present" },
+  { name = "clear",                    litehtml = "string_id.h:268", status = "present" },
+  { name = "text-indent",              litehtml = "string_id.h:269", status = "present" },
+  { name = "left",                     litehtml = "string_id.h:270", status = "present" },
+  { name = "right",                    litehtml = "string_id.h:271", status = "present" },
+  { name = "top",                      litehtml = "string_id.h:272", status = "present" },
+  { name = "bottom",                   litehtml = "string_id.h:273", status = "present" },
+  { name = "cursor",                   litehtml = "string_id.h:274", status = "present" },
+  { name = "content",                  litehtml = "string_id.h:275", status = "present" },
+  { name = "border-collapse",          litehtml = "string_id.h:276", status = "present" },
+  { name = "text-transform",           litehtml = "string_id.h:277", status = "present" },
+  { name = "flex",                     litehtml = "string_id.h:279", status = "present" },
+  { name = "flex-flow",                litehtml = "string_id.h:280", status = "present" },
+  { name = "flex-direction",           litehtml = "string_id.h:281", status = "present" },
+  { name = "flex-wrap",                litehtml = "string_id.h:282", status = "present" },
+  { name = "justify-content",          litehtml = "string_id.h:283", status = "present" },
+  { name = "align-items",              litehtml = "string_id.h:284", status = "present" },
+  { name = "align-content",            litehtml = "string_id.h:285", status = "present" },
+  { name = "align-self",               litehtml = "string_id.h:286", status = "present" },
+  { name = "flex-grow",                litehtml = "string_id.h:287", status = "present" },
+  { name = "flex-shrink",              litehtml = "string_id.h:288", status = "present" },
+  { name = "flex-basis",               litehtml = "string_id.h:289", status = "present" },
+  { name = "caption-side",             litehtml = "string_id.h:291", status = "present" },
+  { name = "order",                    litehtml = "string_id.h:292", status = "present" },
+  # === build-how (Axis-3 IN, NOT litehtml parse names; asserted ABSENT from string_id.h:163-295) ===
+  { name = "gap",                      litehtml = "absent",          status = "build_how_committed" },
+  { name = "row-gap",                  litehtml = "absent",          status = "build_how_committed" },
+  { name = "column-gap",               litehtml = "absent",          status = "build_how_committed" },
+  { name = "opacity",                  litehtml = "absent",          status = "build_how_pending" },
+  { name = "letter-spacing",           litehtml = "absent",          status = "build_how_pending" },
+]
 
 # --- Host API (game.*) -----------------------------------------------------
 # INTENTIONALLY UNSPECIFIED per the architecture doc: the organization and shape of

@@ -1,0 +1,377 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "CathodeDom.h"
+#include "CathodeCssCapability.h"
+#include "CathodeJsRuntime.h"
+#include "CathodeRuntimeTesting.h"
+
+#include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Interfaces/IPluginManager.h"
+
+THIRD_PARTY_INCLUDES_START
+#include "quickjs.h"
+THIRD_PARTY_INCLUDES_END
+
+// 013 slice 1 — the CSS capability declaration's COHERENCE GUARD + the element.style ACCEPT-AND-IGNORE proof.
+// COHERENCE (the no-drift guard ruling-B uses instead of codegen): the hand-authored C++ mirror == capability-
+// manifest.toml [css] AND every PRESENT name ⊆ litehtml's string_id.h parse names — both read as FILES so the test
+// catches vendor drift. The guard BITES if the mirror is perturbed off the manifest (set-equality fails).
+
+namespace
+{
+using namespace Cathode;
+
+class FStubLayoutEngine final : public ILayoutEngine
+{
+public:
+	virtual void SetDocument(const ILayoutDocumentSource&) override {}
+	virtual void MarkNodeDirty(int32, EDirtyKind) override {}
+	virtual FLayoutResult Relayout(int32) override { return FLayoutResult(); }
+};
+
+JSValue Eval(JSContext* Context, const char* Source)
+{
+	return JS_Eval(Context, Source, FCStringAnsi::Strlen(Source), "<cathode-csscap-test>", JS_EVAL_TYPE_GLOBAL);
+}
+
+FString CathodePluginDir()
+{
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
+	return Plugin.IsValid() ? Plugin->GetBaseDir() : FString();
+}
+
+// Extract every `name = "X"` from the manifest [css] block (a line-based parse — no TOML lib needed).
+void ParseManifestCssNames(const FString& Toml, TSet<FString>& Out)
+{
+	TArray<FString> Lines;
+	Toml.ParseIntoArrayLines(Lines);
+	bool bInCss = false;
+	for (const FString& Line : Lines)
+	{
+		const FString Trim = Line.TrimStartAndEnd();
+		if (Trim.StartsWith(TEXT("[")) ) { bInCss = Trim.Equals(TEXT("[css]")); continue; }
+		if (!bInCss) { continue; }
+		int32 NameIdx;
+		if (Trim.FindChar(TEXT('\"'), NameIdx)) // a { name = "X", ... } entry
+		{
+			const int32 Close = Trim.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, NameIdx + 1);
+			if (Trim.Contains(TEXT("name")) && Close > NameIdx)
+			{
+				Out.Add(Trim.Mid(NameIdx + 1, Close - NameIdx - 1));
+			}
+		}
+	}
+}
+
+// Derive litehtml's CSS property NAMES from string_id.h's `// CSS property names` block (`_name_,` -> "name").
+void ParseLitehtmlPropertyNames(const FString& StringIdH, TSet<FString>& Out)
+{
+	TArray<FString> Lines;
+	StringIdH.ParseIntoArrayLines(Lines);
+	bool bInBlock = false;
+	for (const FString& Line : Lines)
+	{
+		const FString Trim = Line.TrimStartAndEnd();
+		if (Trim.Contains(TEXT("// CSS property names"))) { bInBlock = true; continue; }
+		if (!bInBlock) { continue; }
+		if (Trim.StartsWith(TEXT("_")) && Trim.EndsWith(TEXT("_,")))
+		{
+			FString Id = Trim.LeftChop(2);                       // drop the trailing "_,"
+			while (Id.StartsWith(TEXT("_"))) { Id = Id.RightChop(1); } // drop ALL leading "_" (so __litehtml_ -> litehtml-)
+			Out.Add(Id.Replace(TEXT("_"), TEXT("-")));           // _flex_direction_ -> "flex-direction"
+		}
+	}
+}
+
+// Extract css_properties.h computed-member identifiers (m_<name>). SETTLED ROLE (browse-design ratified the inverted
+// method): NOT the inclusion filter — a member-filter silently drops shorthands whose decomposition lives in litehtml's
+// non-vendored parse() .cpp (flex-flow was hole #7; #8 unknowable from headers). The member set is the CROSS-CHECK that
+// justifies the 3 parse-but-not-computed exclusions: assert font-variant/counter-reset/counter-increment stay member-less,
+// so a future litehtml member-add for any flags its exclusion for reclassification.
+void ParseCssPropertyMembers(const FString& Header, TSet<FString>& Out)
+{
+	TArray<FString> Lines;
+	Header.ParseIntoArrayLines(Lines);
+	for (const FString& Line : Lines)
+	{
+		// a bare member DECLARATION "<type> m_<name>;" — the token is immediately followed by ';' (skip the
+		// constructor-initializer uses "m_<name>(...)" where it is followed by '(').
+		int32 Idx = Line.Find(TEXT("m_"), ESearchCase::CaseSensitive, ESearchDir::FromStart, 0);
+		while (Idx != INDEX_NONE)
+		{
+			int32 End = Idx + 2;
+			while (End < Line.Len() && (FChar::IsAlnum(Line[End]) || Line[End] == TEXT('_'))) { ++End; }
+			if (End < Line.Len() && Line[End] == TEXT(';') && End > Idx + 2)
+			{
+				Out.Add(Line.Mid(Idx + 2, End - (Idx + 2)));
+			}
+			Idx = Line.Find(TEXT("m_"), ESearchCase::CaseSensitive, ESearchDir::FromStart, End);
+		}
+	}
+}
+
+// THE 7 AUDITED EXCLUSIONS — single source for every capability test (subtracted from the string_id.h:163-295 universe).
+// 3 parse-but-not-computed (font-variant/counter-reset/counter-increment) + 2 __litehtml internals + 2 *-baseurl url
+// internals. Source-cited in capability-manifest.toml [css]. Single-sourcing here keeps Coherence + CompletenessBites lockstep.
+const TArray<FString>& CssAuditedExclusions()
+{
+	static const TArray<FString> E = {
+		TEXT("litehtml-border-spacing-x"), TEXT("litehtml-border-spacing-y"),
+		TEXT("background-image-baseurl"), TEXT("list-style-image-baseurl"),
+		TEXT("font-variant"), TEXT("counter-reset"), TEXT("counter-increment"),
+	};
+	return E;
+}
+
+// THE INVERTED ORACLE, single-sourced: present = string_id.h:163-295 parse-names MINUS the audited exclusions.
+void DeriveCssPresentSet(const FString& StringIdH, TSet<FString>& Out)
+{
+	ParseLitehtmlPropertyNames(StringIdH, Out);
+	for (const FString& Ex : CssAuditedExclusions()) { Out.Remove(Ex); }
+}
+
+// THE 5 FORWARD-DECLARED BUILD-HOW props — an EXPLICIT CLOSED list (same closed/cited discipline as CssAuditedExclusions).
+// Each is intended Axis-3-IN but is NOT a litehtml parse name, so it is HAND-AUTHORED OUTSIDE the file-derivation; it must
+// stay a closed audited set, never an open bucket. Reason per entry:
+//   gap / row-gap / column-gap — Axis-3 flex gap; litehtml lacks the parse name (Axis-3's settled "implement-or-margins"); build-how at the cascade slice.
+//   opacity                    — Axis-3 IN; litehtml lacks it; build-how spans the cascade + the Blend2D alpha-compositing rasterizer.
+//   letter-spacing             — Axis-3 IN; litehtml lacks it; build-how at the cascade slice.
+const TArray<FString>& CssForwardDeclaredBuildHow()
+{
+	static const TArray<FString> E = {
+		TEXT("gap"), TEXT("row-gap"), TEXT("column-gap"), TEXT("opacity"), TEXT("letter-spacing"),
+	};
+	return E;
+}
+} // namespace
+
+// ===== COMPLETENESS GUARD (inverted method): mirror Present == string_id.h:163-295 parse-names MINUS the 7 audited
+// exclusions (file-derived; bites on a litehtml name add/remove OR a mirror perturbation, BOTH directions); mirror ==
+// manifest [css] lockstep; member CROSS-CHECK that the 3 parse-but-not-computed exclusions stay member-less. =====
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCssCapabilityCoherenceTest,
+	"Cathode.Css.Capability.Coherence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	const FString Dir = CathodePluginDir();
+	if (Dir.IsEmpty()) { AddError(TEXT("could not resolve the Cathode plugin dir")); return false; }
+
+	FString Manifest, StringIdH;
+	const FString ManifestPath = FPaths::Combine(Dir, TEXT("Authoring"), TEXT("capability-manifest.toml"));
+	const FString StringIdPath = FPaths::Combine(Dir, TEXT("Source"), TEXT("ThirdParty"), TEXT("litehtml"), TEXT("include"), TEXT("litehtml"), TEXT("string_id.h"));
+	if (!FFileHelper::LoadFileToString(Manifest, *ManifestPath)) { AddError(FString::Printf(TEXT("could not read %s"), *ManifestPath)); return false; }
+	if (!FFileHelper::LoadFileToString(StringIdH, *StringIdPath)) { AddError(FString::Printf(TEXT("could not read %s"), *StringIdPath)); return false; }
+
+	TSet<FString> ManifestNames, LitehtmlNames;
+	ParseManifestCssNames(Manifest, ManifestNames);
+	ParseLitehtmlPropertyNames(StringIdH, LitehtmlNames);
+	TestTrue(TEXT("the manifest [css] parse found a real set (sanity)"), ManifestNames.Num() > 10);
+	TestTrue(TEXT("the litehtml string_id property-name parse found a real set (sanity)"), LitehtmlNames.Num() > 20);
+
+	FString CssPropsH;
+	const FString CssPropsPath = FPaths::Combine(Dir, TEXT("Source"), TEXT("ThirdParty"), TEXT("litehtml"), TEXT("include"), TEXT("litehtml"), TEXT("css_properties.h"));
+	if (!FFileHelper::LoadFileToString(CssPropsH, *CssPropsPath)) { AddError(FString::Printf(TEXT("could not read %s"), *CssPropsPath)); return false; }
+	TSet<FString> ComputedMembers;
+	ParseCssPropertyMembers(CssPropsH, ComputedMembers);
+	TestTrue(TEXT("the css_properties.h member parse found a real computed-surface set (sanity)"), ComputedMembers.Num() > 40);
+
+	// THE 7 AUDITED EXCLUSIONS are single-sourced in CssAuditedExclusions(). GROUND each: it MUST be a real string_id.h
+	// parse name, else the exclusion is a phantom (a name we exclude that litehtml never had). The 3 parse-but-not-computed
+	// are additionally cross-checked member-less below; the 4 internals are member-backed url/accessor names excluded by name.
+	for (const FString& Ex : CssAuditedExclusions())
+	{
+		TestTrue(FString::Printf(TEXT("exclusion '%s' is a real string_id.h parse name (grounded, not phantom)"), *Ex), LitehtmlNames.Contains(Ex));
+	}
+	static const TCHAR* const ParseButNotComputed[] = { TEXT("font-variant"), TEXT("counter-reset"), TEXT("counter-increment") };
+
+	// DERIVE Present from the FILE (single-sourced inverted oracle): universe = string_id.h:163-295 parse-names MINUS the
+	// audited exclusions. It bites on a litehtml name ADD (new name -> in DerivedPresent, absent from mirror -> fail) or REMOVE.
+	TSet<FString> DerivedPresent;
+	DeriveCssPresentSet(StringIdH, DerivedPresent);
+
+	// Partition the mirror into Present / build-how.
+	TSet<FString> MirrorNames, MirrorPresent, MirrorBuildHow;
+	for (const FCssCapabilityEntry& E : GetCssCapabilityMirror())
+	{
+		MirrorNames.Add(E.Name);
+		(E.Status == ECssPropertyStatus::Present ? MirrorPresent : MirrorBuildHow).Add(E.Name);
+	}
+
+	// (1) mirror == manifest [css] lockstep — BITES if the two materializations drift.
+	TestTrue(TEXT("mirror == manifest [css] (same name set — lockstep)"), MirrorNames.Difference(ManifestNames).Num() == 0 && ManifestNames.Difference(MirrorNames).Num() == 0);
+
+	// (2) COMPLETENESS, BOTH directions: mirror Present == DerivedPresent (string_id.h:163-295 minus exclusions).
+	TestEqual(TEXT("mirror Present has no name OUTSIDE the derived set (no over-declaration)"), MirrorPresent.Difference(DerivedPresent).Num(), 0);
+	TestEqual(TEXT("mirror Present is MISSING no derived name (bites on a litehtml name ADD)"), DerivedPresent.Difference(MirrorPresent).Num(), 0);
+
+	// (3) MEMBER CROSS-CHECK: the 3 parse-but-not-computed exclusions stay member-LESS (a future litehtml member-add flags them).
+	for (const TCHAR* Pnc : ParseButNotComputed)
+	{
+		const FString MemberForm = FString(Pnc).Replace(TEXT("-"), TEXT("_"));
+		TestFalse(FString::Printf(TEXT("parse-but-not-computed '%s' has NO css_properties member (cross-check; a member-add would flag reclassification)"), Pnc), ComputedMembers.Contains(MemberForm));
+	}
+
+	// (4) build-how (gap/row-gap/column-gap/opacity/letter-spacing) MUST be ABSENT from string_id.h (Axis-3 IN, not a litehtml parse name).
+	for (const FString& Bh : MirrorBuildHow)
+	{
+		TestFalse(FString::Printf(TEXT("build-how '%s' is correctly ABSENT from string_id.h (that's WHY it needs a build-how)"), *Bh), LitehtmlNames.Contains(Bh));
+	}
+
+	// (5) CLOSED-SET HYGIENE on the forward-declared 5 build-how (reviewer standing gate; same discipline as the 7 exclusions).
+	const TSet<FString> BuildHowAudited(CssForwardDeclaredBuildHow());
+	// (5a) the build-how mirror entries are EXACTLY the closed audited list — not an open bucket (both directions).
+	TestEqual(TEXT("build-how mirror entries == the closed audited 5 (no over)"), MirrorBuildHow.Difference(BuildHowAudited).Num(), 0);
+	TestEqual(TEXT("build-how mirror entries == the closed audited 5 (no under)"), BuildHowAudited.Difference(MirrorBuildHow).Num(), 0);
+	// (5b) EXACT 113 = 108 + 5, DISJOINT: the file-derivation yields exactly 108 INDEPENDENT of the 5; no name in both partitions.
+	TestEqual(TEXT("derived Present is exactly 108 (file-derivation, independent of the 5 build-how)"), DerivedPresent.Num(), 108);
+	TestEqual(TEXT("mirror Present is exactly 108"), MirrorPresent.Num(), 108);
+	TestEqual(TEXT("mirror build-how is exactly 5"), MirrorBuildHow.Num(), 5);
+	TestEqual(TEXT("Present and build-how are DISJOINT (no overlap in 113 = 108 + 5)"), MirrorPresent.Intersect(MirrorBuildHow).Num(), 0);
+	// (5c) none of the 5 leaks into the 108 file-derivation (each forward-declared name is OUTSIDE the derived set).
+	for (const FString& Bh : CssForwardDeclaredBuildHow())
+	{
+		TestFalse(FString::Printf(TEXT("forward-declared '%s' does NOT leak into the 108 file-derivation"), *Bh), DerivedPresent.Contains(Bh));
+	}
+
+	// (6) DISCRIMINATING declared-vs-cascaded: a build-how-pending prop (opacity) is DECLARED in the mirror yet is NOT a
+	// litehtml computed-parse name -> cascade-EMPTY by construction until the build-how lands (cascade-real is 013 slices
+	// 3-4). Contrast a Present prop (color): DECLARED AND a litehtml parse name -> cascade-real. Proves declared != cascaded.
+	auto MirrorStatus = [](const FString& Name) -> int32 {
+		for (const FCssCapabilityEntry& E : GetCssCapabilityMirror()) { if (Name.Equals(E.Name, ESearchCase::CaseSensitive)) { return (int32)E.Status; } }
+		return -1;
+	};
+	TestEqual(TEXT("'opacity' is DECLARED build-how-PENDING in the mirror (declared, not yet computed)"), MirrorStatus(TEXT("opacity")), (int32)ECssPropertyStatus::BuildHowPending);
+	TestFalse(TEXT("'opacity' is NOT a litehtml computed-parse name -> cascade-empty until the build-how (declared != cascaded)"), LitehtmlNames.Contains(TEXT("opacity")));
+	TestEqual(TEXT("contrast: 'color' is PRESENT in the mirror (declared)"), MirrorStatus(TEXT("color")), (int32)ECssPropertyStatus::Present);
+	TestTrue(TEXT("contrast: 'color' IS a litehtml computed-parse name (declared AND cascade-real)"), LitehtmlNames.Contains(TEXT("color")));
+
+	return true;
+}
+
+// ===== COMPLETENESS BITES BOTH DIRECTIONS — the discriminating boundary proof. A guard that cannot fail proves nothing:
+// construct perturbed Present sets and assert the SAME symmetric-difference comparison the Coherence guard uses DETECTS
+// an injected fake (over-declaration) and a dropped real name (under-declaration), with a clean control on the true set. =====
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCssCapabilityCompletenessBitesTest,
+	"Cathode.Css.Capability.CompletenessBites",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCssCapabilityCompletenessBitesTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	const FString Dir = CathodePluginDir();
+	if (Dir.IsEmpty()) { AddError(TEXT("could not resolve the Cathode plugin dir")); return false; }
+	FString StringIdH;
+	const FString StringIdPath = FPaths::Combine(Dir, TEXT("Source"), TEXT("ThirdParty"), TEXT("litehtml"), TEXT("include"), TEXT("litehtml"), TEXT("string_id.h"));
+	if (!FFileHelper::LoadFileToString(StringIdH, *StringIdPath)) { AddError(FString::Printf(TEXT("could not read %s"), *StringIdPath)); return false; }
+
+	TSet<FString> DerivedPresent;
+	DeriveCssPresentSet(StringIdH, DerivedPresent);
+	TSet<FString> MirrorPresent;
+	for (const FCssCapabilityEntry& E : GetCssCapabilityMirror()) { if (E.Status == ECssPropertyStatus::Present) { MirrorPresent.Add(E.Name); } }
+
+	// INDEPENDENCE (reviewer gate: the 108 file-derivation bites independently of the 5): none of the forward-declared
+	// build-how leaks into either the file-derivation or the Present partition, so the perturbation below tests the 108 alone.
+	for (const FString& Bh : CssForwardDeclaredBuildHow())
+	{
+		TestFalse(FString::Printf(TEXT("build-how '%s' is OUTSIDE the file-derived 108 (bite domain independent of the 5)"), *Bh), DerivedPresent.Contains(Bh));
+		TestFalse(FString::Printf(TEXT("build-how '%s' is OUTSIDE the mirror Present partition"), *Bh), MirrorPresent.Contains(Bh));
+	}
+
+	// CONTROL: the real mirror Present is complete — zero diff BOTH directions (no false-positive; the guard is green on truth).
+	TestEqual(TEXT("CONTROL: real mirror Present has zero over-declaration vs derived"), MirrorPresent.Difference(DerivedPresent).Num(), 0);
+	TestEqual(TEXT("CONTROL: real mirror Present has zero under-declaration vs derived"), DerivedPresent.Difference(MirrorPresent).Num(), 0);
+
+	// OVER-DECLARATION bite: inject a fake name the derivation can't contain -> the (Mirror - Derived) check DETECTS it.
+	{
+		TSet<FString> Over = MirrorPresent;
+		Over.Add(TEXT("__cathode_perturb_fake__"));
+		TestTrue(TEXT("BITE (over): an injected fake name IS caught by the over-declaration check (Mirror - Derived > 0)"), Over.Difference(DerivedPresent).Num() > 0);
+	}
+	// UNDER-DECLARATION bite: drop a real present name -> the (Derived - Mirror) check DETECTS the gap.
+	{
+		const bool bHadDisplay = MirrorPresent.Contains(TEXT("display"));
+		TestTrue(TEXT("precondition: 'display' is a real present name available to drop"), bHadDisplay);
+		TSet<FString> Under = MirrorPresent;
+		Under.Remove(TEXT("display"));
+		TestTrue(TEXT("BITE (under): a dropped real name IS caught by the under-declaration check (Derived - Mirror > 0)"), DerivedPresent.Difference(Under).Num() > 0);
+	}
+
+	return true;
+}
+
+// ===== element.style ACCEPT-AND-IGNORE (fork-3): unsupported write does NOT reach the canonical 'style' attribute =====
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCssCapabilityValidationTest,
+	"Cathode.Css.Capability.Validation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCssCapabilityValidationTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+
+	FJsValue ElW = Doc->CreateElement(TEXT("div"));
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__el", JS_DupValue(Context, ElW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { JS_FreeValue(Context, R); AddError(FString::Printf(TEXT("JS threw: %s"), ANSI_TO_TCHAR(Expr))); return false; }
+		bool bValue = false; const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+
+	// DECLARED (Present) name accepted -> reaches the canonical 'style' attribute.
+	TestTrue(TEXT("declared 'color' write reaches the style attribute"),
+		EvalBool("(function(){ __el.style.color='red'; return __el.getAttribute('style').indexOf('color')>=0 && __el.style.color==='red'; })()"));
+
+	// UNSUPPORTED (OUT) name SILENTLY DROPPED -> demonstrably ABSENT from the style attribute (NOT merely 'no error').
+	TestTrue(TEXT("unsupported 'grid-template-columns' write is DROPPED — absent from the style attribute (gate flip)"),
+		EvalBool("(function(){ __el.style.gridTemplateColumns='1fr 1fr'; var s=__el.getAttribute('style')||''; return s.indexOf('grid')<0 && __el.style.gridTemplateColumns===undefined; })()"));
+	TestTrue(TEXT("setProperty('grid-gap',...) (unsupported) is DROPPED — absent from the style attribute"),
+		EvalBool("(function(){ __el.style.setProperty('grid-gap','10px'); return (__el.getAttribute('style')||'').indexOf('grid')<0; })()"));
+
+	// CUSTOM properties (--x, the var() theming) stay ACCEPTED (not regressed by the gate).
+	TestTrue(TEXT("custom property '--brand' is accepted (var() theming) — reaches the style attribute"),
+		EvalBool("(function(){ __el.style.setProperty('--brand','#0af'); return (__el.getAttribute('style')||'').indexOf('--brand')>=0; })()"));
+
+	// cssText FILTERS the unsupported (keeps declared + custom, drops OUT).
+	TestTrue(TEXT("cssText filters unsupported: 'color:red;grid-area:x' keeps color, drops grid"),
+		EvalBool("(function(){ __el.style.cssText='color:red;grid-area:foo'; var s=__el.getAttribute('style')||''; return s.indexOf('color')>=0 && s.indexOf('grid')<0; })()"));
+
+	// SELF-GUARD — the BREAKING GEOMETRY (review): a cssText with MULTIPLE declared props INCLUDING font-size. The prior
+	// cssText case (color+grid-area, one declared/one unsupported) structurally could NOT see a declared prop dropped or
+	// re-serialized; the multi-declared-incl-font-size cell lived only in 012's ElementStyle. Now it is IN the slice's own proof.
+	// (5a) all-declared multi-prop round-trips VERBATIM — color AND font-size both survive, exact serialization (the cell that broke).
+	TestTrue(TEXT("cssText multi-declared incl font-size round-trips VERBATIM (color AND font-size survive, exact bytes)"),
+		EvalBool("(function(){ __el.style.cssText='color:red;font-size:12px'; return __el.getAttribute('style')==='color:red;font-size:12px' && __el.style.color==='red' && __el.style.fontSize==='12px'; })()"));
+	// (5b) mixed: declared (color+font-size) + custom (--brand) KEPT, unsupported (grid-area) FILTERED — declared admitted, drop preserved.
+	TestTrue(TEXT("cssText mixed: declared color+font-size + custom --brand KEPT, unsupported grid-area FILTERED"),
+		EvalBool("(function(){ __el.style.cssText='color:red;font-size:12px;grid-area:foo;--brand:#0af'; var s=__el.getAttribute('style')||''; return s.indexOf('color')>=0 && s.indexOf('font-size')>=0 && s.indexOf('--brand')>=0 && s.indexOf('grid')<0 && __el.style.fontSize==='12px'; })()"));
+
+	// BUILD-HOW-PENDING: opacity declares-PRESENT (accepted, reaches the attribute) — its cascade-empty resolution is
+	// the slice-5 getComputedStyle stub (013 slices 3-4 deliver the value). The marking is real (mirror status).
+	TestTrue(TEXT("build-how-pending 'opacity' is DECLARED — accepted, reaches the style attribute"),
+		EvalBool("(function(){ __el.style.opacity='0.5'; return (__el.getAttribute('style')||'').indexOf('opacity')>=0; })()"));
+
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

@@ -1,6 +1,7 @@
 #include "CathodeDom.h"
 
 #include "CathodeBoundMember.h" // sprint 012 slice 1: the single binding-definition mechanism (install + enumerate)
+#include "CathodeCssCapability.h" // 013 slice 1: the CSS capability mirror — element.style accept-and-ignore validation
 
 // The DOM is quickjs-type-coupled by design (via 007). quickjs.h reaches here through CathodeBinding.h; the
 // DOM calls a few quickjs primitives directly to map wrappers<->opaques. Include path wired at execution.
@@ -1431,6 +1432,37 @@ int StyleGetOwnProperty(JSContext* Ctx, JSPropertyDescriptor* Desc, JSValueConst
 
 // EXOTIC set_property: cssText + named CSS properties write through to the canonical 'style' attribute. A READ-ONLY
 // backing (getComputedStyle) silently no-ops (spec). Arbitrary names route here (--custom / anyName), not just color.
+// 013 slice 1 — the element.style ACCEPT-AND-IGNORE gate (fork-3): a CSS property write is accepted iff its name is
+// in the capability mirror (Present or either BuildHow) OR is a custom property (--x, the var() theming model, always
+// valid). An undeclared/OUT name is SILENTLY DROPPED (not written to the canonical 'style' attribute, never reaches
+// the cascade) — CSSOM parity. (Distinct from the el[name] undefined-member backstop, which THROWS.)
+bool IsAcceptedStyleProperty(const FString& CssName)
+{
+	return CssName.StartsWith(TEXT("--")) || IsDeclaredCssProperty(CssName); // custom props + declared props
+}
+
+// cssText filter (013 slice 1): drop the unsupported declarations, KEEP the accepted ones VERBATIM (the author's exact
+// spacing/order). FILTER-ONLY, deliberately NOT a parse->SerializeInlineStyle round-trip: re-serializing would NORMALIZE
+// whitespace ('color:red' -> 'color: red') and rewrite the canonical 'style' bytes, regressing the cssText verbatim
+// round-trip (the pre-slice-1 cssText path set the raw string as-is). We split on ';', drop only the declarations whose
+// name is unsupported (or malformed), and rejoin the kept RAW substrings. (Moving to CSSOM-normalized serialization would
+// be a separate, intentional behavior change + a CathodeDomStyleTests update — out of this slice's filter-only scope.)
+FString FilterDeclaredInlineStyle(const FString& Css)
+{
+	TArray<FString> RawDecls;
+	Css.ParseIntoArray(RawDecls, TEXT(";"), true);
+	TArray<FString> Kept;
+	for (const FString& Raw : RawDecls)
+	{
+		int32 Colon = INDEX_NONE;
+		if (!Raw.FindChar(TEXT(':'), Colon)) { continue; } // a declaration with no ':' is malformed -> drop
+		const FString Name = Raw.Left(Colon).TrimStartAndEnd(); // trim for the membership check ONLY, not the kept text
+		if (IsAcceptedStyleProperty(Name)) { Kept.Add(Raw); }   // keep the RAW substring verbatim (no re-serialization)
+	}
+	if (Kept.Num() == RawDecls.Num()) { return Css; } // nothing dropped -> the author's exact cssText, byte-for-byte
+	return FString::Join(Kept, TEXT(";"));
+}
+
 int StyleSetProperty(JSContext* Ctx, JSValueConst Obj, JSAtom Prop, JSValueConst Value, JSValueConst /*Receiver*/, int /*Flags*/)
 {
 	FStyleBacking* B = static_cast<FStyleBacking*>(JS_GetOpaque(Obj, GStyleDeclClassId));
@@ -1447,13 +1479,17 @@ int StyleSetProperty(JSContext* Ctx, JSValueConst Obj, JSAtom Prop, JSValueConst
 	MarshalAttributeValue(Ctx, Value, ValStr); // bounded coercion (String as-is / Number / Bool -> string)
 	if (Name == TEXT("cssText"))
 	{
-		Node->SetAttribute(TEXT("style"), ValStr); // cssText IS the canonical attribute string
+		Node->SetAttribute(TEXT("style"), FilterDeclaredInlineStyle(ValStr)); // cssText: filter unsupported, keep canonical
 	}
 	else
 	{
-		SetInlineProperty(Node, StyleNameToCss(Name), ValStr);
+		const FString CssName = StyleNameToCss(Name);
+		if (IsAcceptedStyleProperty(CssName)) // accept-and-ignore: an undeclared property write is SILENTLY dropped
+		{
+			SetInlineProperty(Node, CssName, ValStr);
+		}
 	}
-	return 1;
+	return 1; // CSSOM: an unsupported CSS property write is silent (no throw) — NOT an error
 }
 
 void StyleDeclFinalizer(JSRuntime* /*Rt*/, JSValueConst Val)
@@ -1478,7 +1514,10 @@ JSValue StyleSetPropertyMethod(JSContext* Ctx, JSValueConst ThisVal, int Argc, J
 	FString Name, Val;
 	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Name)) { return JS_ThrowTypeError(Ctx, "setProperty expects (name, value)"); }
 	MarshalAttributeValue(Ctx, Argv[1], Val);
-	SetInlineProperty(Node, Name, Val); // name AS-IS (already CSS-form)
+	if (IsAcceptedStyleProperty(Name)) // name AS-IS (CSS-form); accept-and-ignore the undeclared
+	{
+		SetInlineProperty(Node, Name, Val);
+	}
 	return JS_UNDEFINED;
 }
 
