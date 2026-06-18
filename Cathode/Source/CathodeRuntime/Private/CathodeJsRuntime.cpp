@@ -86,9 +86,27 @@ public:
 
 	virtual FEvalResult Evaluate(const FString& Source, const FString& SourceName, EEvalKind Kind) override
 	{
-		// TODO(eval/startup slice): JS_Eval(Context, ..., JS_EVAL_TYPE_GLOBAL | _MODULE), map a thrown
-		// JSValue to FJsError, and JS_FreeValue the result. Not owned by Slice 2 (lifecycle only).
-		return FEvalResult{};
+		// 016 slice 1 — real JS_Eval (the shape is proven by CathodeContractGlobalsTests). FEvalResult carries
+		// no vendor value (the Bridge's seam); we report ONLY whether it threw + the error. Both eval-type flags
+		// are wired per Kind (Module is wired-but-dormant this slice — no caller/proof; the proof is on Global).
+		FEvalResult Result;
+		if (Context == nullptr)
+		{
+			return Result; // defensive (IsValid() guards this) — bThrew=false, no engine
+		}
+
+		const FTCHARToUTF8 SourceUtf8(*Source);
+		const FTCHARToUTF8 NameUtf8(*SourceName);
+		const int EvalFlags = (Kind == EEvalKind::Module) ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
+
+		JSValue EvalResult = JS_Eval(Context, SourceUtf8.Get(), SourceUtf8.Length(), NameUtf8.Get(), EvalFlags);
+		if (JS_IsException(EvalResult))
+		{
+			Result.bThrew = true;
+			TakePendingError(Result.Error); // pull the engine's pending exception -> Message/Stack
+		}
+		JS_FreeValue(Context, EvalResult); // free the result handle on EVERY path (the exception-sentinel free is a safe no-op)
+		return Result;
 	}
 
 	virtual EJobPumpResult ExecutePendingJob() override
