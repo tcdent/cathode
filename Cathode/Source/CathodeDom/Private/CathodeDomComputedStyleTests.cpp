@@ -12,8 +12,8 @@ THIRD_PARTY_INCLUDES_END
 
 // 013 slice 4 — the GATE-FLIP proof: getComputedStyle returns litehtml's REAL resolved values (QueryComputedValue); an
 // empty value (correct in 012/slice-1) is now a DEFECT. Each of the 17 litehtml-computed props carries its OWN
-// DISCRIMINATING specified!=computed fixture (so a wrong-source/echo read fails, not just the stub); opacity asserts
-// EMPTY (the lone build-how-pending positive boundary); font-family is RELATIONAL-TO-CAPTURE (a unique controlled face
+// DISCRIMINATING specified!=computed fixture (so a wrong-source/echo read fails, not just the stub); opacity reads its
+// OWN-INLINE value (CathodeComputed, 014 slice 2 — was the lone empty boundary in 013/slice-1); font-family is RELATIONAL-TO-CAPTURE (a unique controlled face
 // round-trips input->Container-capture->read-back, env-independent -- no system font, the stub measurer does no matching).
 // Drives the REAL litehtml engine over a real FDomDocument; FORK-1: getComputedStyle is CathodeDom-side over the
 // engine-free FResolvedStyle (FString) seam.
@@ -109,8 +109,9 @@ bool FCathodeDomComputedStyleTest::RunTest(const FString& Parameters)
 	// ENUMS -> litehtml's computed keyword (not the echoed attr).
 	TestTrue(TEXT("text-align: center -> 'center'"), Gcs("getComputedStyle(__c)['text-align'] === 'center'"));
 	TestTrue(TEXT("visibility: hidden -> 'hidden'"), Gcs("getComputedStyle(__c)['visibility'] === 'hidden'"));
-	// OPACITY -> EMPTY (build-how-pending positive boundary; gate-accepted yet cascade-empty -- NOT a defect).
-	TestTrue(TEXT("opacity: build-how-pending -> '' (legitimately empty, NOT a defect)"), Gcs("getComputedStyle(__c)['opacity'] === ''"));
+	// OPACITY -> '0.5' (014 slice 2 FLIP: was '' build-how-pending; now CathodeComputed parses __c's OWN opacity:0.5).
+	// THE FRESH-BINARY MARKER for slice 2 — a STALE binary returns '' here and FAILS (the behavior flip, not a name-set change).
+	TestTrue(TEXT("opacity: 0.5 -> '0.5' (CathodeComputed own-inline; 014 slice 2 flip from '')"), Gcs("getComputedStyle(__c)['opacity'] === '0.5'"));
 	// FONT -> resolved px / numeric; font-family relational-to-capture (round-trip, env-independent).
 	TestTrue(TEXT("font-size: 1.5em of 16px -> '24px' (resolved px)"), Gcs("getComputedStyle(__d)['font-size'] === '24px'"));
 	TestTrue(TEXT("line-height: 1.5 unitless * 24px -> '36px' (resolved px, its OWN fixture)"), Gcs("getComputedStyle(__d)['line-height'] === '36px'"));

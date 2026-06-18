@@ -23,8 +23,10 @@ THIRD_PARTY_INCLUDES_END
 //    (the parse WORKS on this machinery) AND (b) the child with NO own letter-spacing is '' (own-element-only, NOT
 //    inherited). (a) is what makes (b) bite — without it, child-'' can't distinguish own-element-only from a broken parse.
 //  - unset -> '' (NOT 'normal' — the documented own-inline partial).
-//  - opacity CONTRAST (status is informational; the gate is NAME-keyed): the same element reads letter-spacing NON-empty
-//    WHILE opacity (BuildHowPending) reads '' — same mirror, same gate, the READ differs by property name.
+//  - NAME-keyed read (status is informational): the same element reads TWO CathodeComputed props at DISTINCT values —
+//    letter-spacing '1.6px' AND opacity '1' (the initial). A status-keyed read couldn't return two different values for
+//    ONE status; the per-NAME branch does. The bite is the DISTINCT values, NOT 'both non-empty' (opacity flipped ''->'1'
+//    at 014 slice 2, so the old empty-foil is retired).
 
 namespace
 {
@@ -117,9 +119,12 @@ bool FCathodeDomLetterSpacingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("unset: getComputedStyle(__unset).letter-spacing === '' (own-inline partial; not 'normal')"),
 		Js("getComputedStyle(__unset)['letter-spacing'] === ''"));
 
-	// opacity CONTRAST: same element reads letter-spacing NON-empty WHILE opacity '' (NAME-keyed read; status informational).
-	TestTrue(TEXT("contrast: __em reads letter-spacing NON-empty WHILE opacity '' (same gate, read differs by name)"),
-		Js("getComputedStyle(__em)['letter-spacing'] !== '' && getComputedStyle(__em)['opacity'] === ''"));
+	// NAME-KEYED read (status informational): __em reads TWO CathodeComputed props at DISTINCT values — letter-spacing
+	// '1.6px' AND opacity '1' (initial; __em sets no own opacity). A STATUS-keyed read could NOT yield two different values
+	// for ONE status; the per-NAME QueryComputedValue branch does. The BITE is the distinct values ('1.6px' != '1'), NOT
+	// 'both non-empty' (vacuous since opacity flipped ''->'1' at 014 slice 2).
+	TestTrue(TEXT("NAME-keyed: __em letter-spacing === '1.6px' AND opacity === '1' (two CathodeComputed props, distinct per-name values)"),
+		Js("getComputedStyle(__em)['letter-spacing'] === '1.6px' && getComputedStyle(__em)['opacity'] === '1'"));
 
 	return true;
 }

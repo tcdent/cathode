@@ -11,17 +11,16 @@
 namespace Cathode
 {
 
-// Per the manifest [css] status: PRESENT = litehtml parses + cascades it. The other two are Axis-3 IN but litehtml
-// lacks the parse name (declared, never an undeclared drop):
-//   BuildHowPending = resolves cascade-EMPTY until its build-how lands (opacity).
-//   CathodeComputed = delivered Cathode-side TODAY -- getComputedStyle parses the element's OWN inline value
-//                     (own-element-only; inheritance + rendering deferred to the litehtml build-how). A TRANSITIONAL
-//                     partial that migrates to Present when litehtml gains the parse name (letter-spacing, 014 slice 1).
-// All three are DECLARED (valid element.style names); only the unsupported (undeclared) are dropped.
+// Per the manifest [css] status: PRESENT = litehtml parses + cascades it. CathodeComputed is Axis-3 IN but litehtml lacks
+// the parse name (declared, never an undeclared drop) — Cathode OWNS the value: getComputedStyle parses the element's OWN
+// inline value (own-inline + the CSS initial correct; a cascaded/stylesheet value + rendering are deferred). Migration is
+// PROPERTY-DEPENDENT: letter-spacing TRANSITIONAL (-> Present if litehtml ever parses it); opacity TERMINAL (litehtml never
+// parses opacity — compositing is the rasterizer's job, not a layout input; the value stays Cathode-owned, only RENDERING
+// comes via the rasterizer build-how). Both statuses are DECLARED; only the unsupported (undeclared) are dropped.
+// (build_how_pending retired at 014 slice 2 — opacity was its last entry; re-add when a real pending prop appears.)
 enum class ECssPropertyStatus : uint8
 {
 	Present,
-	BuildHowPending,
 	CathodeComputed,
 };
 
@@ -35,7 +34,7 @@ struct FCssCapabilityEntry
 const TArray<FCssCapabilityEntry>& GetCssCapabilityMirror();
 
 // element.style / setProperty validation predicate (fork-3 accept-and-ignore): a property NAME is DECLARED (and so
-// accepted) iff it is in the mirror (Present OR either BuildHow). An undeclared name is silently dropped.
+// accepted) iff it is in the mirror (Present OR CathodeComputed). An undeclared name is silently dropped.
 bool IsDeclaredCssProperty(const FString& Name);
 
 } // namespace Cathode

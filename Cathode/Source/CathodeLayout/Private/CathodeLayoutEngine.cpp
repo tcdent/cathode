@@ -341,6 +341,36 @@ static FString ParseOwnInlineLetterSpacing(const char* StyleAttr, int32 FontSize
 	return FString(); // no own letter-spacing declaration -> empty (own-element-only: the unset / deferred-inheritance boundary)
 }
 
+// 014 slice 2 (CathodeComputed) — opacity is non-litehtml; getComputedStyle sources it Cathode-side: parse the element's
+// OWN inline value ON-DEMAND. CSS computed-value rule = clamp(<number> | <percentage>, [0,1]) serialized as a plain number
+// ('0.5'/'1'/'0'; 1.5->'1' & -0.2->'0' clamp; .5->'0.5' normalize; 90%->'0.9'). opacity does NOT inherit + initial = 1, so
+// UNSET -> '1' (the correct CSS computed value; no cascade needed). A cascaded/stylesheet opacity is OWN-INLINE-ONLY here
+// (litehtml discards opacity; we read only El's own attr) — deferred with the rasterizer build-how. Engine-free; FString
+// crosses the FResolvedStyle seam, so CathodeDom never sees litehtml.
+static FString ParseOwnInlineOpacity(const char* StyleAttr)
+{
+	if (StyleAttr != nullptr)
+	{
+		TArray<FString> Decls;
+		FString(UTF8_TO_TCHAR(StyleAttr)).ParseIntoArray(Decls, TEXT(";"), true);
+		for (const FString& Decl : Decls)
+		{
+			int32 Colon;
+			if (!Decl.FindChar(TEXT(':'), Colon)) { continue; }
+			if (!Decl.Left(Colon).TrimStartAndEnd().Equals(TEXT("opacity"), ESearchCase::IgnoreCase)) { continue; }
+			const FString Value = Decl.RightChop(Colon + 1).TrimStartAndEnd();
+			const bool bPercent = Value.EndsWith(TEXT("%"));
+			const FString NumStr = (bPercent ? Value.LeftChop(1) : Value).TrimStartAndEnd();
+			// a malformed declaration is invalid -> ignored -> the CSS initial '1' (opacity does NOT inherit).
+			if (NumStr.IsEmpty() || !(FChar::IsDigit(NumStr[0]) || NumStr[0] == TEXT('.') || NumStr[0] == TEXT('-') || NumStr[0] == TEXT('+'))) { return FString(TEXT("1")); }
+			float Number = FCString::Atof(*NumStr);
+			if (bPercent) { Number /= 100.0f; }
+			return FString::Printf(TEXT("%g"), FMath::Clamp(Number, 0.0f, 1.0f));
+		}
+	}
+	return FString(TEXT("1")); // no own opacity declaration -> the CSS initial value (opacity does NOT inherit)
+}
+
 // The litehtml-backed relayout backend — the vendor edge of the IRelayoutBackend seam. Re-feeds markup
 // through the document_container + renders + draws (which fires the paint callbacks into the sink). The
 // complete path re-feeds the whole document; the intelligent path re-feeds only the affected subtree.
@@ -446,8 +476,14 @@ public:
 			return ParseOwnInlineLetterSpacing(El->get_attr("style"), Css.get_font_size());
 		}
 
-		// opacity (build-how-pending) -> EMPTY (the Fork-B positive boundary; the lone legitimately-empty contract prop).
-		return FString();
+		// opacity (014 slice 2, CathodeComputed) -> non-litehtml; parse the element's OWN inline value Cathode-side
+		// (NAME-keyed), clamp [0,1], unset -> the CSS initial '1' (opacity does NOT inherit). Cascaded + rendering deferred.
+		if (Property == TEXT("opacity"))
+		{
+			return ParseOwnInlineOpacity(El->get_attr("style"));
+		}
+
+		return FString(); // an unmapped node / non-contract property -> empty (every contract property has a branch above)
 	}
 
 private:

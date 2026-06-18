@@ -55,10 +55,14 @@ version = 0            # schema version of this manifest (placeholder)
 #       litehtml member-add for any FLAGS the exclusion for reclassification.
 #
 # status:
-#   present             = a litehtml parse name (author-settable; cascade-real lands 013 slices 3-4).
-#   build_how_pending   = Axis-3 IN, NOT a litehtml parse name; DECLARED-present yet cascade-EMPTY until the build-how
-#                         lands. opacity (cascade + Blend2D alpha) + letter-spacing. Any DROP is tcdent's.
-#                         (gap/row-gap/column-gap were build-how-committed; tcdent descoped them from 014 — NOT spec'd.)
+#   present          = a litehtml parse name (author-settable; cascade-real lands 013 slices 3-4).
+#   cathode_computed = Axis-3 IN, NOT a litehtml parse name; Cathode OWNS the value — getComputedStyle parses the element's
+#                      OWN inline value (own-inline + the CSS initial correct; a cascaded/stylesheet value + rendering are
+#                      deferred). Migration is PROPERTY-DEPENDENT: letter-spacing TRANSITIONAL (→ present if litehtml ever
+#                      parses it), opacity TERMINAL (litehtml never parses opacity; value stays Cathode-owned, rendering via
+#                      the rasterizer build-how). opacity + letter-spacing.
+#                      (build_how_pending retired at 014 slice 2 — opacity was its last entry; re-add when a real pending prop appears.
+#                       gap/row-gap/column-gap were build-how-committed; tcdent descoped them from 014 — NOT spec'd.)
 #
 # PENDING (tcdent, exclusion-list edit only — NOT a method change): the ~14 litehtml-NONSTANDARD axis longhands
 # (background-position-x/y, border-radius-x/y, per-corner border-*-radius-x/y) are IN the 115 -> present at the
@@ -174,9 +178,9 @@ properties = [
   { name = "flex-basis",               litehtml = "string_id.h:289", status = "present" },
   { name = "caption-side",             litehtml = "string_id.h:291", status = "present" },
   { name = "order",                    litehtml = "string_id.h:292", status = "present" },
-  # === build-how (Axis-3 IN, NOT litehtml parse names; asserted ABSENT from string_id.h:163-295) ===
-  { name = "opacity",                  litehtml = "absent",          status = "build_how_pending" },
-  { name = "letter-spacing",           litehtml = "absent",          status = "build_how_pending" },
+  # === non-litehtml declared (cathode_computed; Axis-3 IN, NOT litehtml parse names; asserted ABSENT from string_id.h:163-295) ===
+  { name = "opacity",                  litehtml = "absent",          status = "cathode_computed" },
+  { name = "letter-spacing",           litehtml = "absent",          status = "cathode_computed" },
 ]
 
 # --- Host API (game.*) -----------------------------------------------------

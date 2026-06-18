@@ -123,10 +123,10 @@ const TArray<FCssCapabilityEntry>& GetCssCapabilityMirror()
 		{ TEXT("flex-basis"),             ECssPropertyStatus::Present },
 		{ TEXT("caption-side"),           ECssPropertyStatus::Present },
 		{ TEXT("order"),                  ECssPropertyStatus::Present },
-		// === non-litehtml declared (Axis-3 IN, not litehtml parse names) — distinct statuses, both DECLARED + both out
-		// of the 108: opacity build-how-PENDING (cascade-empty until its build-how); letter-spacing CathodeComputed
-		// (own-inline parsed at getComputedStyle read, 014 slice 1) ===
-		{ TEXT("opacity"),                ECssPropertyStatus::BuildHowPending },
+		// === non-litehtml declared (Axis-3 IN, not litehtml parse names) — both CathodeComputed (own-inline parsed at
+		// getComputedStyle read), both DECLARED + both out of the 108. opacity (014 slice 2) + letter-spacing (014 slice 1).
+		// Rendering deferred for both; migration is property-dependent (opacity terminal, letter-spacing transitional). ===
+		{ TEXT("opacity"),                ECssPropertyStatus::CathodeComputed },
 		{ TEXT("letter-spacing"),         ECssPropertyStatus::CathodeComputed },
 	};
 	return Mirror;
@@ -138,7 +138,7 @@ bool IsDeclaredCssProperty(const FString& Name)
 	{
 		if (Name.Equals(Entry.Name, ESearchCase::CaseSensitive)) // CSS property names are lowercase + case-sensitive
 		{
-			return true; // Present / BuildHowPending / CathodeComputed -> all DECLARED (element.style accepts the write)
+			return true; // Present / CathodeComputed -> DECLARED (element.style accepts the write)
 		}
 	}
 	return false; // undeclared -> the accept-and-ignore gate drops the write
