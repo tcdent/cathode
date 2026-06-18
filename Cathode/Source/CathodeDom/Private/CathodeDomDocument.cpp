@@ -78,6 +78,7 @@ void FDomDocument::MarkDirty(FDomNodeId InNodeId, EDirtyKind Kind)
 	// Dirty-mark on mutation (S3): tell 005 to relayout only the affected region. The DOM serializes + drives;
 	// it does not lay out.
 	Layout.MarkNodeDirty(InNodeId, Kind);
+	if (Kind != EDirtyKind::PaintOnly) { bLayoutDirty = true; } // 013 slice 5: a layout-affecting write -> getComputedStyle must flush
 }
 
 void FDomDocument::Relayout(int32 AvailableWidth)
@@ -85,6 +86,28 @@ void FDomDocument::Relayout(int32 AvailableWidth)
 	// Drive 005 + cache the result; the observation reads compose its geometry/style. Real layout output is
 	// 005's (validation-pass) — the DOM only drives + reads.
 	LastLayout = Layout.Relayout(AvailableWidth);
+	LastLayoutWidth = AvailableWidth; // 013 slice 5: remember the width the flush re-relayouts with
+	bLayoutDirty = false;             // the relayout flushed the accumulated dirty
+}
+
+void FDomDocument::FlushLayoutIfDirty()
+{
+	// 013 slice 5 — getComputedStyle's lazy flush: re-run the cascade if an element.style/structure write is pending,
+	// so the read reflects the mutation. Reuses the existing FRelayoutController via Relayout(LastLayoutWidth).
+	//
+	// CORRECTNESS of reusing the Controller (browse-design ratified, components-css.md): IsLayoutBoundary is ROOT-ONLY
+	// today, so the Controller does a FULL relayout (every dirty -> root boundary -> Plan.bFull -> RelayoutDocument
+	// re-feeds the whole-doc GetDocumentHtml) -> full-document selector context (a doc-CSS descendant selector whose
+	// ancestor is outside any subtree still matches) AND inherited changes reach every descendant.
+	// REUSE stays correct WHILE BOTH (a) attribute/sibling selectors are OUT (spec-surface.md:104 -> inline writes don't
+	// change selector matching) AND (b) the Controller relayouts FULL (root-only IsLayoutBoundary). EITHER changing --
+	// finer boundaries activating the subtree path, OR attr/sibling selectors added -- and the subtree re-cascade must
+	// FIRST gain full-doc context (GetSubtreeHtml is currently subtree-in-isolation / cascade-unsafe; built for geometry/011).
+	// Both are CHANGE-TRIGGERS, not standing.
+	if (bLayoutDirty && LastLayoutWidth > 0)
+	{
+		Relayout(LastLayoutWidth);
+	}
 }
 
 // === 005 ILayoutDocumentSource — structure reads (wrapper-governed index) + markup serialization (S5) ===

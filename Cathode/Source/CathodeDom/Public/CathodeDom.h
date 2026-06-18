@@ -326,6 +326,11 @@ public:
 	// its geometry/style. The DOM serializes + drives; it does NOT lay out.
 	void Relayout(int32 AvailableWidth);
 
+	// 013 slice 5 — getComputedStyle LAZY flush: relayout-if-dirty using the last Relayout's width, so a
+	// getComputedStyle read reflects pending element.style writes. Writes only dirty-mark; the read flushes the
+	// ACCUMULATED dirty into ONE relayout (browser flush-on-read; batches writes; not eager-per-write).
+	void FlushLayoutIfDirty();
+
 	// --- 005 ILayoutDocumentSource (Slice 5): structure reads + markup serialization ---
 	virtual int32 GetRootNode() const override;
 	virtual int32 GetParentNode(int32 NodeId) const override;
@@ -353,6 +358,8 @@ private:
 	FDomNodeId RootNodeId = INDEX_NONE;
 	FDomNodeId FocusedNodeId = INDEX_NONE; // 012 focus state (document.activeElement); runtime, not serialized
 	FLayoutResult LastLayout;              // the last Relayout result; the observation reads compose its geometry/style
+	bool bLayoutDirty = false;             // 013 slice 5: a layout-affecting write is pending since the last Relayout
+	int32 LastLayoutWidth = 0;             // 013 slice 5: the width the flush re-relayouts with (the last Relayout's); 0 = never laid out
 };
 
 // --- Registration + construction (composing the siblings) ---

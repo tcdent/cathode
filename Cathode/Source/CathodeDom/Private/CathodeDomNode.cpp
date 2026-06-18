@@ -1588,6 +1588,8 @@ JSValue GetComputedStyleThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int Argc
 	if (Argc < 1) { return JS_ThrowTypeError(Ctx, "getComputedStyle expects an element"); }
 	FDomNode* El = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, Argv[0], GDomNodeClassId));
 	if (El == nullptr) { return JS_EXCEPTION; }
+	// 013 slice 5: LAZY flush-on-read — re-cascade if an element.style write is pending, so getComputedStyle reflects it.
+	if (FDomDocument* OwnerDoc = El->GetOwningDocument()) { OwnerDoc->FlushLayoutIfDirty(); }
 	return MarshalStyleDeclaration(Ctx, El->GetOwningDocument(), El->GetNodeId(), /*bWritable*/ false).Release();
 }
 
