@@ -11,13 +11,18 @@
 namespace Cathode
 {
 
-// Per the manifest [css] status: PRESENT = litehtml parses + cascades it; BuildHowPending = Axis-3 IN but litehtml
-// lacks the parse name (declared-present, resolves cascade-EMPTY until the build-how lands). BOTH are DECLARED (valid
-// element.style names); only the unsupported (undeclared) are dropped.
+// Per the manifest [css] status: PRESENT = litehtml parses + cascades it. The other two are Axis-3 IN but litehtml
+// lacks the parse name (declared, never an undeclared drop):
+//   BuildHowPending = resolves cascade-EMPTY until its build-how lands (opacity).
+//   CathodeComputed = delivered Cathode-side TODAY -- getComputedStyle parses the element's OWN inline value
+//                     (own-element-only; inheritance + rendering deferred to the litehtml build-how). A TRANSITIONAL
+//                     partial that migrates to Present when litehtml gains the parse name (letter-spacing, 014 slice 1).
+// All three are DECLARED (valid element.style names); only the unsupported (undeclared) are dropped.
 enum class ECssPropertyStatus : uint8
 {
 	Present,
 	BuildHowPending,
+	CathodeComputed,
 };
 
 struct FCssCapabilityEntry

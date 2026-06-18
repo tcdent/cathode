@@ -317,6 +317,30 @@ static FString FmtCssEnum(int Value, const char* Strings)
 	return FString(UTF8_TO_TCHAR(litehtml::index_value(Value, Strings).c_str()));
 }
 
+// 014 slice 1 (CathodeComputed) — litehtml does NOT parse letter-spacing, so getComputedStyle sources it Cathode-side:
+// parse the element's OWN inline 'style' attr ON-DEMAND (own-element-only; inheritance + rendering deferred to the
+// litehtml build-how). A LENGTH value -> normalized px: 'letter-spacing:2px' -> '2px'; '0.1em' of font-size 16 -> '1.6px'
+// (specified '0.1em' != computed '1.6px' -> the parse is load-bearing, not an echo). unset/absent/'normal'/rem/other-unit
+// -> EMPTY (the documented own-inline partial; NOT 'normal'). FontSizePx is litehtml's resolved px (the em base). Engine-
+// free (plain args, no litehtml type); the FString crosses the FResolvedStyle seam, so CathodeDom never sees litehtml.
+static FString ParseOwnInlineLetterSpacing(const char* StyleAttr, int32 FontSizePx)
+{
+	if (StyleAttr == nullptr) { return FString(); }
+	TArray<FString> Decls;
+	FString(UTF8_TO_TCHAR(StyleAttr)).ParseIntoArray(Decls, TEXT(";"), true);
+	for (const FString& Decl : Decls)
+	{
+		int32 Colon;
+		if (!Decl.FindChar(TEXT(':'), Colon)) { continue; }
+		if (!Decl.Left(Colon).TrimStartAndEnd().Equals(TEXT("letter-spacing"), ESearchCase::IgnoreCase)) { continue; }
+		const FString Value = Decl.RightChop(Colon + 1).TrimStartAndEnd().ToLower();
+		if (Value.EndsWith(TEXT("em")) && !Value.EndsWith(TEXT("rem"))) { return FString::Printf(TEXT("%gpx"), FCString::Atof(*Value.LeftChop(2)) * FontSizePx); }
+		if (Value.EndsWith(TEXT("px")))                                 { return FString::Printf(TEXT("%gpx"), FCString::Atof(*Value.LeftChop(2))); }
+		return FString(); // 'normal'/rem/other unit -> empty (the documented partial covers px/em lengths)
+	}
+	return FString(); // no own letter-spacing declaration -> empty (own-element-only: the unset / deferred-inheritance boundary)
+}
+
 // The litehtml-backed relayout backend — the vendor edge of the IRelayoutBackend seam. Re-feeds markup
 // through the document_container + renders + draws (which fires the paint callbacks into the sink). The
 // complete path re-feeds the whole document; the intelligent path re-feeds only the affected subtree.
@@ -412,6 +436,14 @@ public:
 				return Property == TEXT("font-family") ? Face : FString::Printf(TEXT("%d"), Weight);
 			}
 			return FString(); // font not yet resolved (e.g. an element litehtml created no font for) -> empty
+		}
+
+		// letter-spacing (014 slice 1, CathodeComputed) -> litehtml does NOT parse it; source the element's OWN inline
+		// value Cathode-side (NAME-keyed branch, not status-keyed), em resolved against litehtml's computed font-size.
+		// own-element-only: inheritance is deferred to the litehtml build-how (no Cathode-side parent walk).
+		if (Property == TEXT("letter-spacing"))
+		{
+			return ParseOwnInlineLetterSpacing(El->get_attr("style"), Css.get_font_size());
 		}
 
 		// opacity (build-how-pending) -> EMPTY (the Fork-B positive boundary; the lone legitimately-empty contract prop).

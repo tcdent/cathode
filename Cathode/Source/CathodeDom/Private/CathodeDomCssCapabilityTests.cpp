@@ -133,10 +133,12 @@ void DeriveCssPresentSet(const FString& StringIdH, TSet<FString>& Out)
 }
 
 // THE 2 FORWARD-DECLARED BUILD-HOW props — an EXPLICIT CLOSED list (same closed/cited discipline as CssAuditedExclusions).
-// Each is intended Axis-3-IN but is NOT a litehtml parse name, so it is HAND-AUTHORED OUTSIDE the file-derivation; it must
-// stay a closed audited set, never an open bucket. Reason per entry:
-//   opacity        — Axis-3 IN; litehtml lacks it; build-how spans the cascade + the Blend2D alpha-compositing rasterizer.
-//   letter-spacing — Axis-3 IN; litehtml lacks it; build-how at the cascade slice.
+// Each is Axis-3-IN but NOT a litehtml parse name, so it is HAND-AUTHORED OUTSIDE the file-derivation; it must stay a
+// closed audited set, never an open bucket. Both are out of the 108 file-derived; their STATUS now differs (the two
+// hand-buckets the completeness asserts split on):
+//   opacity        — BuildHowPending; litehtml lacks it; build-how spans the cascade + the Blend2D alpha rasterizer (deferred).
+//   letter-spacing — CathodeComputed (014 slice 1); own-inline parsed at getComputedStyle read; inheritance + rendering
+//                    deferred to the litehtml build-how (a transitional partial that migrates to Present when it lands).
 // (gap/row-gap/column-gap were forward-declared build-how-committed; tcdent descoped them from 014 — NOT authored into the spec.)
 const TArray<FString>& CssForwardDeclaredBuildHow()
 {
@@ -195,12 +197,18 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 	TSet<FString> DerivedPresent;
 	DeriveCssPresentSet(StringIdH, DerivedPresent);
 
-	// Partition the mirror into Present / build-how.
-	TSet<FString> MirrorNames, MirrorPresent, MirrorBuildHow;
+	// Partition the mirror into Present / build-how (non-Present), AND split build-how into the two STATUS hand-buckets
+	// (BuildHowPending vs CathodeComputed) the completeness now tracks separately.
+	TSet<FString> MirrorNames, MirrorPresent, MirrorBuildHow, MirrorPending, MirrorCathodeComputed;
 	for (const FCssCapabilityEntry& E : GetCssCapabilityMirror())
 	{
 		MirrorNames.Add(E.Name);
-		(E.Status == ECssPropertyStatus::Present ? MirrorPresent : MirrorBuildHow).Add(E.Name);
+		if (E.Status == ECssPropertyStatus::Present) { MirrorPresent.Add(E.Name); }
+		else
+		{
+			MirrorBuildHow.Add(E.Name); // both non-Present statuses: declared but NOT a litehtml parse name
+			(E.Status == ECssPropertyStatus::BuildHowPending ? MirrorPending : MirrorCathodeComputed).Add(E.Name);
+		}
 	}
 
 	// (1) mirror == manifest [css] lockstep — BITES if the two materializations drift.
@@ -239,15 +247,25 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 		TestFalse(FString::Printf(TEXT("forward-declared '%s' does NOT leak into the 108 file-derivation"), *Bh), DerivedPresent.Contains(Bh));
 	}
 
-	// (6) DISCRIMINATING declared-vs-cascaded: a build-how-pending prop (opacity) is DECLARED in the mirror yet is NOT a
-	// litehtml computed-parse name -> cascade-EMPTY by construction until the build-how lands (cascade-real is 013 slices
-	// 3-4). Contrast a Present prop (color): DECLARED AND a litehtml parse name -> cascade-real. Proves declared != cascaded.
+	// (6) THE TWO STATUS HAND-BUCKETS (the completeness split): the 2 non-litehtml props partition EXACTLY into
+	// {opacity}=BuildHowPending + {letter-spacing}=CathodeComputed — disjoint, union == MirrorBuildHow. The status is
+	// INFORMATIONAL metadata here (the gate keys on NAME, not status; the READ-behavior distinction is proven in the
+	// Cathode.Dom.Style.LetterSpacing getComputedStyle test). This asserts the mirror RECORDS the right two buckets.
+	TestTrue(TEXT("BuildHowPending bucket is EXACTLY {opacity}"), MirrorPending.Num() == 1 && MirrorPending.Contains(TEXT("opacity")));
+	TestTrue(TEXT("CathodeComputed bucket is EXACTLY {letter-spacing}"), MirrorCathodeComputed.Num() == 1 && MirrorCathodeComputed.Contains(TEXT("letter-spacing")));
+	TestEqual(TEXT("the two status buckets are DISJOINT and union to the 2 non-litehtml (no third bucket)"), MirrorPending.Num() + MirrorCathodeComputed.Num(), MirrorBuildHow.Num());
+
+	// (7) DISCRIMINATING declared-vs-cascaded: a non-litehtml prop is DECLARED in the mirror yet is NOT a litehtml
+	// computed-parse name -> not cascade-real (opacity stays empty; letter-spacing is Cathode-computed own-inline).
+	// Contrast a Present prop (color): DECLARED AND a litehtml parse name -> cascade-real. Proves declared != cascaded.
 	auto MirrorStatus = [](const FString& Name) -> int32 {
 		for (const FCssCapabilityEntry& E : GetCssCapabilityMirror()) { if (Name.Equals(E.Name, ESearchCase::CaseSensitive)) { return (int32)E.Status; } }
 		return -1;
 	};
-	TestEqual(TEXT("'opacity' is DECLARED build-how-PENDING in the mirror (declared, not yet computed)"), MirrorStatus(TEXT("opacity")), (int32)ECssPropertyStatus::BuildHowPending);
-	TestFalse(TEXT("'opacity' is NOT a litehtml computed-parse name -> cascade-empty until the build-how (declared != cascaded)"), LitehtmlNames.Contains(TEXT("opacity")));
+	TestEqual(TEXT("'opacity' is DECLARED build-how-PENDING in the mirror"), MirrorStatus(TEXT("opacity")), (int32)ECssPropertyStatus::BuildHowPending);
+	TestEqual(TEXT("'letter-spacing' is DECLARED CathodeComputed in the mirror (014 slice 1)"), MirrorStatus(TEXT("letter-spacing")), (int32)ECssPropertyStatus::CathodeComputed);
+	TestFalse(TEXT("'opacity' is NOT a litehtml computed-parse name (declared != cascaded)"), LitehtmlNames.Contains(TEXT("opacity")));
+	TestFalse(TEXT("'letter-spacing' is NOT a litehtml computed-parse name (that's WHY it's Cathode-computed own-inline)"), LitehtmlNames.Contains(TEXT("letter-spacing")));
 	TestEqual(TEXT("contrast: 'color' is PRESENT in the mirror (declared)"), MirrorStatus(TEXT("color")), (int32)ECssPropertyStatus::Present);
 	TestTrue(TEXT("contrast: 'color' IS a litehtml computed-parse name (declared AND cascade-real)"), LitehtmlNames.Contains(TEXT("color")));
 
@@ -366,10 +384,13 @@ bool FCathodeCssCapabilityValidationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("cssText mixed: declared color+font-size + custom --brand KEPT, unsupported grid-area FILTERED"),
 		EvalBool("(function(){ __el.style.cssText='color:red;font-size:12px;grid-area:foo;--brand:#0af'; var s=__el.getAttribute('style')||''; return s.indexOf('color')>=0 && s.indexOf('font-size')>=0 && s.indexOf('--brand')>=0 && s.indexOf('grid')<0 && __el.style.fontSize==='12px'; })()"));
 
-	// BUILD-HOW-PENDING: opacity declares-PRESENT (accepted, reaches the attribute) — its cascade-empty resolution is
-	// the slice-5 getComputedStyle stub (013 slices 3-4 deliver the value). The marking is real (mirror status).
+	// NON-LITEHTML DECLARED: both reach the style attribute (accepted by NAME) — opacity (build-how-pending, resolves
+	// empty) and letter-spacing (CathodeComputed; acceptance into the attr is the PRECONDITION for the on-demand parse
+	// at getComputedStyle read — the value-side proof is Cathode.Dom.Style.LetterSpacing).
 	TestTrue(TEXT("build-how-pending 'opacity' is DECLARED — accepted, reaches the style attribute"),
 		EvalBool("(function(){ __el.style.opacity='0.5'; return (__el.getAttribute('style')||'').indexOf('opacity')>=0; })()"));
+	TestTrue(TEXT("CathodeComputed 'letter-spacing' is DECLARED — accepted, reaches the style attribute"),
+		EvalBool("(function(){ __el.style.letterSpacing='2px'; return (__el.getAttribute('style')||'').indexOf('letter-spacing')>=0; })()"));
 
 	return true;
 }

@@ -123,9 +123,11 @@ const TArray<FCssCapabilityEntry>& GetCssCapabilityMirror()
 		{ TEXT("flex-basis"),             ECssPropertyStatus::Present },
 		{ TEXT("caption-side"),           ECssPropertyStatus::Present },
 		{ TEXT("order"),                  ECssPropertyStatus::Present },
-		// === build-how (Axis-3 IN, not litehtml parse names; cascade-EMPTY until the build-how lands) ===
+		// === non-litehtml declared (Axis-3 IN, not litehtml parse names) — distinct statuses, both DECLARED + both out
+		// of the 108: opacity build-how-PENDING (cascade-empty until its build-how); letter-spacing CathodeComputed
+		// (own-inline parsed at getComputedStyle read, 014 slice 1) ===
 		{ TEXT("opacity"),                ECssPropertyStatus::BuildHowPending },
-		{ TEXT("letter-spacing"),         ECssPropertyStatus::BuildHowPending },
+		{ TEXT("letter-spacing"),         ECssPropertyStatus::CathodeComputed },
 	};
 	return Mirror;
 }
@@ -136,7 +138,7 @@ bool IsDeclaredCssProperty(const FString& Name)
 	{
 		if (Name.Equals(Entry.Name, ESearchCase::CaseSensitive)) // CSS property names are lowercase + case-sensitive
 		{
-			return true; // Present OR either BuildHow -> DECLARED (element.style accepts the write)
+			return true; // Present / BuildHowPending / CathodeComputed -> all DECLARED (element.style accepts the write)
 		}
 	}
 	return false; // undeclared -> the accept-and-ignore gate drops the write
