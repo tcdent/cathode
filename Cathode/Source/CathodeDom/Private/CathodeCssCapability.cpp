@@ -124,9 +124,6 @@ const TArray<FCssCapabilityEntry>& GetCssCapabilityMirror()
 		{ TEXT("caption-side"),           ECssPropertyStatus::Present },
 		{ TEXT("order"),                  ECssPropertyStatus::Present },
 		// === build-how (Axis-3 IN, not litehtml parse names; cascade-EMPTY until the build-how lands) ===
-		{ TEXT("gap"),                    ECssPropertyStatus::BuildHowCommitted },
-		{ TEXT("row-gap"),                ECssPropertyStatus::BuildHowCommitted },
-		{ TEXT("column-gap"),             ECssPropertyStatus::BuildHowCommitted },
 		{ TEXT("opacity"),                ECssPropertyStatus::BuildHowPending },
 		{ TEXT("letter-spacing"),         ECssPropertyStatus::BuildHowPending },
 	};

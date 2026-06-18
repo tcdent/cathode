@@ -132,16 +132,16 @@ void DeriveCssPresentSet(const FString& StringIdH, TSet<FString>& Out)
 	for (const FString& Ex : CssAuditedExclusions()) { Out.Remove(Ex); }
 }
 
-// THE 5 FORWARD-DECLARED BUILD-HOW props — an EXPLICIT CLOSED list (same closed/cited discipline as CssAuditedExclusions).
+// THE 2 FORWARD-DECLARED BUILD-HOW props — an EXPLICIT CLOSED list (same closed/cited discipline as CssAuditedExclusions).
 // Each is intended Axis-3-IN but is NOT a litehtml parse name, so it is HAND-AUTHORED OUTSIDE the file-derivation; it must
 // stay a closed audited set, never an open bucket. Reason per entry:
-//   gap / row-gap / column-gap — Axis-3 flex gap; litehtml lacks the parse name (Axis-3's settled "implement-or-margins"); build-how at the cascade slice.
-//   opacity                    — Axis-3 IN; litehtml lacks it; build-how spans the cascade + the Blend2D alpha-compositing rasterizer.
-//   letter-spacing             — Axis-3 IN; litehtml lacks it; build-how at the cascade slice.
+//   opacity        — Axis-3 IN; litehtml lacks it; build-how spans the cascade + the Blend2D alpha-compositing rasterizer.
+//   letter-spacing — Axis-3 IN; litehtml lacks it; build-how at the cascade slice.
+// (gap/row-gap/column-gap were forward-declared build-how-committed; tcdent descoped them from 014 — NOT authored into the spec.)
 const TArray<FString>& CssForwardDeclaredBuildHow()
 {
 	static const TArray<FString> E = {
-		TEXT("gap"), TEXT("row-gap"), TEXT("column-gap"), TEXT("opacity"), TEXT("letter-spacing"),
+		TEXT("opacity"), TEXT("letter-spacing"),
 	};
 	return E;
 }
@@ -217,23 +217,23 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 		TestFalse(FString::Printf(TEXT("parse-but-not-computed '%s' has NO css_properties member (cross-check; a member-add would flag reclassification)"), Pnc), ComputedMembers.Contains(MemberForm));
 	}
 
-	// (4) build-how (gap/row-gap/column-gap/opacity/letter-spacing) MUST be ABSENT from string_id.h (Axis-3 IN, not a litehtml parse name).
+	// (4) build-how (opacity/letter-spacing) MUST be ABSENT from string_id.h (Axis-3 IN, not a litehtml parse name).
 	for (const FString& Bh : MirrorBuildHow)
 	{
 		TestFalse(FString::Printf(TEXT("build-how '%s' is correctly ABSENT from string_id.h (that's WHY it needs a build-how)"), *Bh), LitehtmlNames.Contains(Bh));
 	}
 
-	// (5) CLOSED-SET HYGIENE on the forward-declared 5 build-how (reviewer standing gate; same discipline as the 7 exclusions).
+	// (5) CLOSED-SET HYGIENE on the forward-declared 2 build-how (reviewer standing gate; same discipline as the 7 exclusions).
 	const TSet<FString> BuildHowAudited(CssForwardDeclaredBuildHow());
 	// (5a) the build-how mirror entries are EXACTLY the closed audited list — not an open bucket (both directions).
-	TestEqual(TEXT("build-how mirror entries == the closed audited 5 (no over)"), MirrorBuildHow.Difference(BuildHowAudited).Num(), 0);
-	TestEqual(TEXT("build-how mirror entries == the closed audited 5 (no under)"), BuildHowAudited.Difference(MirrorBuildHow).Num(), 0);
-	// (5b) EXACT 113 = 108 + 5, DISJOINT: the file-derivation yields exactly 108 INDEPENDENT of the 5; no name in both partitions.
-	TestEqual(TEXT("derived Present is exactly 108 (file-derivation, independent of the 5 build-how)"), DerivedPresent.Num(), 108);
+	TestEqual(TEXT("build-how mirror entries == the closed audited 2 (no over)"), MirrorBuildHow.Difference(BuildHowAudited).Num(), 0);
+	TestEqual(TEXT("build-how mirror entries == the closed audited 2 (no under)"), BuildHowAudited.Difference(MirrorBuildHow).Num(), 0);
+	// (5b) EXACT 110 = 108 + 2, DISJOINT: the file-derivation yields exactly 108 INDEPENDENT of the 2; no name in both partitions.
+	TestEqual(TEXT("derived Present is exactly 108 (file-derivation, independent of the 2 build-how)"), DerivedPresent.Num(), 108);
 	TestEqual(TEXT("mirror Present is exactly 108"), MirrorPresent.Num(), 108);
-	TestEqual(TEXT("mirror build-how is exactly 5"), MirrorBuildHow.Num(), 5);
-	TestEqual(TEXT("Present and build-how are DISJOINT (no overlap in 113 = 108 + 5)"), MirrorPresent.Intersect(MirrorBuildHow).Num(), 0);
-	// (5c) none of the 5 leaks into the 108 file-derivation (each forward-declared name is OUTSIDE the derived set).
+	TestEqual(TEXT("mirror build-how is exactly 2"), MirrorBuildHow.Num(), 2);
+	TestEqual(TEXT("Present and build-how are DISJOINT (no overlap in 110 = 108 + 2)"), MirrorPresent.Intersect(MirrorBuildHow).Num(), 0);
+	// (5c) none of the 2 leaks into the 108 file-derivation (each forward-declared name is OUTSIDE the derived set).
 	for (const FString& Bh : CssForwardDeclaredBuildHow())
 	{
 		TestFalse(FString::Printf(TEXT("forward-declared '%s' does NOT leak into the 108 file-derivation"), *Bh), DerivedPresent.Contains(Bh));
@@ -277,11 +277,11 @@ bool FCathodeCssCapabilityCompletenessBitesTest::RunTest(const FString& Paramete
 	TSet<FString> MirrorPresent;
 	for (const FCssCapabilityEntry& E : GetCssCapabilityMirror()) { if (E.Status == ECssPropertyStatus::Present) { MirrorPresent.Add(E.Name); } }
 
-	// INDEPENDENCE (reviewer gate: the 108 file-derivation bites independently of the 5): none of the forward-declared
+	// INDEPENDENCE (reviewer gate: the 108 file-derivation bites independently of the 2): none of the forward-declared
 	// build-how leaks into either the file-derivation or the Present partition, so the perturbation below tests the 108 alone.
 	for (const FString& Bh : CssForwardDeclaredBuildHow())
 	{
-		TestFalse(FString::Printf(TEXT("build-how '%s' is OUTSIDE the file-derived 108 (bite domain independent of the 5)"), *Bh), DerivedPresent.Contains(Bh));
+		TestFalse(FString::Printf(TEXT("build-how '%s' is OUTSIDE the file-derived 108 (bite domain independent of the 2)"), *Bh), DerivedPresent.Contains(Bh));
 		TestFalse(FString::Printf(TEXT("build-how '%s' is OUTSIDE the mirror Present partition"), *Bh), MirrorPresent.Contains(Bh));
 	}
 

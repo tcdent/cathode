@@ -56,9 +56,9 @@ version = 0            # schema version of this manifest (placeholder)
 #
 # status:
 #   present             = a litehtml parse name (author-settable; cascade-real lands 013 slices 3-4).
-#   build_how_committed = Axis-3 IN, NOT a litehtml parse name; the build-how delivers it. gap/row-gap/column-gap.
 #   build_how_pending   = Axis-3 IN, NOT a litehtml parse name; DECLARED-present yet cascade-EMPTY until the build-how
 #                         lands. opacity (cascade + Blend2D alpha) + letter-spacing. Any DROP is tcdent's.
+#                         (gap/row-gap/column-gap were build-how-committed; tcdent descoped them from 014 — NOT spec'd.)
 #
 # PENDING (tcdent, exclusion-list edit only — NOT a method change): the ~14 litehtml-NONSTANDARD axis longhands
 # (background-position-x/y, border-radius-x/y, per-corner border-*-radius-x/y) are IN the 115 -> present at the
@@ -175,9 +175,6 @@ properties = [
   { name = "caption-side",             litehtml = "string_id.h:291", status = "present" },
   { name = "order",                    litehtml = "string_id.h:292", status = "present" },
   # === build-how (Axis-3 IN, NOT litehtml parse names; asserted ABSENT from string_id.h:163-295) ===
-  { name = "gap",                      litehtml = "absent",          status = "build_how_committed" },
-  { name = "row-gap",                  litehtml = "absent",          status = "build_how_committed" },
-  { name = "column-gap",               litehtml = "absent",          status = "build_how_committed" },
   { name = "opacity",                  litehtml = "absent",          status = "build_how_pending" },
   { name = "letter-spacing",           litehtml = "absent",          status = "build_how_pending" },
 ]

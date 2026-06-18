@@ -11,13 +11,12 @@
 namespace Cathode
 {
 
-// Per the manifest [css] status: PRESENT = litehtml parses + cascades it; BuildHowCommitted/BuildHowPending = Axis-3
-// IN but litehtml lacks the parse name (declared-present, the build-how delivers it; Pending resolves cascade-EMPTY
-// until then). All three are DECLARED (valid element.style names); only the unsupported (undeclared) are dropped.
+// Per the manifest [css] status: PRESENT = litehtml parses + cascades it; BuildHowPending = Axis-3 IN but litehtml
+// lacks the parse name (declared-present, resolves cascade-EMPTY until the build-how lands). BOTH are DECLARED (valid
+// element.style names); only the unsupported (undeclared) are dropped.
 enum class ECssPropertyStatus : uint8
 {
 	Present,
-	BuildHowCommitted,
 	BuildHowPending,
 };
 
