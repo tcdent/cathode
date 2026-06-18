@@ -110,6 +110,9 @@ public:
 	{
 		const bool bItalic = (italic == litehtml::font_style_italic);
 		const uint64 Handle = FontCache.ResolveFont(UTF8_TO_TCHAR(faceName), size, weight, bItalic);
+		// 013 slice 4 (B/b1): capture {face, weight} keyed by the handle. font-family/font-weight are member-only in
+		// css_properties (no getter); css().get_font() -> this handle is the only public read path back to them.
+		FontByHandle.Add(static_cast<litehtml::uint_ptr>(Handle), FCapturedFont{ FString(UTF8_TO_TCHAR(faceName)), weight });
 		if (fm != nullptr)
 		{
 			float Ascent = 0.0f, Descent = 0.0f, Height = 0.0f;
@@ -124,6 +127,14 @@ public:
 	void delete_font(litehtml::uint_ptr hFont) override
 	{
 		FontCache.ReleaseFont(static_cast<uint64>(hFont));
+	}
+
+	// 013 slice 4 (B/b1): read back the captured face/weight for a font handle (css().get_font()). CathodeLayout-side;
+	// returns FString/int32 (no litehtml type crosses the FResolvedStyle seam).
+	bool LookupFont(litehtml::uint_ptr Handle, FString& OutFace, int32& OutWeight) const
+	{
+		if (const FCapturedFont* Found = FontByHandle.Find(Handle)) { OutFace = Found->Face; OutWeight = Found->Weight; return true; }
+		return false;
 	}
 
 	int text_width(const char* text, litehtml::uint_ptr hFont) override
@@ -265,7 +276,46 @@ private:
 	int32 DefaultFontSize;
 	FTCHARToUTF8 DefaultFontUtf8; // stable UTF-8 default font name (init from the ctor's InDefaultFont)
 	IResourceResolver* Resolver;  // sprint 009: nullable; the image/CSS resource callbacks route to it
+
+	// 013 slice 4 (B/b1): handle -> {face, weight} captured at create_font, read back for font-family/font-weight.
+	struct FCapturedFont { FString Face; int32 Weight = 400; };
+	TMap<litehtml::uint_ptr, FCapturedFont> FontByHandle;
 };
+
+// 013 slice 4 — getComputedStyle value formatters (CSSOM resolved-value forms per Fork-A). litehtml-confined
+// (web_color/css_length/enum -> FString); the FString crosses the FResolvedStyle seam engine-free.
+static FString FmtCssPx(int Px) { return FString::Printf(TEXT("%dpx"), Px); }
+
+static FString FmtCssColor(const litehtml::web_color& C)
+{
+	// CSSOM comma-form, never hex; opaque -> rgb(), else rgba() with a 0..1 alpha (transparent -> rgba(0,0,0,0)).
+	if (C.alpha >= 255) { return FString::Printf(TEXT("rgb(%d,%d,%d)"), C.red, C.green, C.blue); }
+	return FString::Printf(TEXT("rgba(%d,%d,%d,%g)"), C.red, C.green, C.blue, static_cast<double>(C.alpha) / 255.0);
+}
+
+static FString FmtCssLength(const litehtml::css_length& L)
+{
+	if (L.is_predefined()) { return TEXT("auto"); }
+	switch (L.units())
+	{
+	case litehtml::css_units_px:         return FString::Printf(TEXT("%gpx"), L.val());
+	case litehtml::css_units_percentage: return FString::Printf(TEXT("%g%%"), L.val()); // ON-RECORD: %/em return the computed form, not used-px (the used edges are inaccessible)
+	default:                             return FString::Printf(TEXT("%gpx"), L.val());
+	}
+}
+
+// margin/padding/border-width are single contract props -> uniform sides collapse to one value (margin:7px -> '7px').
+static FString FmtCssSides(const litehtml::css_length& T, const litehtml::css_length& R, const litehtml::css_length& B, const litehtml::css_length& L)
+{
+	const FString Ts = FmtCssLength(T), Rs = FmtCssLength(R), Bs = FmtCssLength(B), Ls = FmtCssLength(L);
+	if (Ts == Rs && Rs == Bs && Bs == Ls) { return Ts; }
+	return FString::Printf(TEXT("%s %s %s %s"), *Ts, *Rs, *Bs, *Ls);
+}
+
+static FString FmtCssEnum(int Value, const char* Strings)
+{
+	return FString(UTF8_TO_TCHAR(litehtml::index_value(Value, Strings).c_str()));
+}
 
 // The litehtml-backed relayout backend — the vendor edge of the IRelayoutBackend seam. Re-feeds markup
 // through the document_container + renders + draws (which fires the paint callbacks into the sink). The
@@ -308,6 +358,64 @@ public:
 			return ToBox((*Element)->get_placement());
 		}
 		return FBox2f(ForceInit);
+	}
+
+	// 013 slice 4 — the per-property computed-value read (the gate-flip's vendor edge): litehtml's OWN resolved value
+	// for NodeId's element, in the CSSOM Fork-A form. Empty for an unmapped node, opacity (build-how-pending), or the
+	// HELD font-family/font-weight (member-only/no-getter; browse-design B-ruling pending). FString crosses engine-free.
+	FString QueryComputedValue(int32 NodeId, const FString& Property) const
+	{
+		const litehtml::element::ptr* ElementPtr = NodeElementMap.Find(NodeId);
+		if (ElementPtr == nullptr || !*ElementPtr) { return FString(); }
+		const litehtml::element::ptr& El = *ElementPtr;
+		const litehtml::css_properties& Css = El->css();
+		const litehtml::position Box = El->get_placement();
+
+		// BOX-MODEL used px from get_placement (NOT css()); top/left -> 'auto' on a static element.
+		if (Property == TEXT("width"))  { return FmtCssPx(Box.width); }
+		if (Property == TEXT("height")) { return FmtCssPx(Box.height); }
+		if (Property == TEXT("left"))   { return Css.get_position() == litehtml::element_position_static ? FString(TEXT("auto")) : FmtCssPx(Box.left()); }
+		if (Property == TEXT("top"))    { return Css.get_position() == litehtml::element_position_static ? FString(TEXT("auto")) : FmtCssPx(Box.top()); }
+
+		// ENUMS -> litehtml's COMPUTED keyword (the typed getter via index_value over the _strings table).
+		if (Property == TEXT("display"))    { return FmtCssEnum(Css.get_display(),    style_display_strings); }
+		if (Property == TEXT("position"))   { return FmtCssEnum(Css.get_position(),   element_position_strings); }
+		if (Property == TEXT("text-align")) { return FmtCssEnum(Css.get_text_align(), text_align_strings); }
+		if (Property == TEXT("visibility")) { return FmtCssEnum(Css.get_visibility(), visibility_strings); }
+
+		// COLOR -> rgb()/rgba() comma-form.
+		if (Property == TEXT("color"))            { return FmtCssColor(Css.get_color()); }
+		if (Property == TEXT("background-color")) { return FmtCssColor(Css.get_bg().m_color); }
+
+		// FONT (readable getters) -> resolved px.
+		if (Property == TEXT("font-size"))   { return FmtCssPx(Css.get_font_size()); }
+		if (Property == TEXT("line-height")) { return FmtCssPx(Css.get_line_height()); }
+
+		// BOX-MODEL EDGES — option-(i) css()-COMPUTED (browse-design Fork-A refinement). LIMITATION (on-record):
+		// %/layout-resolved margin/padding return the COMPUTED form, NOT used-px (the used edges are on litehtml's
+		// PRIVATE render_item, inaccessible via the public API). Correct used px only for ABSOLUTE/default lengths.
+		// Future = expose render_item edges -> 1-line-real to used-px. Do NOT reconstruct used-from-computed.
+		if (Property == TEXT("margin"))       { const litehtml::css_margins& M = Css.get_margins(); return FmtCssSides(M.top, M.right, M.bottom, M.left); }
+		if (Property == TEXT("padding"))      { const litehtml::css_margins& P = Css.get_padding(); return FmtCssSides(P.top, P.right, P.bottom, P.left); }
+		if (Property == TEXT("border-width")) { const litehtml::css_borders& B = Css.get_borders(); return FmtCssSides(B.top.width, B.right.width, B.bottom.width, B.left.width); }
+
+		// FONT-FAMILY / FONT-WEIGHT — option-(b1): member-only/no-getter in css_properties, read back via the font HANDLE
+		// (css().get_font()) -> the Container's capture map. FIDELITY NOTE (on-record): font-family returns the resolved
+		// FACE ('Arial'), which may differ from the CSSOM computed-LIST ('Arial, sans-serif') -- the computed-list member
+		// has no public getter; resolved-face proves resolution (fine for slice-4). font-weight is the full-fidelity
+		// resolved NUMERIC ('400'/'700'), no enum mapping.
+		if (Property == TEXT("font-family") || Property == TEXT("font-weight"))
+		{
+			FString Face; int32 Weight = 400;
+			if (Container.LookupFont(Css.get_font(), Face, Weight))
+			{
+				return Property == TEXT("font-family") ? Face : FString::Printf(TEXT("%d"), Weight);
+			}
+			return FString(); // font not yet resolved (e.g. an element litehtml created no font for) -> empty
+		}
+
+		// opacity (build-how-pending) -> EMPTY (the Fork-B positive boundary; the lone legitimately-empty contract prop).
+		return FString();
 	}
 
 private:
@@ -451,15 +559,15 @@ private:
 
 	FResolvedStyle QueryNodeStyle(int32 NodeId) const
 	{
-		// The bounded mapping is OURS (queries only the contract property set); the per-property raw value
-		// is the vendor edge (litehtml's computed cascade), stubbed empty this sprint.
+		// The bounded mapping is OURS (queries only the contract property set); the per-property value is the
+		// vendor edge (litehtml's computed cascade) read by the backend (013 slice 4, gate flipped to real values).
 		return MapResolvedStyle([this, NodeId](const FString& Property) { return QueryComputedValue(NodeId, Property); });
 	}
 
-	FString QueryComputedValue(int32 /*NodeId*/, const FString& /*Property*/) const
+	FString QueryComputedValue(int32 NodeId, const FString& Property) const
 	{
-		// TODO(validation pass): read the element's computed value for Property from litehtml's cascade.
-		return FString();
+		// 013 slice 4: delegate to the backend's litehtml-confined per-property read (the empty stub is gone).
+		return Backend.IsValid() ? Backend->QueryComputedValue(NodeId, Property) : FString();
 	}
 };
 

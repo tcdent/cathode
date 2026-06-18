@@ -131,8 +131,9 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	Cathode::FScopedTestRuntime RuntimePtr;
 	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
-	// The REAL litehtml engine + a Relayout populates FResolvedStyle (with the slice-5 STUB empty values) so the
-	// getComputedStyle READ PATH reaches it. (The values are empty = the stubbed cascade — that is CORRECT.)
+	// The REAL litehtml engine + a Relayout populates FResolvedStyle with litehtml's REAL resolved values (013 slice 4
+	// gate-flip; QueryComputedValue) so the getComputedStyle READ PATH returns them. (The per-prop discriminating oracle
+	// is Cathode.Dom.Style.ComputedStyleRealValues; this test exercises the read-path mechanics + read-only semantics.)
 	FStubMeasurer Measurer;
 	TUniquePtr<ILayoutEngine> RealEngine = CreateLiteHtmlLayoutEngine(Measurer);
 	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, *RealEngine);
@@ -142,7 +143,7 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	FDomNode* El = Doc->NodeFromWrapper(ElW);
 	El->SetAttribute(TEXT("style"), TEXT("width:50px;height:30px"));
 	Doc->FindNode(Doc->GetRootNode())->AppendChild(ElW);
-	Doc->Relayout(800); // populate FResolvedStyle (empty stub values for the contract properties)
+	Doc->Relayout(800); // populate FResolvedStyle with the REAL resolved values (013 slice 4)
 
 	JSValue Global = JS_GetGlobalObject(Context);
 	JS_SetPropertyStr(Context, Global, "__el", JS_DupValue(Context, ElW.GetValue()));
@@ -161,14 +162,16 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("getComputedStyle is a global function"), EvalBool("typeof getComputedStyle === 'function'"));
 	TestTrue(TEXT("getComputedStyle(el) instanceof CSSStyleDeclaration"), EvalBool("getComputedStyle(__el) instanceof CSSStyleDeclaration"));
 
-	// READ PATH wired to the STUB joint: a contract property reads from FResolvedStyle -> '' (the stubbed empty
-	// value — CORRECT; 1-line-real when the epic implements QueryComputedValue). NOT that styling cascades.
-	TestTrue(TEXT("getComputedStyle(el).color === '' (the FResolvedStyle read path; empty = the stubbed cascade)"),
-		EvalBool("getComputedStyle(__el).color === ''"));
+	// GATE-FLIP (013 slice 4): the read path now returns litehtml's REAL resolved value (QueryComputedValue), NOT the
+	// 012/slice-1 stub empty. color (unset on this div) resolves to the inherited/UA default -- a real rgb() value, NOT
+	// ''. (The discriminating per-prop relational oracle is the dedicated slice-4 proof; here the EXISTING test is
+	// updated empty->real, the enumerated gate-flip change.)
+	TestTrue(TEXT("getComputedStyle(el).color is the REAL resolved value (gate-flip: a non-empty rgb() form, not '')"),
+		EvalBool("(function(){ var c=getComputedStyle(__el).color; return c.length>0 && c.indexOf('rgb')===0; })()"));
 
-	// READ-ONLY: a write is a silent NO-OP per spec (distinct from element.style's write-through).
-	TestTrue(TEXT("getComputedStyle(el) is READ-ONLY: a write is a no-op (.color stays '')"),
-		EvalBool("(function(){ var cs=getComputedStyle(__el); cs.color='x'; return cs.color===''; })()"));
+	// READ-ONLY: a write is a silent NO-OP per spec (distinct from element.style's write-through) -- the REAL value is unchanged.
+	TestTrue(TEXT("getComputedStyle(el) is READ-ONLY: a write is a no-op (.color stays its real resolved value)"),
+		EvalBool("(function(){ var cs=getComputedStyle(__el); var before=cs.color; cs.color='x'; return cs.color===before && before.indexOf('rgb')===0; })()"));
 
 	return true;
 }
