@@ -111,8 +111,15 @@ public:
 
 	virtual EJobPumpResult ExecutePendingJob() override
 	{
-		// TODO(Slice 4 — tick): JS_ExecutePendingJob(Runtime, &ctx) tri-state -> EJobPumpResult. The
-		// drain-to-empty LOOP stays in the tick, not here, so the loop is independently testable.
+		// 016 slice 2 — the real one-job pump. The tri-state is CONFIRMED against pinned quickjs-ng v0.15.1/fd0a0210:
+		// "return < 0 if exception, 0 if no job pending, 1 if a job was executed successfully". Single-context, so the
+		// out *pctx == our Context; a faulted job's exception is retrieved by the existing TakePendingError (which the
+		// tick's DrainMicrotasks routes to the diagnostic sink). The drain-to-empty LOOP stays in the tick — this is the
+		// one-job primitive only.
+		JSContext* JobContext = nullptr;
+		const int Ret = JS_ExecutePendingJob(Runtime, &JobContext);
+		if (Ret < 0) { return EJobPumpResult::Faulted; }
+		if (Ret > 0) { return EJobPumpResult::Executed; }
 		return EJobPumpResult::NoPending;
 	}
 
