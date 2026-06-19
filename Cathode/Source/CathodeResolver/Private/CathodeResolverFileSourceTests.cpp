@@ -86,4 +86,62 @@ bool FCathodeResolverFileSourceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// 019 slice 2 — THE RESOLVER OVER THE PRODUCTION BACKEND (the goal: "real asset bytes load THROUGH the resolver"
+// end-to-end). Test-only (CreateResourceResolver + CreateUEFileBundleSource both reused/committed — no new production
+// code). Slice 1 proved Read directly; slice 2 proves the RESOLVER routes a URL through the PRODUCTION backend to real
+// bytes: ResolveBytes(url, baseUrl) -> ResolveUrlPath normalizes the url to the root-relative path -> the production
+// FFileHelper Read -> the real fixture bytes. byte-EXACT against the SAME hardcoded marker (non-circular, full-array ==),
+// through the production source (NOT the in-memory FMemoryBundleSource).
+// The URL is NON-TRIVIAL (genuinely exercises ResolveUrlPath, CathodeResolver.cpp:48-61 — NOT an identity pass-through):
+// "../probe.txt" vs base "sub/index.html" -> BaseDir="sub/" -> "sub/../probe.txt" -> CollapseSegments -> "probe.txt".
+// A resolver skipping base-resolution -> "../probe.txt" (wrong) -> miss -> RED; skipping the ".." collapse ->
+// "sub/../probe.txt" (wrong) -> miss -> RED. URL != resolved path (a genuine normalization, not slice-1's backend job).
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeResolverOverProductionTest,
+	"Cathode.Resolver.FileSource.ResolverOverProduction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeResolverOverProductionTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	const FString RootDir = FixturesRootDir();
+	if (RootDir.IsEmpty()) { AddError(TEXT("could not locate the Cathode plugin base dir (IPluginManager)")); return false; }
+	const FString FixtureFullPath = FPaths::Combine(RootDir, FString(GFixtureBundlePath));
+	if (!FPaths::FileExists(FixtureFullPath))
+	{
+		AddError(FString::Printf(TEXT("the committed fixture is not on disk at run time: %s"), *FixtureFullPath));
+		return false;
+	}
+
+	// The RESOLVER over the PRODUCTION backend (both reused; no new production code). Source outlives Resolver (the
+	// resolver holds a reference) — Source declared first, destroyed last.
+	TUniquePtr<IBundleSource> Source = CreateUEFileBundleSource(RootDir);
+	TUniquePtr<IResourceResolver> Resolver = CreateResourceResolver(*Source);
+
+	const TArray<uint8> Expected = HardcodedExpectedBytes(); // the SAME hardcoded oracle (non-circular)
+
+	// (1) byte-EXACT END-TO-END: a NON-TRIVIAL URL "../probe.txt" vs base "sub/index.html" -> BaseDir="sub/" +
+	// relative-join + ".." collapse -> "probe.txt" -> the PRODUCTION FFileHelper Read -> the marker. NOT the in-memory
+	// source; NOT Contains; not echoable (URL "../probe.txt" != the resolved path "probe.txt"). Bites a stub backend OR a
+	// skipped base-resolution ("../probe.txt" -> miss) OR a skipped ".." collapse ("sub/../probe.txt" -> miss).
+	{
+		TArray<uint8> OutBytes;
+		const bool bHit = Resolver->ResolveBytes(TEXT("../probe.txt"), TEXT("sub/index.html"), OutBytes);
+		TestTrue(TEXT("(hit) the resolver routes a NON-TRIVIAL URL THROUGH the production backend to real bytes"), bHit);
+		TestTrue(FString::Printf(TEXT("(byte-exact end-to-end) ResolveBytes('../probe.txt','sub/index.html') -> OutBytes (%d bytes) == the hardcoded marker (%d bytes) through the PRODUCTION source (not in-memory; genuine BaseDir+collapse normalization -> 'probe.txt')"), OutBytes.Num(), Expected.Num()),
+			OutBytes == Expected);
+	}
+
+	// (2) MISS-URL: a URL resolving to a nonexistent path -> the URL-namespace + the production backend's clean miss propagate -> false.
+	{
+		TArray<uint8> OutBytes;
+		const bool bMiss = Resolver->ResolveBytes(TEXT("/does-not-exist-9Z3K.bin"), TEXT("pages/x.html"), OutBytes);
+		TestFalse(TEXT("(miss-url) a URL resolving to a nonexistent path -> ResolveBytes false (clean miss propagates through the resolver)"), bMiss);
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
