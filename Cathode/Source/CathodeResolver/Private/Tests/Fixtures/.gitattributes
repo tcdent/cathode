@@ -1,0 +1,4 @@
+# Byte-exact resolver fixtures: verbatim checkout (no CRLF/LF normalization, no eol conversion) so the
+# WINDOWS build box sees the exact committed bytes. The 019 byte-exact match would false-RED on CRLF drift
+# (git autocrlf) — this scoped -text (overriding the repo-root `* text=auto eol=lf`) keeps the fixture verbatim.
+probe.txt -text

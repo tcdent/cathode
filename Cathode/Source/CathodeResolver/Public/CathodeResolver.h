@@ -68,6 +68,14 @@ CATHODERESOLVER_API FString ResolveUrlPath(const FString& Url, const FString& Ba
 // ProjectContentDir()/<root>/path. (RQ3 scaffold: the configured root is the Source's input.) Body Slice 2.
 CATHODERESOLVER_API TUniquePtr<IResourceResolver> CreateResourceResolver(IBundleSource& Source);
 
+// The PRODUCTION read-mechanism backend (sprint 019): an IBundleSource that reads REAL file bytes via FFileHelper,
+// rooted at a SUPPLIED (REQUIRED) RootDir — Read(path) -> FFileHelper::LoadFileToArray over RootDir/path; false +
+// empty OutBytes on a clean miss. The FFontRegistry loader is the precedent. The RootDir is the configured root: NO
+// baked production default-root here — the production default-root factory + the UFS-staging config + the cooked-pak
+// read validation are the COUPLED integration item (Deferred #3/#5, shipped together). Mirrors CreateResourceResolver's
+// factory shape; the impl class is private to its TU. (Body Slice 1.)
+CATHODERESOLVER_API TUniquePtr<IBundleSource> CreateUEFileBundleSource(const FString& RootDir);
+
 // === 005 document_container HOOK CONTRACT (specified here; APPLIED to CathodeLayout in Slice 2) ===
 //
 // 005's ILayoutEngine gains exactly one nullable setter (non-pure default no-op, so 008's ILayoutEngine test

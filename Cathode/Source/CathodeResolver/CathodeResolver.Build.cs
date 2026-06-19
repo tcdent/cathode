@@ -14,5 +14,14 @@ public class CathodeResolver : ModuleRules
 		{
 			"Core",
 		});
+
+		// TEST-ONLY conditional dep (sprint 019 real-bytes proof): the production-backend test uses IPluginManager
+		// (Projects module) to resolve the plugin dir for the committed on-disk fixture (the MountProof/Verify
+		// convention). The use is WITH_DEV_AUTOMATION_TESTS-gated; non-Shipping so a Shipping CathodeResolver carries
+		// no Projects dependency — the module stays Core-only / couples-to-none in production.
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateDependencyModuleNames.Add("Projects");
+		}
 	}
 }
