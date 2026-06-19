@@ -22,6 +22,39 @@ CONSUMERS. **No network I/O, ever.**
 | **The bundle backend seam** (url → bytes) | S1 + S2 | `IBundleSource` (hit/miss). The resolver's logic is backend-agnostic; the UE-asset backend is integration; an in-memory source backs the tests. | `Cathode.Resolver.Resolve.HitMiss` |
 | **Boundaries** (serves 005 + the JS loader; no network; doesn't decide bundling) | by design | couples-to-none; the resolver reads from `IBundleSource`, never packages; no network I/O | — |
 
+## Production read-mechanism status (sprint 019 — resolved)
+
+The first PRODUCTION `IBundleSource` resolves a URL to **real file bytes**. `FUEFileBundleSource`
+(`CreateUEFileBundleSource(RootDir)`, `Private/CathodeFileBundleSource.cpp`) reads via
+`FFileHelper::LoadFileToArray` over a **supplied (REQUIRED) RootDir** — `Read(path)` -> `RootDir/path` -> the real
+file; `false` + empty `OutBytes` on a clean miss (the `FFontRegistry` `CreateFontRegistry`->`LoadFileToArray`
+precedent, `CathodeText/Private/CathodeFontRegistry.cpp:43-50`). NOT `UAssetManager` (raw `.html/.css/.png` are not
+UObjects — UFS non-asset, per the audit correction below).
+
+| Proof | What |
+|---|---|
+| `Cathode.Resolver.FileSource.RealBytes` (019 s1) | a GENUINE `FFileHelper` disk read of the NEW backend: `Read("probe.txt")` -> `OutBytes ==` a HARDCODED 35-byte marker (full-array `==`, NON-circular oracle, NOT `Contains`, not echoable from the path); a missing path -> `Read==false` + empty (the clean miss) |
+| `Cathode.Resolver.FileSource.ResolverOverProduction` (019 s2) | the goal END-TO-END: `CreateResourceResolver(CreateUEFileBundleSource(...))` -> `ResolveBytes("../probe.txt","sub/index.html")` -> `ResolveUrlPath` (BaseDir + relative-join + `..` collapse) -> `"probe.txt"` -> the production read -> byte-exact `==` the marker (a NON-trivial URL: URL `!=` the resolved path, a genuine normalization, not a passthrough); a miss-URL -> `false` |
+
+The committed fixture (`Private/Tests/Fixtures/probe.txt`, located via `IPluginManager`->`GetBaseDir()`) is
+**checkout-stable** (single-line, NO trailing newline, 35 bytes / 0 CR; a scoped `.gitattributes -text` overrides
+the repo-root `* text=auto eol=lf`) so the byte-exact match does not false-RED on the WINDOWS build box (git
+autocrlf) — proven on the box (35 bytes, 0 CR). The test's `Projects` dep (IPluginManager) is non-Shipping /
+test-only (the CathodeDom convention); a Shipping `CathodeResolver` stays Core-only.
+
+**The DEPLOYMENT is deferred-TOGETHER (the coupled integration item).** 019 ships the read MECHANISM with a
+configurable RootDir and **NO baked production default-root**. The production default-root (`/Game/Cathode/`) + the
+`DirectoriesToAlwaysStageAsUFS` staging config + the cooked-pak read validation (Deferred #3's project-setting
+plumbing + #5's cooked-staging) ship **together** at integration — shipping a content root the cook cannot stage
+would be incoherent, so 019 ships neither. The **container wiring** (`SetResourceResolver` into the live litehtml
+container) is **integration-deferred** (the 014/018 layout/render analog; no production caller — null = the
+pre-hook clean-miss stub; the routing is already tested via a stub resolver).
+
+**Scaffold-prose coherence note:** the pre-existing sprint-009 prose (`CathodeResolver.h:23, 65, 68`) describes the
+EVENTUAL integration default-root (`ProjectContentDir()/<root>`); 019's backend takes a **configurable RootDir** (no
+baked default). That prose documents the deferred-integration intent (accurate), NOT a 019 baked default — the
+default-root is the deferred factory.
+
 ## The doc's three open items — resolved
 
 - **Virtual URL scheme/root** → a **configurable root**, default **`/Game/Cathode/`** (expected to be changed by
@@ -47,19 +80,31 @@ CONSUMERS. **No network I/O, ever.**
 - **Dependency / unblocker:** the integration sprint (route 004's font-file read through the resolver).
 - **First-execution risk:** url-addressed `@font-face` fonts aren't resolved until that wiring lands; locally-registered fonts are unaffected.
 
-### 3. The UE-asset `IBundleSource` backend
-- **Reason:** the resolver stays backend-agnostic behind `IBundleSource`; the UE-asset impl (content-dir + UFS + `FFileHelper`, rooted at the configurable `/Game/Cathode/`) is integration.
-- **Dependency / unblocker:** the integration sprint + the project-setting plumbing (a `UDeveloperSettings`/value → the root).
-- **First-execution risk:** no resource resolves to real bytes until a backend is wired; the in-memory source proves the logic.
+### 3. The UE-asset `IBundleSource` backend — RESOLVED (read mechanism, sprint 019); deployment deferred-together
+- **RESOLVED:** `FUEFileBundleSource` / `CreateUEFileBundleSource(RootDir)` reads real bytes via `FFileHelper` over a
+  supplied RootDir (proven: `Cathode.Resolver.FileSource.RealBytes` + `…ResolverOverProduction`). See **Production
+  read-mechanism status** above. The resolver logic was reused (not re-proven), now over the production source.
+- **Still deferred (coupled with #5 — the DEPLOYMENT):** the production default-root (`/Game/Cathode/`) + the
+  project-setting (`UDeveloperSettings`) plumbing + the `DirectoriesToAlwaysStageAsUFS` staging config — shipped
+  **together** with #5's cooked-pak validation. 019 ships NO baked default-root (the configurable RootDir is the
+  whole contract).
+- **Container wiring:** `SetResourceResolver` into the live litehtml container is integration-deferred (no production
+  caller — the 014/018 analog).
 
 ### 4. Caching of resolved resources
 - **Reason:** bundled bytes are already in memory / the UE asset system caches; a resolver-level cache is likely redundant ceremony.
 - **Dependency / unblocker:** a measured repeated-resolution cost.
 - **First-execution risk:** redundant re-reads if a resource is resolved repeatedly; correctness unaffected.
 
-### 5. Real bytes / UE-asset load + UFS-staging-in-a-COOKED-build — validation-pass
-- **Reason:** no build runs; the in-memory source + the routing helpers are tested, but real `FFileHelper` reads of UFS-staged content only run in a cooked build. UFS staging (`DirectoriesToAlwaysStageAsUFS`) has version-dependent reliability reports; the editor reads the loose source files regardless, which can MASK staging bugs.
-- **Dependency / unblocker:** the execution/validation pass — verify in a real cooked build (not editor/PIE).
+### 5. Cooked-pak UFS-staging validation — deferred-TOGETHER with #3's default-root (the coupled integration item)
+- **Reason:** the read MECHANISM is proven in the EDITOR (a genuine `FFileHelper` disk read of a committed loose
+  fixture, sprint 019 — `FileSource.RealBytes`/`ResolverOverProduction`); but real `FFileHelper` reads of
+  UFS-STAGED content only run in a COOKED build. UFS staging (`DirectoriesToAlwaysStageAsUFS`) has version-dependent
+  reliability reports; the editor reads the loose source files regardless, which can MASK staging bugs. This couples
+  with #3's production default-root + staging config — shipped together (a default-root the cook can't stage is
+  incoherent, so neither ships in 019).
+- **Dependency / unblocker:** the integration pass — the default-root + the staging config + verify in a real cooked
+  build (not editor/PIE).
 - **First-execution risk:** a resource present in editor but not staged into the pak would 404 only in a packaged build.
 
 ### 6. The decode-for-size seam-ownership (RQ1) — integration open
