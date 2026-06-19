@@ -21,13 +21,37 @@ This file is the accountability of record.
 | **Delegates glyph rasterization; serves Layout; OS-independent** | by design | No `BL*` / no `CathodeRasterizer` coupling (grep-clean); the OS text stack never participates |
 | **Shape-plan/result cache policy** (doc-open) | S4 | DECIDED — a sensible fixed default (bounded, FIFO), no tuning surface (human-ruled) |
 
+## Shaping execution status (sprint 021)
+
+The **FIRST real HarfBuzz `hb_shape` execution.** `FHarfBuzzShaper` (real `hb_shape`) now runs over a real font,
+proven DIRECTLY on CathodeText's API — a server **LEAF** (NO `CathodeLayout` dep, NO `ITextMeasurer` adapter):
+
+- **Real shaping runs + the fidelity is ASSERTED** (retires the tautology guard, deferral #4):
+  `Cathode.Text.Shaping.KerningRelation` registers a committed OFL font, runs real `hb_shape`, and asserts the
+  **TAUTOLOGY-FREE kerning relation** — `measure("AV") < measure("A")+measure("V")` (kern-delta **+3.562** on
+  Liberation Sans v2.1.5; only real `hb_shape` applying the font's GPOS/kern yields the `<`; a naive/proportional/
+  fixed path gives `==`) + the **EXACT** non-kerning control (`measure("II") == I+I`). HarfBuzz's exact advances are
+  NEVER hand-asserted (it owns shaping correctness) — the RELATION is what a stub fails.
+- **Win64-executed, non-vacuous:** the shaping is `#if PLATFORM_WINDOWS` (HarfBuzz is Win64-only); a non-Win64 build
+  `AddError`s (never a vacuous `#if`'d-out green). The `[WIN64-EXECUTED]` marker + real non-zero advances prove it ran.
+- **Font source:** a committed **test fixture** — Liberation Sans Regular **v2.1.5 (SIL OFL 1.1)**,
+  `Private/Tests/Fixtures/LiberationSans-Regular.ttf` (binary-verbatim via `*.ttf binary`; sha256-pinned in
+  `PROVENANCE.md`), loaded via `FFontRegistry::RegisterFontFile` → `FFileHelper` → `hb_blob_create`. Test-wired.
+- **Stays INTEGRATION (the leaf ruling — Text does NOT dep Layout):** the real `ITextMeasurer` adapter (CathodeLayout's
+  seam ← CathodeText's shaper) + "the measurement reaches Layout" (Layout's `text_width` → the adapter → the shaper),
+  and the glyph-run → 003 map, are cross-module composition-glue built at integration — NOT 021. See deferral #1.
+
 ## Deferred — with accountability
 
-### 1. Live cross-module seam consumers (the two seams' callers + the glyph-run→BLFont map)
-- **Reason:** Text & Fonts *produces* the measurement + glyph-run seams; who *calls* them is future. The glyph-run seam is the neutral shape the integration sprint maps to the 003 `FPositionedGlyphRun`, and the Rasterizer maps `FFontHandle` → `BLFont` over the same bytes on its side.
-- **Dependency:** Layout & Style (calls measure), the Rasterizer (consumes the glyph run + maps the handle), and an integration sprint.
+### 1. Live cross-module seam consumers (the two seams' callers + the glyph-run→BLFont map) — partially addressed (021)
+- **Reason:** Text & Fonts *produces* the measurement + glyph-run seams. **Sprint 021: the shaper now RUNS and the
+  measurement seam (`GetMetrics`) executes — proven directly on CathodeText's API (the kerning relation, see above).**
+  What stays deferred is the CROSS-MODULE wiring: the real `ITextMeasurer` adapter so Layout's `text_width` reaches the
+  shaper, and the glyph-run → 003 `FPositionedGlyphRun` / `FFontHandle` → `BLFont` map. The leaf ruling keeps Text
+  dep-free of Layout; the adapter (deps both Text + Layout) is the integration sprint's.
+- **Dependency:** Layout & Style (calls measure via the adapter), the Rasterizer (consumes the glyph run + maps the handle), and an integration sprint.
 - **Unblocks:** the integration sprint.
-- **First-execution risk:** nothing measures or renders text across modules until the seams are wired. (Both seams exist + are produced + populated now; only the cross-module callers/map are future. Text & Fonts stays `BL*`-free.)
+- **First-execution risk:** nothing measures or renders text ACROSS MODULES until the seams are wired (the shaper itself runs, 021). Text & Fonts stays `BL*`-free + Layout-dep-free (the leaf ruling).
 
 ### 2. Which fonts ship / how they are bundled
 - **Reason:** the loading *mechanism* is covered (single-load via local FS / UE file APIs); *which* fonts ship and how they are bundled is a content decision, not a shaping concern.
@@ -41,8 +65,11 @@ This file is the accountability of record.
 - **Unblocks:** when non-Latin RTL content becomes real.
 - **First-execution risk:** RTL text shapes/orders left-to-right (visually wrong) until added.
 
-### 4. Shaping / typography fidelity proof
-- **Reason:** the shaped positions/advances/ids are HarfBuzz's output; no shaping runs this sprint, so fidelity cannot be asserted (the tautology guard — the shaper's output is never hand-asserted).
-- **Dependency:** an execution-sprint build + run; HarfBuzz itself owns the shaping correctness.
-- **Unblocks:** the execution-approval sprint.
-- **First-execution risk:** kerning/ligature/feature fidelity (and the 4K typography bar) is proven only when shaped + rendered; our orchestration is tested, the vendor shaping is assumed correct.
+### 4. Shaping / typography fidelity proof — RETIRED (sprint 021)
+- **RETIRED:** the FIRST real `hb_shape` ran (021) and the shaping fidelity IS now asserted — the tautology-free
+  **kerning relation** (`measure("AV") < measure("A")+measure("V")`, kern-delta +3.562 on OFL Liberation v2.1.5; only
+  real GPOS/kern yields the `<`) + the exact non-kerning control. See **Shaping execution status (sprint 021)** above.
+  HarfBuzz's exact advances are still never hand-asserted (it owns correctness) — the RELATION is the tautology-free proof.
+- **Still deferred:** ligature/feature fidelity beyond the kern relation, and the 4K typography bar — proven only when
+  shaped + **RENDERED** (the glyph-raster sprint, the other engine stub). The measurement path is proven (021); the
+  raster path is separate.
