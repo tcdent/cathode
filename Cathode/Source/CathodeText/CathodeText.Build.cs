@@ -15,6 +15,15 @@ public class CathodeText : ModuleRules
 			"Core",
 		});
 
+		// TEST-ONLY conditional dep (sprint 021): the kerning-relation test uses IPluginManager (Projects)
+		// to resolve the plugin dir for the committed font fixture (LiberationSans-Regular.ttf). Non-Shipping
+		// so a Shipping CathodeText carries no Projects dependency. NO CathodeLayout dep — Text stays a server
+		// LEAF (the ITextMeasurer adapter / "measurement reaches Layout" is integration, not 021).
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateDependencyModuleNames.Add("Projects");
+		}
+
 		// --- Bundled ThirdParty: HarfBuzz (the text shaper) ---
 		//
 		// ACTIVATED (sprint 010 bring-up): the shaper impl #includes the HarfBuzz headers (hb.h) and calls

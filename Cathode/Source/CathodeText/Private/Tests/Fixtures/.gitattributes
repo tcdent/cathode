@@ -1,0 +1,4 @@
+# The .ttf font fixture is BINARY -- mark it `binary` (= -text -diff) so it checks out byte-verbatim on
+# the WINDOWS build box. The repo-root `* text=auto eol=lf` catch-all could otherwise EOL/CRLF-mangle a
+# misdetected font and CORRUPT it -> hb_shape garbage. Scoped to this fixtures dir.
+*.ttf binary
