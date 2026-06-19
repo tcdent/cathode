@@ -1,0 +1,4 @@
+# The linked-CSS fixture is litehtml-PARSED (CRLF-tolerant, not byte-compared like 019's probe.txt), but
+# commit it verbatim so it reads identically on the WINDOWS build box (no eol surprises). Scoped -text
+# overrides the repo-root `* text=auto eol=lf`.
+linked.css -text
