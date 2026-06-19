@@ -19,9 +19,36 @@ pass") resolves to an entry here.
 | **Surface computed geometry + resolved style (observation)** | S5 | `WalkGeometry` (pre-order DFS over `ILayoutDocumentSource`, one `FLayoutNodeGeometry{NodeId, Box, Style}` per node — walk/assembly are ours) + `MapResolvedStyle` bounded **by construction** to `ContractStyleProperties()` (box-model + visual subset, not the full CSSOM). Backs `getBoundingClientRect` / `getComputedStyle`; the vendor BOX read (`QueryNodeBox`) is **discharged** (011 [c] — real `get_placement` through the observation read path), while the per-property computed-VALUE read (`QueryComputedValue`) stays deferred (see #2). |
 | **Delegate text measurement/shaping to Text & Fonts** | by design | The neutral `ITextMeasurer` input seam (`ResolveFont`/`MeasureWidth`/`GetFontMetrics`); the container's `create_font`/`text_width` route through `FLayoutFontCache` to it. **No `hb_*` / no `CathodeText` coupling** (grep-clean). Produces 004's measurement-*consumer* side. |
 | **Delegate rasterization to the Rasterizer** | by design | Output is OUR neutral `FLayoutPaintOp` stream (incl. `StrokeBorder`, `ClipPush`/`ClipPop`) — mapped to 003's `FPaintOp` at integration. **No `BL*` / no `CathodeRasterizer` coupling** (grep-clean). Produces 003's draw-call source + the `StrokeBorder` the Rasterizer's 003 `COVERAGE.md` #3 stroke op will consume. |
-| **Consume the DOM tree** | S2 + S3 | The neutral retained-DOM seam `ILayoutDocumentSource` (tree structure for selection + markup for the re-feed). The source *implementation* is sibling-missing (deferred). |
+| **Consume the DOM tree** | S2 + S3 | The neutral retained-DOM seam `ILayoutDocumentSource` (tree structure for selection + markup for the re-feed). **The source impl is BUILT (sprint 020-confirmed): `FDomDocument` IS the `ILayoutDocumentSource` (CathodeDom.h:253), self-wired via `Layout.SetDocument(*this)` (CathodeDomDocument.cpp:27); `Relayout` drives it (`Render(Source.GetDocumentHtml()/GetSubtreeHtml(), …)` + the structure-walk for dirty selection).** See the sprint-020 status below. |
 | **Mutation strategy (fork vs re-feed) — doc-open** | S3 | DECIDED as **strategy-agnostic re-feed** behind `IRelayoutBackend` (complete + subtree both built); the litehtml-fork remains a contingency the seam can adopt without breaking callers. Knobs fixed, no tuning surface. |
 | **Knobs (finalized, minimal — no tuning surface)** | S2–S5 | Viewport/DPI/default-font defaults (`1920×1080`, `96` dpi, `sans-serif`/`16`) fixed in `FLiteHtmlRelayoutBackend`; litehtml `master_css` as the UA sheet; the font-cache dedup key; the `ContractStyleProperties()` set (widening it is a deliberate contract change). None are runtime-tunable. |
+
+## litehtml on the real Dom + Resolver — status (sprint 020)
+
+litehtml runs on the **real `FDomDocument`** (the adapter is `FDomDocument` itself, self-wired) and the **real
+Resolver** is test-bound. The DOM-to-CSS round-trip is proven on real data:
+
+- **Real-Dom adapter — BUILT + Relayout-driven.** `FDomDocument : public ILayoutDocumentSource` (CathodeDom.h:253)
+  self-registers in its ctor (`Layout.SetDocument(*this)`, CathodeDomDocument.cpp:27). `Relayout` feeds litehtml via
+  the adapter's markup-refeed (`Source.GetDocumentHtml()` → `createFromString`, CathodeLayoutEngine.cpp:390/500) +
+  the structure-walk (`GetRootNode`/`IsLayoutBoundary`, CathodeRelayout.cpp) for dirty-region selection. The
+  re-serialization IS the adapter contract (litehtml is `createFromString`-based by design), NOT a bypass.
+- **getComputedStyle real values + inline re-cascade — ALREADY PROVEN over the real `FDomDocument` + real litehtml**
+  (sprints 013/014; only the text measurer is stubbed, the cascade is real). `Cathode.Dom.Style.*` / `…Opacity` /
+  letter-spacing / `…ReCascade` assert cascade-COMPUTED values (50%→100px, 0.1em→1.6px, an inline write → re-cascade →
+  the new value). 020 did **not** re-prove these — the premise correction (the stated proof was already done).
+- **Linked-CSS through the REAL Resolver — PROVEN (020-A1), test-wired.** `SetResourceResolver(CreateResourceResolver(
+  CreateUEFileBundleSource(<test fixtures dir>)))` on a real `FDomDocument`'s litehtml engine; a `<style>@import
+  url('linked.css')` → litehtml's OWN parse fires `import_css` → `RouteLinkedCss` → the real `FUEFileBundleSource`
+  `FFileHelper` read → the cascade → `getComputedStyle(#target).color == 'rgb(255,0,255)'` (the linked value). Proof:
+  `Cathode.Dom.Resolver.LinkedCssRoundTrip` (a NULL-resolver control pair: null → the default, distinct → the linked
+  value provably came THROUGH the real resolver). The `@import`-in-`<style>` → `import_css` trigger is
+  EMPIRICALLY confirmed (the vendored litehtml is prebuilt; grounded vs upstream v0.7 — the green pair IS the
+  confirmation, not a hand-call [that's the existing RouteLinkedCss routing coverage], not `GetDocumentCss` [empty]).
+- **A2 — production wiring DEFERRED (the next integration sprint, a tcdent tooling gate).** 020-A1 is **test-wired** (a
+  test RootDir). NO production `SetResourceResolver` caller; NO production default-root; the 019 deploy-coupling
+  (the `/Game/Cathode/` default-root + `DirectoriesToAlwaysStageAsUFS` staging + the cooked-pak validation) stays
+  deferred-together. A2 ships the production wiring + the deploy-coupling together.
 
 ## Deferred — with accountability
 
@@ -52,17 +79,22 @@ pass") resolves to an entry here.
 - **Unblocks:** when that op lands + integration maps `StrokeBorder` → it.
 - **First-execution risk:** styled/rounded borders are emitted but render square or missing until the Rasterizer draw op exists (solid square borders already decompose to `FillBox` edges and render).
 
-### 4. Image byte LOADING
-- **Reason:** the container *routes* images (`draw_background`/`draw_list_marker` → `EmitDrawImage` with a neutral source ref) and exposes the info seam (`get_image_size`/`load_image`), but resolving the source to bytes + real dimensions is the Resource Resolver's job; both are stubbed (size `0×0`, load no-op).
-- **Dependency:** the Resource Resolver component (sibling-missing) + an image-info seam.
-- **Unblocks:** the Resource Resolver lands.
-- **First-execution risk:** images route by ref but draw at zero size / with unresolved bytes until the Resolver answers; layout that depends on intrinsic image size is wrong until then.
+### 4. Image byte LOADING + size-decode
+- **Reason:** the container *routes* images (`draw_background`/`draw_list_marker` → `EmitDrawImage` with a neutral source ref) and exposes the info seam (`get_image_size`/`load_image`), but resolving the source to bytes + real dimensions is downstream. **The Resource Resolver is now BUILT (sprint 019) and the linked-CSS resolve-path through it is proven (020-A1: `import_css` → `RouteLinkedCss` → the real `FUEFileBundleSource`)**; the IMAGE path (`load_image`/`get_image_size`) is the same router shape but still stubbed (size `0×0`, load no-op), and the size needs a 003/Blend2D image-info decode over the resolver's bytes.
+- **Dependency:** the production resolver wiring (A2) for `load_image`; a 003 decode-for-size seam for `get_image_size`.
+- **Unblocks:** A2 (image bytes) + the rasterizer decode-for-size (dimensions).
+- **First-execution risk:** images route by ref but draw at zero size / with unresolved bytes until A2 wires the resolver + the decode-for-size lands; layout that depends on intrinsic image size is wrong until then.
 
-### 5. The retained-DOM source IMPLEMENTATION + live cross-module WIRING
-- **Reason:** Layout *defines + consumes* the `ILayoutDocumentSource`, `ITextMeasurer`, and `FLayoutPaintOp`/geometry seams; who *implements/calls* them is future. The DOM component implements the source; 004 backs the measurer; 003 consumes the paint ops (`FLayoutPaintOp` → `FPaintOp`, `FLayoutFontRef` → `FFontHandle`).
-- **Dependency:** the DOM component (source impl), Text & Fonts (measurer backing), the Rasterizer (paint-op consumer), and an integration sprint.
-- **Unblocks:** the integration sprint.
-- **First-execution risk:** nothing lays out or paints across modules until the seams are wired; the seams exist + are produced now, only the cross-module impls/callers are future. Layout stays litehtml-confined + `BL*`/`hb_*`-free.
+### 5. Cross-module WIRING — source impl DONE (sprint 020); measurer/paint-op + production resolver wiring deferred
+- **DONE (sprint 020):** the `ILayoutDocumentSource` impl is `FDomDocument` (self-wired, Relayout-driven — see the
+  sprint-020 status above); the Resolver bind (`SetResourceResolver`) is proven **test-wired** over the real
+  `FUEFileBundleSource` (`Cathode.Dom.Resolver.LinkedCssRoundTrip`).
+- **Still deferred:** (a) the **production** `SetResourceResolver` caller + the 019 deploy-coupling (the default-root +
+  `DirectoriesToAlwaysStageAsUFS` + the cooked-pak validation) = **A2**, the next integration sprint (a tcdent tooling
+  gate); (b) 004 backs the measurer (today a stub measurer); (c) 003 consumes the paint ops (`FLayoutPaintOp` →
+  `FPaintOp`, `FLayoutFontRef` → `FFontHandle`) — the rasterization/egress sprint.
+- **First-execution risk:** the inline + linked-CSS round-trips run (test-wired); production resource resolution +
+  cross-module paint/measure are future. Layout stays litehtml-confined + `BL*`/`hb_*`-free.
 
 ### 6. Hit-testing (point → element) — OUT of scope
 - **Reason:** litehtml provides it, but it existed only to serve pointer input, which is deferred; the component doc explicitly scopes it **out** (distinct from the element→box geometry read, which *is* covered above).
