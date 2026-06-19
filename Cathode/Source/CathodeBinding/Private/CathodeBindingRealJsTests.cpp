@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CathodeBinding.h"
+#include "CathodeBoundMember.h"
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTesting.h"
 
@@ -31,6 +32,21 @@ struct FRoundTripNative { int32 Field = 0; }; // the opaque target; Field is the
 void NoopFinalizer(JSRuntime* /*Rt*/, JSValueConst /*Val*/) {} // the native is a stack sentinel the test owns (no free)
 
 int32 ComputeField(int32 Seed) { return Seed * Seed + 1; } // f(seed): distinct per seed, computed C++-side
+
+// 017 slice 2 — the method-access test class K. The FBoundMember `compute` thunk reads the opaque (class-id-checked) AND
+// the JS arg, returning arg*field — the GENUINE product. GKComputeClassId is the test-side per-run class-id the thunk
+// reads; it is OVERWRITTEN each runtime registration (-> always the current run's id), and the binding's own class-id
+// stays LOCAL-per-runtime (RegisterClass allocates fresh) — no production static.
+struct FKTestNative { int32 Field = 0; };
+JSClassID GKComputeClassId = 0;
+JSValue ComputeThunk(JSContext* Ctx, JSValueConst ThisVal, int /*Argc*/, JSValueConst* Argv)
+{
+	FKTestNative* Self = static_cast<FKTestNative*>(JS_GetOpaque2(Ctx, ThisVal, GKComputeClassId)); // class-id-checked
+	if (Self == nullptr) { return JS_EXCEPTION; }                                                  // wrong class -> JS_GetOpaque2 threw
+	int32 Arg = 0;
+	JS_ToInt32(Ctx, &Arg, Argv[0]);
+	return JS_NewInt32(Ctx, Arg * Self->Field); // reads BOTH the JS arg AND the opaque field -> the both-factors product
+}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -143,6 +159,109 @@ bool FCathodeBindingRoundTripThroughJsTest::RunTest(const FString& Parameters)
 		for (int32 i = 0; i < 50; ++i) { OneCycle(); }  // 10x
 		const uint64 After = MallocSizeAfterGC();
 		TestTrue(FString::Printf(TEXT("(LEAK) malloc_size BOUNDED after 50 construct+round-trip cycles (baseline=%llu after=%llu)"), Baseline, After),
+			After <= Baseline + (128 * 1024));
+	}
+
+	return true;
+}
+
+// 017 slice 2 — METHOD ACCESS FROM REAL JS (FBoundMember) on the binding's OWN class K, over 016's real Evaluate. C++
+// constructs K (CreateWrappedObject, opaque -> field) -> set as a JS global (NO JS constructor; C++-side construct) ->
+// Evaluate("if (o.compute(arg) === expected) throw ...") -> the `compute` thunk reads the opaque (class-id-checked) AND
+// the JS arg, returns arg*field -> the success-triggered throw carries the computed value. THROW-ON-SUCCESS (=== expected
+// -> throw -> bThrew==true + Contains(value); a bThrew==false-only assertion is the PRIMARY reject).
+//
+// THE BOTH-FACTORS VARIATION (test-the-breaking-geometry on the product): TWO checks with DISTINCT (arg, field) pairs --
+// o1(field=6).compute(7)===42 AND o2(field=10).compute(5)===50 -- bites EVERY degenerate thunk:
+//   constant-42 (returns 42)             -> 42 != 50 -> check2 no-throw -> bThrew==false -> FAILS.
+//   arg*const (arg*6, hardcodes field)   -> 5*6=30 != 50 -> check2 FAILS.
+//   field*const (field*7, hardcodes arg) -> 10*7=70 != 50 -> check2 FAILS.
+//   stub (no method/undefined) / echo (returns arg) -> check1 FAILS.
+// Only the genuine arg*field (reading BOTH) passes both. The chain runs across >=2 SEQUENTIAL runtimes -- the FBoundMember
+// install is JS_SetClassProto, so the PROTO is per-runtime (a stale class-id/proto would break o.compute on run 2).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeBindingMethodAccessThroughJsTest,
+	"Cathode.Binding.Registry.MethodAccessThroughJs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeBindingMethodAccessThroughJsTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	auto RunMethodChain = [this](ICathodeJsRuntime& Rt, int32 Run) -> void
+	{
+		JSContext* const Ctx = static_cast<JSContext*>(Rt.GetNativeContextHandle());
+		if (Ctx == nullptr) { AddError(FString::Printf(TEXT("run %d: no native context"), Run)); return; }
+
+		TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(Rt);
+		FNativeClassDef Def;
+		Def.Name = "CathodeKTest";
+		Def.Finalizer = &NoopFinalizer;
+		const JSClassID ClassId = Registry->RegisterClass(Def);
+		GKComputeClassId = ClassId; // the thunk reads this (per-run; overwritten each runtime -> always the current id)
+
+		const FBoundMember KMembers[] = {
+			{ "compute", "TestK", EBoundMemberKind::Method, "test", nullptr, &ComputeThunk, nullptr, nullptr }
+		};
+		InstallBoundMembers(Ctx, ClassId, KMembers, UE_ARRAY_COUNT(KMembers)); // JS_SetClassProto -- the per-runtime proto
+
+		FKTestNative K1{ 6 };
+		FKTestNative K2{ 10 };
+		FJsValue O1 = Registry->CreateWrappedObject(ClassId, &K1);
+		FJsValue O2 = Registry->CreateWrappedObject(ClassId, &K2);
+		JSValue Global = JS_GetGlobalObject(Ctx);
+		JS_SetPropertyStr(Ctx, Global, "o1", JS_DupValue(Ctx, O1.GetValue()));
+		JS_SetPropertyStr(Ctx, Global, "o2", JS_DupValue(Ctx, O2.GetValue()));
+		JS_FreeValue(Ctx, Global);
+
+		// (arg, field) = (7, 6) -> 42, throw-on-success carrying "42".
+		const FEvalResult Ra = Rt.Evaluate(TEXT("if (o1.compute(7) === 42) throw new Error('p:' + o1.compute(7))"), TEXT("<method>"), EEvalKind::Global);
+		TestTrue(FString::Printf(TEXT("run %d (7*6): o.compute(7) === 42 -> throw-on-success (the method ran)"), Run), Ra.bThrew);
+		TestTrue(FString::Printf(TEXT("run %d (7*6): the computed product '42' surfaces"), Run), Ra.Error.Message.Contains(TEXT("42")));
+
+		// (arg, field) = (5, 10) -> 50, DISTINCT on BOTH axes -> bites constant-42 / arg*const / field*const.
+		const FEvalResult Rb = Rt.Evaluate(TEXT("if (o2.compute(5) === 50) throw new Error('q:' + o2.compute(5))"), TEXT("<method>"), EEvalKind::Global);
+		TestTrue(FString::Printf(TEXT("run %d (5*10): o.compute(5) === 50 -> throw-on-success (both-factors: reads arg AND field)"), Run), Rb.bThrew);
+		TestTrue(FString::Printf(TEXT("run %d (5*10): the DISTINCT computed product '50' surfaces"), Run), Rb.Error.Message.Contains(TEXT("50")));
+	};
+
+	// >=2 SEQUENTIAL runtimes: the FBoundMember proto + the class-id are per-runtime (a stale one breaks o.compute on run 2).
+	for (int32 Run = 0; Run < 2; ++Run)
+	{
+		FScopedTestRuntime Runtime;
+		if (!Runtime.IsValid() || !Runtime->IsValid()) { AddError(FString::Printf(TEXT("run %d: runtime failed to start"), Run)); return false; }
+		RunMethodChain(Runtime.Get(), Run);
+	}
+
+	// LEAK — N construct+method-call cycles -> malloc_size bounded (the thunk's opaque read + arg-marshal + result don't leak).
+	{
+		FScopedTestRuntime LeakRt;
+		if (!LeakRt.IsValid() || !LeakRt.Get().IsValid()) { AddError(TEXT("leak: runtime failed to start")); return false; }
+		JSContext* const Ctx = static_cast<JSContext*>(LeakRt.Get().GetNativeContextHandle());
+		JSRuntime* const Rt = JS_GetRuntime(Ctx);
+		TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(LeakRt.Get());
+		FNativeClassDef Def; Def.Name = "CathodeKTest"; Def.Finalizer = &NoopFinalizer;
+		const JSClassID ClassId = Registry->RegisterClass(Def);
+		GKComputeClassId = ClassId;
+		const FBoundMember KMembers[] = { { "compute", "TestK", EBoundMemberKind::Method, "test", nullptr, &ComputeThunk, nullptr, nullptr } };
+		InstallBoundMembers(Ctx, ClassId, KMembers, UE_ARRAY_COUNT(KMembers));
+		FKTestNative Native{ 6 };
+
+		auto OneCycle = [&]()
+		{
+			FJsValue W = Registry->CreateWrappedObject(ClassId, &Native);
+			JSValue Global = JS_GetGlobalObject(Ctx);
+			JS_SetPropertyStr(Ctx, Global, "o", JS_DupValue(Ctx, W.GetValue())); // overwrites the prior -> prior ref dropped
+			JS_FreeValue(Ctx, Global);
+			LeakRt.Get().Evaluate(TEXT("globalThis.__x = globalThis.o.compute(7);"), TEXT("<leak>"), EEvalKind::Global);
+		};
+		auto MallocSizeAfterGC = [&]() -> uint64 { JS_RunGC(Rt); JSMemoryUsage U; JS_ComputeMemoryUsage(Rt, &U); return static_cast<uint64>(U.malloc_size); };
+
+		for (int32 i = 0; i < 5; ++i) { OneCycle(); }
+		const uint64 Baseline = MallocSizeAfterGC();
+		for (int32 i = 0; i < 50; ++i) { OneCycle(); }
+		const uint64 After = MallocSizeAfterGC();
+		TestTrue(FString::Printf(TEXT("(LEAK) malloc_size BOUNDED after 50 construct+method-call cycles (baseline=%llu after=%llu)"), Baseline, After),
 			After <= Baseline + (128 * 1024));
 	}
 
