@@ -66,6 +66,42 @@ proves the real mechanism instead). **Justification is TOPOLOGY-DEPENDENT:** `no
 > the next author inherits `document.gc_mark` UNSAFE-to-re-add under this model.** (Demonstrated: the events slice's
 > node↔listener JS-closure reclaim test + the listener→document benign-over-retention test.)
 
+## JS-driven DOM status (sprint 018 — engine-verified)
+
+Real panel JS — via **016's real `Evaluate`** + **017's engine-verified class binding** — mutates the
+**retained `FDomNode` tree**, each mutation verified **C++-DIRECT** on the `FDomNode` (the source of truth:
+`NodeFromWrapper` → `GetTagName` / `GetChildNodes` / `GetAttribute`), **not** `querySelector` / `getComputedStyle`
+(the selector-service-mediated / read-path indirections — the **primary reject** for a retained-tree claim).
+The DOM op runs **inside the `Evaluate` source string** (real-JS-driven), and C++ recovers the JS-minted wrapper
+via the **global channel** (017's transit: `JS_GetPropertyStr` → `NodeFromWrapper`).
+
+| Op | Test | C++-direct assertion |
+|---|---|---|
+| `document.createElement` + `parent.appendChild` (real JS) | `Cathode.Dom.JsDriven.CreateAppendRetainedTree` | the JS-MINTED node's identity: `NodeFromWrapper(__a)->GetTagName()` == the UNIQUE tag; + exact-order parenting: the parent's `GetChildNodes()` == `[__a, __b]` IN ORDER (a fresh/empty parent → the whole-list order assertion is genuine; stronger than a `Contains` membership) |
+| `el.style.<prop> = value` (real JS, the 014 write-through `CSSStyleDeclaration` setter) | `Cathode.Dom.JsDriven.StyleWriteRetainedNode` | the C++-STORED inline style: `NodeFromWrapper(__el)->GetAttribute("style")` returns true AND `Contains` the distinct value tokens (`"42px"`, `"red"`) |
+
+**Premise note (the 017-style correction — the gap was narrower than "first time").** All three ops were
+**already** real-JS-driven before 018 (the selector + Preact mount-proof + `StyleTests` exercise
+`document.createElement` / `appendChild` / `el.style` via real `Evaluate`), and **appendChild's C++-direct
+retained-tree verify already existed** — `…Event.*` asserts `NativeChildIds(Parent).Contains(Child->GetNodeId())`
+(`= FDomNode::GetChildNodes`) after a real-JS `appendChild`, on a **C++-minted** node (EventTests:436). The
+**genuine 018 gap**, added here, is the **C++-direct verify of (a) the JS-MINTED node** (`createElement` in the
+eval → `GetTagName` on the recovered node) **and (b) the JS-WRITTEN style** (`el.style` write in the eval →
+`GetAttribute("style")`) — neither verified C++-direct before 018. Not a re-proof.
+
+**The masquerade guard (the discriminator).** The mutating op must be **in the `Evaluate` source string**
+(real-JS-driven = the gap); a test-side **C++** `Doc->CreateElement(...)` / `SetAttribute("style", …)` is the
+**other direction** (the existing C++-driven / EventTests coverage), not the 018 gap. A **distinct, non-echoable
+value** binds the JS op to the C++ tree state — a UNIQUE tag (a no-op/echo → wrong tag → FAILS), EXACT child
+order (mis-order → FAILS), a DISTINCT inline style token (`"42px"`, the length, zero CSS-serialization-normalization
+risk; `"red"` stored verbatim per CssCapabilityTests:375 — NOT the `rgb(…)` computed form, NOT a space-separated
+`prop: value`, which would false-RED).
+
+**Layout/render boundary REAFFIRMED.** 018 proves the **tree MUTATION** reaches the retained `FDomNode`. The
+**re-layout / render** of the mutated tree (Dom→Layout→Blend2D→texture) is **integration-deferred** (the 014
+pipeline finding; deferral **#8** below) — NOT 018. A mutated tree is proven changed C++-side; that it re-lays-out
+or renders is the integration phase's.
+
 ## Covered
 
 | Responsibility | Slice | Mechanism | Proof |
