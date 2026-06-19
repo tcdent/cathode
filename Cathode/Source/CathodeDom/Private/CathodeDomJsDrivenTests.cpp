@@ -97,4 +97,58 @@ bool FCathodeDomJsCreateAppendTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// 018 slice 2 — el.STYLE WRITE -> the C++ RETAINED NODE (C++-direct). Real JS (016 Evaluate) writes el.style via the bound
+// CSSStyleDeclaration write-through setter (014; the WRITE is IN the Evaluate source -- NOT a C++ SetAttribute("style",...),
+// which would be the masquerade [the other direction]); then C++ reads the node's STORED inline 'style' attribute DIRECTLY
+// (NodeFromWrapper -> GetAttribute("style"), the canonical FDomNode attr the write-through stores on) -- NOT the JS
+// getAttribute('style')/el.style read-back (the PRIMARY reject, indirect). The gap: the C++-stored inline style after a
+// real-JS write (the setter + the real-JS drive exist [StyleTests:86]; only the C++-direct verify is unproven).
+// DISCRIMINATOR: DISTINCT written values 'red' + '42px' (not default/empty) -> GetAttribute("style") CONTAINS them C++-side.
+// A no-op/stub setter (a JS-side style object not writing through to the FDomNode attr) -> no 'style' attr / lacks the
+// values -> FAILS. Contains on the distinct value substrings (robust to CSS serialization: style.color='red' stores 'red'
+// as-is per StyleTests:86, NOT normalized to rgb; '42px' is a length, stored as-is).
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomJsStyleWriteTest,
+	"Cathode.Dom.JsDriven.StyleWriteRetainedNode",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomJsStyleWriteTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	FScopedTestRuntime Runtime;
+	if (!Runtime.IsValid()) { AddError(TEXT("runtime failed to start")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*Runtime);
+	FStubMeasurer Measurer;
+	TUniquePtr<ILayoutEngine> Engine = CreateLiteHtmlLayoutEngine(Measurer);
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*Runtime, *Registry, *Engine);
+	JSContext* Context = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
+	Doc->InstallAsGlobal(); // globalThis.document
+
+	// REAL JS mints a node + writes el.style (the bound CSSStyleDeclaration write-through setter) — the WRITE is in the eval source.
+	const FEvalResult R = Runtime->Evaluate(
+		TEXT("globalThis.__el = document.createElement('cathode-styled');")
+		TEXT("globalThis.__el.style.color = 'red'; globalThis.__el.style.width = '42px';"),
+		TEXT("<style-write>"), EEvalKind::Global);
+	TestFalse(TEXT("the style-write eval did not throw"), R.bThrew);
+
+	// C++ recovers the JS-MINTED wrapper via the global channel (017's transit) -> NodeFromWrapper -> the C++ FDomNode.
+	JSValue Global = JS_GetGlobalObject(Context);
+	const FJsValue ElW(Context, JS_GetPropertyStr(Context, Global, "__el"));
+	JS_FreeValue(Context, Global);
+	FDomNode* const El = Doc->NodeFromWrapper(ElW);
+	if (El == nullptr) { AddError(TEXT("the JS-minted styled node did not resolve to a C++ FDomNode")); return false; }
+
+	// C++-DIRECT: the FDomNode's STORED inline 'style' attribute (the source of truth the 014 write-through stores on) — NOT the JS getAttribute.
+	// A no-op/stub setter -> no 'style' attr (bHasStyle false) or lacks the values -> FAILS.
+	FString StyleAttr;
+	const bool bHasStyle = El->GetAttribute(TEXT("style"), StyleAttr);
+	TestTrue(TEXT("(style write) the real-JS el.style write created a C++ 'style' attribute on the FDomNode (a no-op setter -> none)"), bHasStyle);
+	TestTrue(FString::Printf(TEXT("(style write) the C++-stored style CONTAINS the distinct 'red' (the real-JS write reached the node; attr='%s')"), *StyleAttr), StyleAttr.Contains(TEXT("red")));
+	TestTrue(FString::Printf(TEXT("(style write) the C++-stored style CONTAINS the distinct '42px' (attr='%s')"), *StyleAttr), StyleAttr.Contains(TEXT("42px")));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
