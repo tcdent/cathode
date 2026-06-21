@@ -60,6 +60,17 @@ BLRgba32 ToBLRgba32(const FColor& Color)
 	return BLRgba32(Color.R, Color.G, Color.B, Color.A);
 }
 
+// Frees the heap font-bytes copy a BLFontData owns — create_from_data's external-data destroy callback. The copy
+// is FMemory::Malloc'd at a cache miss and handed to BLFontData::create_from_data(ptr, size, destroy); Blend2D
+// invokes this when the (cached) font data is released, so the cached face is self-contained and frees its bytes.
+// (We CANNOT use BLArray::assign_data to own the copy: bl_array_assign_data sizes the new impl from the array's
+// OLD size, not the new count [vendored array.cpp:883], so a copy INTO a fresh BLArray heap-overflows its buffer —
+// an asan-grounded, repro-confirmed system-crasher. The external-data ownership form sidesteps it entirely.)
+void BL_CDECL Blend2DFreeOwnedFontBytes(void* /*Impl*/, void* ExternalData, void* /*UserData*/) BL_NOEXCEPT_C
+{
+	FMemory::Free(ExternalData);
+}
+
 // One Blend2D-backed CPU bitmap (wraps BLImage).
 class FBlend2DBitmap final : public IRasterBitmap
 {
@@ -154,13 +165,60 @@ public:
 
 	virtual void DrawGlyphRun(const FVector2f& Origin, const FPositionedGlyphRun& Run, const FColor& Color) override
 	{
-		// TODO(Text & Fonts): map FPositionedGlyphRun -> BLFont + BLGlyphRun and
-		// Context.fill_glyph_run(BLPoint(Origin.X, Origin.Y), Font, GlyphRun, ToBLRgba32(Color)). The
-		// glyph data (font + shaped glyphs) is supplied by Text & Fonts (future). The origin is already
-		// fractional — the draw-dispatch never snaps it — so no rounding happens here either.
-		(void)Origin;
-		(void)Run;
-		(void)Color;
+		if (FaceCache == nullptr || Run.Glyphs.Num() == 0 || Run.FontBytes.Num() == 0)
+		{
+			return;
+		}
+
+		// Cache the BLFontFace by font identity (createFromData ONCE per distinct font; reuse across runs — NOT a
+		// per-run re-parse). The cache OWNS its bytes: on a miss, COPY the BORROWED FontBytes view into a heap
+		// buffer that the BLFontData OWNS — via create_from_data's (ptr, size, destroy) external-data form, which
+		// frees the copy through Blend2DFreeOwnedFontBytes when the (cached) font data is released. The cached face
+		// is then self-contained and OUTLIVES the per-call borrow (no dangling on a later call); the heap copy has
+		// a stable address, so a later cache rehash that moves the BLFontFace does not dangle the data pointer. The
+		// seam's FontBytes borrow only needs to be valid for THIS synchronous call's copy (the borrow contract).
+		// NOT BLArray::assign_data — that copy heap-overflows a fresh array (see Blend2DFreeOwnedFontBytes).
+		BLFontFace* CachedFace = FaceCache->Find(Run.FontId);
+		if (CachedFace == nullptr)
+		{
+			const int32 NumBytes = Run.FontBytes.Num();
+			void* OwnedCopy = FMemory::Malloc(static_cast<SIZE_T>(NumBytes)); // BLFontData takes ownership (freed via the destroy cb)
+			FMemory::Memcpy(OwnedCopy, Run.FontBytes.GetData(), static_cast<SIZE_T>(NumBytes)); // COPY the borrow once
+			BLFontData FontData;
+			if (FontData.create_from_data(OwnedCopy, static_cast<size_t>(NumBytes), &Blend2DFreeOwnedFontBytes, nullptr) != BL_SUCCESS)
+			{
+				FMemory::Free(OwnedCopy); // create failed -> the destroy cb never fires -> free the copy ourselves
+				return;
+			}
+			BLFontFace Face;
+			if (Face.create_from_data(FontData, 0) != BL_SUCCESS) { return; } // the face ref-counts the font data (owns the copy)
+			CachedFace = &FaceCache->Add(Run.FontId, MoveTemp(Face));
+		}
+
+		BLFont Font;
+		if (Font.create_from_face(*CachedFace, Run.FontSizePx) != BL_SUCCESS) { return; }
+
+		// Build the BLGlyphRun: glyph ids + per-glyph placements. advance 0 + placement = the shaped offset ->
+		// each glyph sits at (Origin + its shaped offset). The origin is a fractional BLPoint (never snapped).
+		TArray<uint32> Ids;
+		TArray<BLGlyphPlacement> Placements;
+		Ids.Reserve(Run.Glyphs.Num());
+		Placements.Reserve(Run.Glyphs.Num());
+		for (const FRasterGlyph& G : Run.Glyphs)
+		{
+			Ids.Add(G.GlyphId);
+			BLGlyphPlacement Placement{};
+			Placement.placement = BLPointI(FMath::RoundToInt(G.X), FMath::RoundToInt(G.Y));
+			Placement.advance = BLPointI(0, 0);
+			Placements.Add(Placement);
+		}
+		BLGlyphRun GlyphRun{};
+		GlyphRun.size = static_cast<size_t>(Ids.Num());
+		GlyphRun.set_glyph_data(Ids.GetData());
+		GlyphRun.set_placement_data(Placements.GetData());
+		GlyphRun.placement_type = BL_GLYPH_PLACEMENT_TYPE_ADVANCE_OFFSET;
+
+		Context.fill_glyph_run(BLPoint(Origin.X, Origin.Y), Font, GlyphRun, ToBLRgba32(Color));
 	}
 
 	virtual void ClearRect(const FBox2f& Rect) override
@@ -173,8 +231,14 @@ public:
 		Context.end();
 	}
 
+	// The backend's font-face cache (set before Begin). Not owned here — the backend persists it across sessions.
+	void SetFaceCache(TMap<int64, BLFontFace>* InCache) { FaceCache = InCache; }
+
 private:
 	BLContext Context;
+	// Borrowed pointer to the backend's BLFontFace-by-identity cache (createFromData once per font; the cache
+	// OWNS its bytes). nullptr until BeginContext wires it.
+	TMap<int64, BLFontFace>* FaceCache = nullptr;
 };
 
 // The Blend2D-backed paint backend — the single place Blend2D (+ AsmJit) is bound.
@@ -193,12 +257,20 @@ public:
 		// The backend only ever produces FBlend2DBitmap, so this downcast is safe.
 		FBlend2DBitmap& BitmapTarget = static_cast<FBlend2DBitmap&>(Target);
 		TUniquePtr<FBlend2DContext> Session = MakeUnique<FBlend2DContext>();
+		Session->SetFaceCache(&FontFaceCache); // the cache persists across sessions (createFromData once per font)
 		if (!Session->Begin(BitmapTarget, Config))
 		{
 			return nullptr;
 		}
 		return Session;
 	}
+
+private:
+	// Font-face cache, keyed by font identity (FPositionedGlyphRun.FontId). createFromData ONCE per distinct
+	// font; the cache OWNS its bytes (each face's BLFontData owns a heap copy of the seam's byte-view, freed via
+	// the external-data destroy callback -> the cached face is self-contained, surviving the per-call borrow).
+	// Persists for the backend's lifetime.
+	TMap<int64, BLFontFace> FontFaceCache;
 };
 
 } // namespace

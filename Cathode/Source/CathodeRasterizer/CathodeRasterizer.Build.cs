@@ -15,6 +15,17 @@ public class CathodeRasterizer : ModuleRules
 			"Core",
 		});
 
+		// TEST-ONLY conditional deps (sprint 022; non-Shipping — a Shipping CathodeRasterizer carries neither,
+		// staying a Core+Blend2D LEAF). The glyph-raster test bridges 021's REAL shaper output into the neutral
+		// FPositionedGlyphRun seam: CathodeText (021's shaper + byte store, for the same-bytes anchor) + Projects
+		// (IPluginManager, to reach the committed OFL font fixture). The PRODUCTION DrawGlyphRun takes the bytes
+		// IN the seam — NO production CathodeText dep (the leaf-preserving inject-the-bytes design).
+		if (Target.Configuration != UnrealTargetConfiguration.Shipping)
+		{
+			PrivateDependencyModuleNames.Add("CathodeText");
+			PrivateDependencyModuleNames.Add("Projects");
+		}
+
 		// --- Bundled ThirdParty: Blend2D (the paint backend) + AsmJit (its JIT pipeline compiler) ---
 		//
 		// ACTIVATED (sprint 010 bring-up): the Blend2D-backed raster impl #includes blend2d.h and calls the

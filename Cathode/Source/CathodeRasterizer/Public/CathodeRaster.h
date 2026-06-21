@@ -51,13 +51,32 @@ struct FBitmapData
 // components wire it.
 using FFrameReadySeam = TFunction<void(const FBitmapData& Bitmap, const TArray<FIntRect>& DirtyRects)>;
 
-// A positioned glyph run from Text & Fonts — the INPUT SEAM for text. Deliberately minimal and
-// evolvable: Text & Fonts owns shaping + hinting (HarfBuzz, default features kern/liga/calt) and does
-// not exist yet, so its taxonomy is NOT pre-specified here. Today it is only the marker that "shaped
-// glyphs, positioned, in a font" flow in; the fields grow with Text & Fonts on this live call site.
+// One positioned glyph in the Rasterizer's OWN neutral terms (NO CathodeText type — the Rasterizer stays a
+// leaf). A glyph id + the fractional offset from the run origin (the shaped pen position). The id indexes the
+// SAME font face the Rasterizer builds from the run's FontBytes (same bytes -> same glyph-id space — the
+// correctness anchor with the shaper).
+struct FRasterGlyph
+{
+	uint32 GlyphId = 0;
+	float X = 0.0f; // fractional offset from the run origin (the shaped pen position)
+	float Y = 0.0f;
+};
+
+// A positioned glyph run from Text & Fonts — the INPUT SEAM for text (the fields GREW here, sprint 022). It is
+// ENGINE-NEUTRAL: it carries the font BYTES + the Rasterizer's own glyph type, so the Rasterizer needs NO
+// CathodeText dep (the bytes + ids are INJECTED, not a dependency — the leaf-preserving design).
+//
+// BORROW CONTRACT (load-bearing): FontBytes and Glyphs are BORROWED VIEWS into data owned EXTERNALLY (the
+// caller / Text & Fonts' single-load byte store). They are valid ONLY for the duration of the SYNCHRONOUS
+// DrawGlyphRun call. The Rasterizer reads FontBytes during the call and COPIES it into an owned, cached
+// BLFontFace on a cache miss (so the cache, which outlives the borrow, never dangles). FPositionedGlyphRun
+// MUST NOT be retained past the owning data, or DrawGlyphRun would read a dangling view -> UAF.
 struct FPositionedGlyphRun
 {
-	// (evolvable) glyph ids + per-glyph positions + the font handle arrive here from Text & Fonts.
+	TArrayView<const uint8> FontBytes;     // BORROWED font-file bytes (see the borrow contract) — for BLFontFace
+	int64 FontId = 0;                      // font identity for the BLFontFace cache (createFromData ONCE per font)
+	float FontSizePx = 0.0f;               // the shaped font size, pixels
+	TArrayView<const FRasterGlyph> Glyphs; // BORROWED glyph ids + fractional positions (the shaped run)
 };
 
 // Image-scaling quality for content-image draws (impl -> BLPatternQuality).
