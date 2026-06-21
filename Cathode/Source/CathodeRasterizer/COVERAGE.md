@@ -14,7 +14,8 @@ This file is the accountability of record — code comments that mention an "acc
 | Paint backend — backgrounds / solid boxes | S4 dispatch + S5 impl | `FillRect` / `FillBox` → `BLContext::fill_rect`/`fill_box` |
 | Paint backend — images | S4 + S5 | `DrawImage` → `BLContext::blit_image` |
 | Paint backend — **borders (solid rectangular)** | S4 + S5 | Layout composes them from `FillBox`/`FillRect` edge rects; the Rasterizer provides the fill primitives, Layout owns CSS per-side border semantics. (Styled/rounded → deferred below.) |
-| Draw shaped text — **dispatch + fractional positioning** | S4 | `DrawGlyphRun` routed by `DispatchPaintOps`; origins passed unsnapped per `bFractionalGlyphPositioning`. (Vendor glyph fill → deferred below.) |
+| Draw shaped text — **dispatch + fractional positioning** | S4 | `DrawGlyphRun` routed by `DispatchPaintOps`; origins passed unsnapped per `bFractionalGlyphPositioning`. |
+| Draw shaped text — **vendor glyph fill (real pixels)** | 022 | `DrawGlyphRun` maps the neutral `FPositionedGlyphRun` (bytes+ids+positions) → `BLFont` (`createFromData` external-data; the face cache owns its byte copy) + `BLGlyphRun` → real `BLContext::fill_glyph_run` → real pixels. Proven by `Cathode.Rasterizer.Glyph.RealRasterPixels` (ink-in-box=637 / margin-ink=0 on 021's real shaped 'M', one `FFontHandle`); leaf-preserved (bytes injected via the seam); Win64-executed; the box survived (the `assign_data` overflow bypassed). |
 | Rasterize **dirty regions only** | S5 | `FSurfaceRasterizer::RasterizeFrame` clips to each dirty rect (`ClipToRect` → `BLContext::clip_to_rect`) and redraws only within it — never the whole surface |
 | Produce the CPU bitmap | S2 / S5 | `FDoubleBuffer` front buffer → `FBitmapData` via `IRasterBitmap::GetData` |
 | Hand bitmap + dirty-rect to Surfaces | S5 | `FFrameReadySeam` output seam (Core-only); produced + handed off, frame-ready-only-on-change |
@@ -24,16 +25,17 @@ This file is the accountability of record — code comments that mention an "acc
 
 ## Deferred — with accountability
 
-### 1. Vendor glyph rasterization (`fill_glyph_run`)
-- **Reason:** `FPositionedGlyphRun` carries no `BLFont`/`BLGlyphRun` yet; `FBlend2DContext::DrawGlyphRun` is a TODO stub.
-- **Dependency:** Text & Fonts supplies the shaped glyphs + font.
-- **Unblocks:** when the Text & Fonts component exists.
-- **First-execution risk:** text does not render until Text fills the glyph run and the impl maps it. (The bespoke dispatch + fractional-positioning logic are real and tested now.)
+### 1. Vendor glyph rasterization (`fill_glyph_run`) — RETIRED (022)
+- **Retired by:** sprint 022. `FBlend2DContext::DrawGlyphRun` maps the grown neutral `FPositionedGlyphRun` (bytes + ids + positions) → `BLFont` (`createFromData` external-data ownership form — the face cache owns its byte copy via a destroy callback) + `BLGlyphRun` → real `BLContext::fill_glyph_run` → real pixels.
+- **Proof:** `Cathode.Rasterizer.Glyph.RealRasterPixels` — the EXISTS-ink-in-box (637) + ALL-blank-margin (0) pair on 021's real shaped 'M' (one `FFontHandle`; the same bytes shaped and drawn); real pixel-read via the Blend2D bitmap `GetData`; leaf-preserved (no production CathodeText dep — bytes injected via the seam); Win64-executed; the box survived.
+- **Vendor-lib follow-on (tracked, separate, non-blocking):** 022 shipped on the **bypass** (the external-data form, which never calls the buggy path) over the **unpatched** Blend2D lib. The root cause — `bl_array_assign_data` under-allocates (sizes the new impl from the array's old size, not the new count → a heap-buffer-overflow; asan-grounded off-box, live on upstream master 0.21.2 / `6dbc2ce`) — is fixed by `patches/blend2d-assign-data-underalloc.patch`, applied via a `git apply` hook **inside** the `setup.ps1` vendor step (after `install.sh` checkout, before the blend2d build; there is no build-without-vendor variant). Sequenced by tcdent.
+- **Layout drive stays integration:** 022 proves the FILL on 021's real shaper output; the Layout → paint-op → raster production drive remains integration (Deferred #5).
 
 ### 2. Glyph-only frames do not dirty / do not render
 - **Reason:** glyph paint ops carry no bounds (`FPaintOp::Rect` is empty for `DrawGlyphRun`), so a frame containing only glyph ops produces an empty dirty region and `RasterizeFrame` returns without rendering.
 - **Dependency:** Text & Fonts supplies glyph-run extents (bounds) so glyph draws can mark their dirty area.
 - **Unblocks:** when Text & Fonts provides glyph extents.
+- **022 note (still deferred):** 022's proof is a DIRECT `DrawGlyphRun` → bitmap, bypassing the frame/dirty path — so this remains deferred. Wiring glyph-run extents into the dirty/frame path is the integration add (the real `fill_glyph_run` that exercises it now exists).
 - **First-execution risk:** a text-only change (no box/image op in the same frame) does not re-rasterize or hand off a frame.
 
 ### 3. Styled / rounded borders
