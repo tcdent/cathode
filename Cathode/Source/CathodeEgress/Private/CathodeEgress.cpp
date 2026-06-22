@@ -30,28 +30,73 @@ namespace
 		}
 	}
 
-	// The bounding rect of the surface's dirty rectangles, clamped to the texture. 1b uploads this single region
-	// (on the first frame the whole surface is dirty -> the full texture). Slice 2 uploads per-sub-rect.
-	FIntRect DirtyBoundsClamped(const TArray<FIntRect>& Rects, int32 Width, int32 Height)
+	// Bytes per pixel for the neutral surface formats (BGRA8 = 4, Alpha8 = 1).
+	int32 BytesPerPixel(ESurfacePixelFormat Format)
 	{
-		const FIntRect Full(0, 0, Width, Height);
+		return (Format == ESurfacePixelFormat::Alpha8) ? 1 : 4;
+	}
+
+	// One assembled upload per dirty rect (slice 2, the dirty-rect REGIONAL upload — uniform TIGHT, one copy path):
+	// a TIGHT command-owned copy of ONLY that rect's pixels (read from the STRIDED source — step source rows by the
+	// view's Stride, offset by the rect origin — into a no-padding buffer) + the matching FUpdateTextureRegion2D
+	// (DestX/DestY = the rect origin, SrcX/SrcY = 0 since the tight buffer STARTS at the rect, Width/Height = the
+	// rect). SourcePitch is the TIGHT pitch (RectW*bpp). The COPY and the upload are BOTH bounded to R — a few
+	// pixels for a few pixels. No full-frame special case: a full-frame rect copies tight too (the strided-read
+	// correctness is bound by the readback over a padded, per-row-distinct source).
+	struct FAssembledRegion
+	{
+		FUpdateTextureRegion2D Region{ 0u, 0u, 0, 0, 0u, 0u };
+		uint32 SourcePitch = 0;
+		TArray<uint8> Bytes; // the tight copy for THIS rect (owned by the render command)
+	};
+
+	TArray<FAssembledRegion> AssembleDirtyUploads(const TArray<FIntRect>& Rects, int32 Width, int32 Height, const uint8* Source, int32 Stride, int32 Bpp)
+	{
+		TArray<FAssembledRegion> Uploads;
+		const auto AssembleRect = [&](const FIntRect& Rect)
+		{
+			const int32 MinX = FMath::Clamp(Rect.Min.X, 0, Width);
+			const int32 MinY = FMath::Clamp(Rect.Min.Y, 0, Height);
+			const int32 MaxX = FMath::Clamp(Rect.Max.X, 0, Width);
+			const int32 MaxY = FMath::Clamp(Rect.Max.Y, 0, Height);
+			const int32 RectW = MaxX - MinX;
+			const int32 RectH = MaxY - MinY;
+			if (RectW <= 0 || RectH <= 0)
+			{
+				return; // empty after clamping
+			}
+			const int32 TightPitch = RectW * Bpp;
+			FAssembledRegion Assembled;
+			Assembled.SourcePitch = static_cast<uint32>(TightPitch);
+			Assembled.Bytes.SetNumUninitialized(TightPitch * RectH);
+			// Copy ONLY the rect's rows from the STRIDED source into the tight buffer: step the source by Stride,
+			// offset MinX*Bpp within each row; write contiguous tight rows. A wrong read-stride misaligns the rows
+			// from a padded source -> the readback mismatches (the relocated padded-stride discriminator).
+			for (int32 Row = 0; Row < RectH; ++Row)
+			{
+				const uint8* SrcRow = Source + static_cast<int64>(MinY + Row) * Stride + static_cast<int64>(MinX) * Bpp;
+				uint8* DstRow = Assembled.Bytes.GetData() + static_cast<int64>(Row) * TightPitch;
+				FMemory::Memcpy(DstRow, SrcRow, TightPitch);
+			}
+			Assembled.Region = FUpdateTextureRegion2D(
+				static_cast<uint32>(MinX), static_cast<uint32>(MinY), // DestX, DestY
+				0, 0,                                                 // SrcX, SrcY — the tight buffer starts at the rect
+				static_cast<uint32>(RectW), static_cast<uint32>(RectH));
+			Uploads.Add(MoveTemp(Assembled));
+		};
+
 		if (Rects.Num() == 0)
 		{
-			return Full; // nothing reported -> treat the whole texture as dirty
+			AssembleRect(FIntRect(0, 0, Width, Height)); // nothing reported -> the whole texture
 		}
-		FIntRect Bounds = Rects[0];
-		for (int32 i = 1; i < Rects.Num(); ++i)
+		else
 		{
-			Bounds.Min.X = FMath::Min(Bounds.Min.X, Rects[i].Min.X);
-			Bounds.Min.Y = FMath::Min(Bounds.Min.Y, Rects[i].Min.Y);
-			Bounds.Max.X = FMath::Max(Bounds.Max.X, Rects[i].Max.X);
-			Bounds.Max.Y = FMath::Max(Bounds.Max.Y, Rects[i].Max.Y);
+			for (const FIntRect& Rect : Rects)
+			{
+				AssembleRect(Rect);
+			}
 		}
-		Bounds.Min.X = FMath::Clamp(Bounds.Min.X, 0, Width);
-		Bounds.Min.Y = FMath::Clamp(Bounds.Min.Y, 0, Height);
-		Bounds.Max.X = FMath::Clamp(Bounds.Max.X, 0, Width);
-		Bounds.Max.Y = FMath::Clamp(Bounds.Max.Y, 0, Height);
-		return Bounds;
+		return Uploads;
 	}
 
 	// The PRODUCTION uploader: the real RHIUpdateTexture2D. Runs on the render thread (the egress invokes it inside
@@ -130,36 +175,39 @@ namespace
 				return;
 			}
 
-			// COPY the dirty bytes BY VALUE at the callback (the borrow can't cross the async hop). 1b copies the
-			// full strided buffer (Height * Stride), preserving the source pitch; slice 2 copies per-sub-rect.
-			const int32 NumBytes = Buffer.Height * Buffer.Stride;
-			TArray<uint8> Copy;
-			Copy.SetNumUninitialized(NumBytes);
-			FMemory::Memcpy(Copy.GetData(), Buffer.Pixels, NumBytes);
-
-			const uint32 SourcePitch = static_cast<uint32>(Buffer.Stride);
-			const FIntRect Dirty = DirtyBoundsClamped(Readiness.Frame.DirtyRects, Buffer.Width, Buffer.Height);
-			const FUpdateTextureRegion2D Region(
-				static_cast<uint32>(Dirty.Min.X), static_cast<uint32>(Dirty.Min.Y), // DestX, DestY
-				Dirty.Min.X, Dirty.Min.Y,                                           // SrcX, SrcY into the copy
-				static_cast<uint32>(Dirty.Width()), static_cast<uint32>(Dirty.Height()));
+			// Assemble one TIGHT command-owned copy per dirty rect, read from the STRIDED source AT THE CALLBACK (the
+			// borrow is valid only synchronously — copy here; never marshal the borrowed Pixels ptr across the async
+			// hop). Each upload's bytes + region are bounded to its rect (a few pixels for a few pixels).
+			const int32 Bpp = BytesPerPixel(Buffer.Format);
+			TArray<FAssembledRegion> Uploads = AssembleDirtyUploads(
+				Readiness.Frame.DirtyRects, Buffer.Width, Buffer.Height,
+				static_cast<const uint8*>(Buffer.Pixels), Buffer.Stride, Bpp);
+			if (Uploads.Num() == 0)
+			{
+				return;
+			}
 
 			const FSurfaceId Surface = Readiness.Surface;
 			FEgressUploader UploaderForCommand = Uploader;
 
-			// Marshal onto the render thread; the command OWNS the copy (moved in). The RHI texture is resolved
-			// inside the command (after the resource's render-thread init has run, by FIFO ordering).
+			// Marshal onto the render thread; the command OWNS the assembled tight copies (moved in). The RHI texture
+			// is resolved inside the command (after the resource's render-thread init has run, by FIFO ordering). One
+			// upload per dirty rect -> only the changed sub-rect(s) reach the GPU (the dirty-rect regional upload).
 			ENQUEUE_RENDER_COMMAND(CathodeEgressUpload)(
-				[Resource, Region, SourcePitch, Surface, Bytes = MoveTemp(Copy), UploaderForCommand](FRHICommandListImmediate& RHICmdList)
+				[Resource, Uploads = MoveTemp(Uploads), Surface, UploaderForCommand](FRHICommandListImmediate& RHICmdList)
 				{
-					FEgressUpload Upload;
-					Upload.Texture = Resource->GetTexture2DRHI();
-					Upload.Region = Region;
-					Upload.SourcePitch = SourcePitch;
-					Upload.SourceData = Bytes.GetData();
-					Upload.SourceNumBytes = Bytes.Num();
-					Upload.Surface = Surface;
-					UploaderForCommand(Upload);
+					FRHITexture* TexRHI = Resource->GetTexture2DRHI();
+					for (const FAssembledRegion& Assembled : Uploads)
+					{
+						FEgressUpload Upload;
+						Upload.Texture = TexRHI;
+						Upload.Region = Assembled.Region;
+						Upload.SourcePitch = Assembled.SourcePitch;
+						Upload.SourceData = Assembled.Bytes.GetData();
+						Upload.SourceNumBytes = Assembled.Bytes.Num();
+						Upload.Surface = Surface;
+						UploaderForCommand(Upload);
+					}
 				});
 		}
 
