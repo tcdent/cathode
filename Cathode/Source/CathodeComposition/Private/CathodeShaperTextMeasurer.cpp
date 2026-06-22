@@ -61,6 +61,27 @@ void FShaperTextMeasurer::GetFontMetrics(FLayoutFontRef Font, float& OutAscent, 
 	OutHeight = M.Ascent + M.Descent + M.LineGap;
 }
 
+bool FShaperTextMeasurer::ShapeText(FLayoutFontRef Font, const FString& Text, FShapedRun& OutShaped, float& OutFontSizePx)
+{
+	const FResolvedFont* R = Lookup(Font);
+	if (R == nullptr || !R->Handle.IsValid() || !Shaper.IsValid())
+	{
+		return false;
+	}
+	FShapeRequest Request;
+	Request.Text = Text;
+	Request.Font = R->Handle;          // the SAME handle Layout measured with (the same-bytes anchor)
+	Request.FontSizePixels = R->PixelSize;
+	OutShaped = Shaper->Shape(Request);
+	OutFontSizePx = R->PixelSize;
+	return true;
+}
+
+bool FShaperTextMeasurer::GetFontBytes(FFontHandle Handle, TArrayView<const uint8>& OutBytes) const
+{
+	return Registry.IsValid() && Registry->GetFontBytes(Handle, OutBytes);
+}
+
 const FShaperTextMeasurer::FResolvedFont* FShaperTextMeasurer::Lookup(FLayoutFontRef Font) const
 {
 	return Resolved.IsValidIndex(Font.Id) ? &Resolved[Font.Id] : nullptr;

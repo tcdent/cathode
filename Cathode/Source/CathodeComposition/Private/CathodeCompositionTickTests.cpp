@@ -66,6 +66,41 @@ namespace
 	{
 		return (Px + Y * Stride + X * 4)[3] > 0; // any non-transparent pixel
 	}
+
+	bool IsBluePixel(const uint8* Px, int32 Stride, int32 X, int32 Y)
+	{
+		// PremultipliedBGRA8: bytes [B,G,R,A]. Opaque blue (#0000ff) -> B=255,G=0,R=0,A=255.
+		const uint8* P = Px + Y * Stride + X * 4;
+		return P[0] > 200 && P[1] < 60 && P[2] < 60 && P[3] > 100;
+	}
+
+	// The slice-2 TEXT document: an absolute, SHRINK-TO-FIT div (width:auto) with a BLUE background + RED text.
+	// The div's box width = the MEASURED text width (ITextMeasurer::MeasureWidth, the adapter) — so the BLUE bg's
+	// horizontal extent is the adapter's measured width OBSERVABLE in the bitmap; the RED glyphs are the shaper's
+	// output. The two colors discriminate the two halves: a stub-measurer (wrong width) collapses the blue box
+	// (no blue at the right) while the red glyphs still render at their shaped positions -> the blue-extent
+	// assertion REDs (the adapter), independent of the glyph ink (the shaper). Default OFL font (no font-family ->
+	// no catalog needed; leaf-clean). Provided both inline (<style>) and via GetDocumentCss (idempotent).
+	static const TCHAR* TextCss()
+	{
+		return TEXT("html,body{margin:0;padding:0;} ")
+			TEXT("#t{position:absolute;left:20px;top:20px;font-size:48px;color:#ff0000;background-color:#0000ff;}");
+	}
+	class FInlineTextDocument final : public Cathode::ILayoutDocumentSource
+	{
+	public:
+		virtual int32 GetRootNode() const override { return 0; }
+		virtual int32 GetParentNode(int32 /*NodeId*/) const override { return INDEX_NONE; }
+		virtual void GetChildNodes(int32 /*NodeId*/, TArray<int32>& OutChildren) const override { OutChildren.Reset(); }
+		virtual bool IsLayoutBoundary(int32 /*NodeId*/) const override { return true; }
+
+		virtual FString GetDocumentHtml() const override
+		{
+			return FString::Printf(TEXT("<html><head><style>%s</style></head><body><div id=\"t\">MM</div></body></html>"), TextCss());
+		}
+		virtual FString GetSubtreeHtml(int32 /*NodeId*/) const override { return FString(); }
+		virtual FString GetDocumentCss() const override { return TextCss(); }
+	};
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -194,6 +229,151 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 	// Blend2D + HarfBuzz + litehtml are Win64-only in the plugin, so the composed RUNTIME tick (the render proof)
 	// cannot execute off-Win64. Do NOT vacuously pass on a structure-only path — the render content is the proof.
 	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersDocumentBox requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed render did not execute on this platform — a non-Win64 pass would be vacuous."));
+	return false;
+#endif
+}
+
+// 023 slice 2 — the TEXT PATH through the composed tick. Exercises BOTH halves discriminatingly: the ADAPTER
+// (ITextMeasurer::MeasureWidth -> the shrink-to-fit box's WIDTH, observable as the BLUE bg's right extent) AND the
+// SHAPER + the 022 glyph-run map (the RED glyph ink). The two colors separate them: a stub-measurer collapses the
+// blue box (no blue at the right) while the red glyphs still render -> the blue-extent assertion REDs the adapter
+// independently of the shaper. The SAME-BYTES ANCHOR: one shared FShaperTextMeasurer (one FFontHandle) threads
+// MeasureWidth (Layout) + ShapeText (the mapper) + the bytes (DrawGlyphRun). Composed through FSurface::DriveAll ->
+// real Layout (measure+position) -> the mapper (shape) -> real Rasterizer (DrawGlyphRun), NOT 022's isolation.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCompositionTextTickTest,
+	"Cathode.Composition.Tick.ComposedFrameRendersTextAtMeasuredWidth",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+#if PLATFORM_WINDOWS
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
+	if (!Plugin.IsValid()) { AddError(TEXT("could not locate the Cathode plugin base dir")); return false; }
+	const FString FontPath = Plugin->GetBaseDir() / TEXT("Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf");
+	if (!FPaths::FileExists(FontPath)) { AddError(FString::Printf(TEXT("the OFL font fixture is not on disk: %s"), *FontPath)); return false; }
+
+	const int32 W = 200;
+	const int32 H = 96;
+	FInlineTextDocument Document; // MUST outlive the surface (the document backer holds it by reference)
+
+	// Read the BLUE shrink-to-fit box from the REAL layout — its WIDTH is the adapter's MEASURED text width.
+	FBox2f BlueBox(ForceInit);
+	bool bFoundBlue = false;
+	bool bFoundText = false;
+	{
+		FShaperTextMeasurer Measurer(FontPath);
+		TUniquePtr<ILayoutEngine> Engine = CreateLiteHtmlLayoutEngine(Measurer);
+		if (!Engine.IsValid()) { AddError(TEXT("standalone layout engine construction failed")); return false; }
+		Engine->SetDocument(Document);
+		const FLayoutResult Result = Engine->Relayout(W);
+		FLayoutPaintOp TextOp;
+		FString OpSeq;
+		for (const FLayoutPaintOp& Op : Result.PaintOps)
+		{
+			OpSeq += FString::Printf(TEXT("%d "), (int32)Op.Kind);
+			const bool bFill = (Op.Kind == ELayoutPaintOpKind::FillRect || Op.Kind == ELayoutPaintOpKind::FillBox);
+			if (bFill && Op.Color.R == 0 && Op.Color.G == 0 && Op.Color.B == 255) { BlueBox = Op.Rect; bFoundBlue = true; }
+			if (Op.Kind == ELayoutPaintOpKind::DrawText && !Op.Text.IsEmpty()) { TextOp = Op; bFoundText = true; }
+		}
+		// DIAGNOSTIC (red-in-box=0): the DrawText op's color/position/font + the standalone shaping (mirrors the
+		// mapper) — pins whether the color is non-red, the shaping fails, or the bytes are missing.
+		if (bFoundText)
+		{
+			FShapedRun DiagShaped; float DiagSize = 0.0f;
+			const bool bShaped = Measurer.ShapeText(TextOp.Font, TextOp.Text, DiagShaped, DiagSize);
+			TArrayView<const uint8> DiagBytes;
+			const bool bBytes = bShaped && Measurer.GetFontBytes(DiagShaped.Font, DiagBytes);
+			AddInfo(FString::Printf(TEXT("[023-TEXT][diag] opseq=[%s] DrawText: color=R%uG%uB%uA%u pos=(%.1f,%.1f) fontId=%d textlen=%d | shaped=%d glyphs=%d sizepx=%.1f bytes=%d num=%d"),
+				*OpSeq, TextOp.Color.R, TextOp.Color.G, TextOp.Color.B, TextOp.Color.A, TextOp.Position.X, TextOp.Position.Y, TextOp.Font.Id, TextOp.Text.Len(),
+				bShaped ? 1 : 0, DiagShaped.Glyphs.Num(), DiagSize, bBytes ? 1 : 0, bBytes ? DiagBytes.Num() : 0));
+		}
+	}
+	if (!bFoundBlue) { AddError(TEXT("the real Layout produced no blue shrink-to-fit bg box for the text div")); return false; }
+	if (!bFoundText) { AddError(TEXT("the real Layout produced no DrawText op — the text did not lay out")); return false; }
+	// The blue box width IS the adapter's measured text width — assert it is a REAL measure (a stub-zero-width
+	// measurer would collapse it; this is the adapter EXERCISED, not slice-1's wired-not-exercised).
+	const float MeasuredWidth = BlueBox.Max.X - BlueBox.Min.X;
+	TestTrue(FString::Printf(TEXT("the shrink-to-fit box width is the adapter's MEASURED text width (>=40; got %.1f)"), MeasuredWidth), MeasuredWidth >= 40.0f);
+	TestTrue(FString::Printf(TEXT("the box is at the non-trivial Layout offset (Min.X=%.1f)"), BlueBox.Min.X), BlueBox.Min.X >= 15.0f);
+
+	// Drive the composed tick via the registry (the production drive path).
+	TUniquePtr<ISurfaceRegistry> Registry = CreateSurfaceRegistry();
+	if (!Registry.IsValid()) { AddError(TEXT("surface registry construction failed")); return false; }
+	FSurfaceRegistration Registration = MakeCompositionSurfaceRegistration(Document, W, H, ESurfacePixelFormat::PremultipliedBGRA8, FontPath);
+	const FSurfaceId SurfaceId = Registry->Register(MoveTemp(Registration));
+	FSurfaceReadiness Captured;
+	bool bRelayed = false;
+	FSurfaceReadinessSeam Egress = [&Captured, &bRelayed](const FSurfaceReadiness& Readiness) { Captured = Readiness; bRelayed = true; };
+	Registry->DriveAll(Egress);
+
+	TestTrue(TEXT("the readiness relay fired"), bRelayed);
+	TestTrue(TEXT("the ready frame carries a valid front-buffer ref"), Captured.Frame.Buffer.IsValid());
+
+	const FBitmapData* Bitmap = static_cast<const FBitmapData*>(Captured.Frame.Buffer.Handle);
+	if (Bitmap == nullptr || Bitmap->Pixels == nullptr) { AddError(TEXT("the ready front buffer resolved to null pixels")); return false; }
+	const uint8* Px = static_cast<const uint8*>(Bitmap->Pixels);
+	const int32 Stride = Bitmap->Stride;
+
+	const int32 BoxL = FMath::Clamp(FMath::FloorToInt(BlueBox.Min.X), 0, W - 1);
+	const int32 BoxT = FMath::Clamp(FMath::FloorToInt(BlueBox.Min.Y), 0, H - 1);
+	const int32 BoxR = FMath::Clamp(FMath::CeilToInt(BlueBox.Max.X), 1, W);
+	const int32 BoxB = FMath::Clamp(FMath::CeilToInt(BlueBox.Max.Y), 1, H);
+
+	// (ADAPTER — observable in the bitmap, absolute threshold): the BLUE bg reaches the MEASURED width. Scan
+	// x in [60, W): a real "MM"@48px measure (~80px) renders blue there; a stub-zero measure collapses the box ->
+	// no blue past the origin -> RED. BLUE specifically (not red) — the glyphs render regardless of the measurer;
+	// only the bg box's right extent reflects MeasureWidth.
+	int32 BlueRight = 0;
+	for (int32 Y = BoxT; Y < BoxB; ++Y) { for (int32 X = 60; X < W; ++X) { if (IsBluePixel(Px, Stride, X, Y)) { ++BlueRight; } } }
+
+	// (SHAPER): EXISTS red glyph ink inside the box (the text shaped + rastered through the composed tick).
+	int32 RedInBox = 0;
+	for (int32 Y = BoxT; Y < BoxB; ++Y) { for (int32 X = BoxL; X < BoxR; ++X) { if (IsRedPixel(Px, Stride, X, Y)) { ++RedInBox; } } }
+
+	// DIAGNOSTIC (red-in-box=0): in-box ink that is NOT the blue bg — a glyph rendered in a wrong color (black/AA
+	// over blue) would show here; 0 means no glyph pixels rendered at all (op not produced/dispatched).
+	int32 NonBlueInkInBox = 0;
+	FString DarkSamples;
+	int32 DarkLogged = 0;
+	for (int32 Y = BoxT; Y < BoxB; ++Y)
+	{
+		for (int32 X = BoxL; X < BoxR; ++X)
+		{
+			if (IsInkPixel(Px, Stride, X, Y) && !IsBluePixel(Px, Stride, X, Y))
+			{
+				++NonBlueInkInBox;
+				if (DarkLogged < 10) { const uint8* P = Px + Y * Stride + X * 4; DarkSamples += FString::Printf(TEXT(" (%d,%d)=B%uG%uR%uA%u"), X, Y, P[0], P[1], P[2], P[3]); ++DarkLogged; }
+			}
+		}
+	}
+	AddInfo(FString::Printf(TEXT("[023-TEXT][diag] in-box-non-blue ink=%d samples:%s"), NonBlueInkInBox, *DarkSamples));
+
+	// (LOCALIZATION): blank outside the box + gap.
+	const int32 Gap = 8;
+	const int32 OutL = FMath::Clamp(BoxL - Gap, 0, W);
+	const int32 OutT = FMath::Clamp(BoxT - Gap, 0, H);
+	const int32 OutR = FMath::Clamp(BoxR + Gap, 0, W);
+	const int32 OutB = FMath::Clamp(BoxB + Gap, 0, H);
+	int32 InkOutside = 0;
+	for (int32 Y = 0; Y < H; ++Y) { for (int32 X = 0; X < W; ++X) { const bool bIn = (X >= OutL && X < OutR && Y >= OutT && Y < OutB); if (!bIn && IsInkPixel(Px, Stride, X, Y)) { ++InkOutside; } } }
+
+	AddInfo(FString::Printf(
+		TEXT("[WIN64-EXECUTED][023-TEXT] composed text tick: blue-right(x>=60)=%d red-in-box=%d ink-outside=%d | measured-box x[%d,%d] y[%d,%d] width=%.1f relayed=%d dims=%dx%d"),
+		BlueRight, RedInBox, InkOutside, BoxL, BoxR, BoxT, BoxB, MeasuredWidth, bRelayed ? 1 : 0, Bitmap->Width, Bitmap->Height));
+
+	// (ADAPTER) the MEASURED width is observable in the bitmap: the blue bg reached it (a stub-measurer -> RED).
+	TestTrue(FString::Printf(TEXT("[WIN64-EXECUTED] the blue bg reaches the MEASURED text width (blue past x=60: %d > 0)"), BlueRight), BlueRight > 0);
+	// (SHAPER) the glyphs rendered inside the laid-out text box.
+	TestTrue(FString::Printf(TEXT("[WIN64-EXECUTED] the shaper rendered red glyph ink in the text box (red-in-box=%d > 0)"), RedInBox), RedInBox > 0);
+	// (LOCALIZATION) nothing rendered outside the box + gap.
+	TestEqual(FString::Printf(TEXT("the composed text render left the outside-the-box margin blank (ink-outside=%d, expect 0)"), InkOutside), InkOutside, 0);
+
+	return true;
+#else
+	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersTextAtMeasuredWidth requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed text render did not execute — a non-Win64 pass would be vacuous."));
 	return false;
 #endif
 }

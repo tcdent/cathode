@@ -3,9 +3,11 @@
 #include "CathodeShaperTextMeasurer.h"
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, CreateLiteHtmlLayoutEngine
-#include "CathodeRaster.h"   // FPaintOp, IRasterBackend, ISurfaceProducer, CreateBlend2DBackend, CreateSurfaceRasterizer
+#include "CathodeRaster.h"   // FPaintOp, FRasterGlyph, IRasterBackend, ISurfaceProducer, CreateBlend2DBackend, CreateSurfaceRasterizer
 #include "CathodeSurfaces.h" // ISurfaceDocument, ISurfaceRenderTarget, the carries-it payloads
+#include "CathodeText.h"     // FShapedRun, FShapedGlyph (the mapper's text case shapes via the shared adapter)
 
+#include "Templates/SharedPointer.h"
 #include "Templates/UniquePtr.h"
 
 namespace Cathode
@@ -14,50 +16,19 @@ namespace Cathode
 namespace
 {
 
-// --- The non-text FLayoutPaintOp -> FPaintOp mapper (slice 1) -----------------------------------------------
-//
-// Layout emits its OWN neutral op type (FLayoutPaintOp); the Rasterizer consumes its own (FPaintOp). The two
-// are distinct by design (the swap-boundary types), so the composition root maps between them. Slice 1 maps the
-// NON-TEXT ops a colored box produces (FillRect / FillBox / ClearRect). The other kinds are out of slice-1
-// scope and not emitted by a bg-color div: DrawText is slice 2's heart (shape -> FPositionedGlyphRun); DrawImage
-// needs the resolver (slice 3); StrokeBorder is the deferred stroke op (Rasterizer COVERAGE #3); ClipPush/ClipPop
-// have no FPaintOp clip op (clipping is an IRasterContext call, not a paint op). They are skipped here.
-TArray<FPaintOp> MapLayoutPaintOpsNonText(const TArray<FLayoutPaintOp>& In)
-{
-	TArray<FPaintOp> Out;
-	Out.Reserve(In.Num());
-	for (const FLayoutPaintOp& L : In)
-	{
-		FPaintOp P;
-		switch (L.Kind)
-		{
-		case ELayoutPaintOpKind::FillRect:
-			P.Kind = EPaintOpKind::FillRect; P.Rect = L.Rect; P.Color = L.Color; Out.Add(P);
-			break;
-		case ELayoutPaintOpKind::FillBox:
-			P.Kind = EPaintOpKind::FillBox; P.Rect = L.Rect; P.Color = L.Color; Out.Add(P);
-			break;
-		case ELayoutPaintOpKind::ClearRect:
-			P.Kind = EPaintOpKind::ClearRect; P.Rect = L.Rect; Out.Add(P);
-			break;
-		default:
-			break; // DrawText (slice 2) / DrawImage (slice 3) / StrokeBorder / ClipPush / ClipPop — not slice 1
-		}
-	}
-	return Out;
-}
-
 // --- ISurfaceDocument backed by the real Layout engine -----------------------------------------------------
 //
 // RenderFrame relays the document through the real ILayoutEngine and exposes the layout's paint-op array as the
-// opaque FSurfacePaintBatch. The Measurer MUST precede the Engine (the engine holds it by ref). LastResult is a
-// member so the exposed Ops pointer stays valid across the synchronous tick (RenderFrame -> ProduceFrame).
+// opaque FSurfacePaintBatch. The ITextMeasurer adapter is SHARED with the render-target backer (the same-bytes
+// anchor: the FLayoutFontRef Layout measures with resolves to the SAME FFontHandle the mapper shapes + the
+// Rasterizer draws). Adapter MUST precede Engine (the engine holds it by reference). LastResult is a member so
+// the exposed Ops pointer stays valid across the synchronous tick (RenderFrame -> ProduceFrame).
 class FLayoutSurfaceDocument final : public ISurfaceDocument
 {
 public:
-	FLayoutSurfaceDocument(const ILayoutDocumentSource& InDocument, const FString& FontFilePath)
-		: Measurer(FontFilePath)
-		, Engine(CreateLiteHtmlLayoutEngine(Measurer))
+	FLayoutSurfaceDocument(const ILayoutDocumentSource& InDocument, TSharedRef<FShaperTextMeasurer> InAdapter)
+		: Adapter(InAdapter)
+		, Engine(CreateLiteHtmlLayoutEngine(*Adapter))
 	{
 		if (Engine.IsValid())
 		{
@@ -77,24 +48,26 @@ public:
 	}
 
 private:
-	FShaperTextMeasurer Measurer;        // MUST be declared before Engine (Engine holds it by reference)
+	TSharedRef<FShaperTextMeasurer> Adapter; // SHARED with the render-target backer; MUST precede Engine (held by ref)
 	TUniquePtr<ILayoutEngine> Engine;
-	FLayoutResult LastResult;            // owns the paint ops the opaque batch points at, across the tick
+	FLayoutResult LastResult;                // owns the paint ops the opaque batch points at, across the tick
 };
 
 // --- ISurfaceRenderTarget backed by the real Rasterizer producer -------------------------------------------
 //
 // ProduceFrame maps the layout ops (carried opaquely from the document backer) to the Rasterizer's FPaintOp
-// stream and rasterizes into the Blend2D bitmap. The producer hands back its published front buffer + dirty
-// rects via the PUSH FFrameReadySeam (no pull) — we capture them and re-expose via GetReadyFrame as the
-// opaque FSurfaceBufferRef. Backend MUST precede Producer (the producer holds the backend by reference).
+// stream and rasterizes into the Blend2D bitmap. The TEXT case (slice 2) shapes the un-shaped FLayoutPaintOp.Text
+// via the SHARED adapter (the same FFontHandle Layout measured with), applies the glyph-run map (FShapedGlyph ->
+// FRasterGlyph), and emits a DrawGlyphRun op. The producer hands back its published front buffer + dirty rects via
+// the PUSH FFrameReadySeam — we capture + re-expose via GetReadyFrame. Backend MUST precede Producer (held by ref).
 class FRasterizerSurfaceRenderTarget final : public ISurfaceRenderTarget
 {
 public:
-	FRasterizerSurfaceRenderTarget(int32 InWidth, int32 InHeight, ESurfacePixelFormat InFormat)
+	FRasterizerSurfaceRenderTarget(int32 InWidth, int32 InHeight, ESurfacePixelFormat InFormat, TSharedRef<FShaperTextMeasurer> InAdapter)
 		: Width(InWidth)
 		, Height(InHeight)
 		, Format(InFormat)
+		, Adapter(InAdapter)
 		, Backend(CreateBlend2DBackend())
 		, Producer(Backend.IsValid() ? CreateSurfaceRasterizer(*Backend, InWidth, InHeight, FRasterConfig{}) : nullptr)
 	{
@@ -116,8 +89,64 @@ public:
 			return false;
 		}
 		const TArray<FLayoutPaintOp>& LayoutOps = *static_cast<const TArray<FLayoutPaintOp>*>(Batch.Ops);
-		const TArray<FPaintOp> Ops = MapLayoutPaintOpsNonText(LayoutOps);
-		return Producer->RasterizeFrame(Ops); // fires the frame-ready seam on a real change (captures the bitmap)
+
+		TArray<FPaintOp> Ops;
+		Ops.Reserve(LayoutOps.Num());
+		// The glyph runs in DrawGlyphRun ops carry BORROWED views (FPositionedGlyphRun.Glyphs); hold the FRasterGlyph
+		// arrays here so they outlive the synchronous RasterizeFrame below. Reserve so this never reallocates — the
+		// views into its elements must stay valid (the FontBytes views borrow the registry, alive via the adapter).
+		TArray<TArray<FRasterGlyph>> GlyphBacking;
+		GlyphBacking.Reserve(LayoutOps.Num());
+
+		for (const FLayoutPaintOp& L : LayoutOps)
+		{
+			switch (L.Kind)
+			{
+			case ELayoutPaintOpKind::FillRect:
+				{ FPaintOp P; P.Kind = EPaintOpKind::FillRect; P.Rect = L.Rect; P.Color = L.Color; Ops.Add(P); }
+				break;
+			case ELayoutPaintOpKind::FillBox:
+				{ FPaintOp P; P.Kind = EPaintOpKind::FillBox; P.Rect = L.Rect; P.Color = L.Color; Ops.Add(P); }
+				break;
+			case ELayoutPaintOpKind::ClearRect:
+				{ FPaintOp P; P.Kind = EPaintOpKind::ClearRect; P.Rect = L.Rect; Ops.Add(P); }
+				break;
+			case ELayoutPaintOpKind::DrawText:
+				{
+					if (L.Text.IsEmpty()) { break; }
+					FShapedRun Shaped;
+					float FontSizePx = 0.0f;
+					if (!Adapter->ShapeText(L.Font, L.Text, Shaped, FontSizePx)) { break; } // SAME FFontHandle as the measure
+					TArrayView<const uint8> FontBytes;
+					if (!Adapter->GetFontBytes(Shaped.Font, FontBytes) || FontBytes.Num() == 0) { break; }
+					// the 022 glyph-run map: FShapedGlyph -> FRasterGlyph (id + fractional pen position from the run origin)
+					TArray<FRasterGlyph> Glyphs;
+					Glyphs.Reserve(Shaped.Glyphs.Num());
+					for (const FShapedGlyph& G : Shaped.Glyphs) { Glyphs.Add(FRasterGlyph{ G.GlyphId, G.X, G.Y }); }
+					if (Glyphs.Num() == 0) { break; }
+					TArray<FRasterGlyph>& Backing = GlyphBacking[GlyphBacking.Add(MoveTemp(Glyphs))];
+
+					FPaintOp P;
+					P.Kind = EPaintOpKind::DrawGlyphRun;
+					// L.Position is the text box's TOP-LEFT (litehtml pos.y, CathodeLayoutEngine.cpp draw_text);
+					// DrawGlyphRun's origin is the BASELINE. The mapper bridges Layout's top-left convention to the
+					// Rasterizer's baseline convention by adding the font ascent. Without this the glyphs render
+					// above the box top and are clipped out -> zero glyph ink (browse 023 slice-2 diagnosis).
+					P.GlyphOrigin = FVector2f(L.Position.X, L.Position.Y + Shaped.Metrics.Ascent);
+					P.Color = L.Color;
+					P.GlyphRun.FontBytes = FontBytes;   // borrowed from the registry (the adapter outlives the tick)
+					P.GlyphRun.FontId = Shaped.Font.Id;
+					P.GlyphRun.FontSizePx = FontSizePx;
+					P.GlyphRun.Glyphs = Backing;        // borrowed from GlyphBacking (held across RasterizeFrame below)
+					Ops.Add(P);
+				}
+				break;
+			default:
+				break; // DrawImage (slice 3 / resolver) / StrokeBorder (deferred stroke op) / ClipPush / ClipPop
+			}
+		}
+
+		return Producer->RasterizeFrame(Ops); // borrows valid here: GlyphBacking + the adapter/registry are alive
 	}
 
 	virtual FSurfaceReadyFrame GetReadyFrame() const override
@@ -139,9 +168,10 @@ private:
 	int32 Width = 0;
 	int32 Height = 0;
 	ESurfacePixelFormat Format = ESurfacePixelFormat::PremultipliedBGRA8;
-	TUniquePtr<IRasterBackend> Backend;     // MUST be declared before Producer (producer holds it by reference)
+	TSharedRef<FShaperTextMeasurer> Adapter; // SHARED with the document backer (one FFontHandle: measure+shape+raster)
+	TUniquePtr<IRasterBackend> Backend;      // MUST be declared before Producer (producer holds it by reference)
 	TUniquePtr<ISurfaceProducer> Producer;
-	FBitmapData CapturedBitmap;             // the front-buffer view captured from the push seam
+	FBitmapData CapturedBitmap;              // the front-buffer view captured from the push seam
 	TArray<FIntRect> CapturedRects;
 	bool bHaveFrame = false;
 };
@@ -155,12 +185,16 @@ FSurfaceRegistration MakeCompositionSurfaceRegistration(
 	ESurfacePixelFormat Format,
 	const FString& FontFilePath)
 {
+	// ONE adapter, SHARED by both backers — the same-bytes anchor: Layout measures, the mapper shapes, and the
+	// Rasterizer draws over the SAME font (one FFontHandle resolved from the same registry/bytes).
+	TSharedRef<FShaperTextMeasurer> Adapter = MakeShared<FShaperTextMeasurer>(FontFilePath);
+
 	FSurfaceRegistration Registration;
 	Registration.Width = Width;
 	Registration.Height = Height;
 	Registration.Format = Format;
-	Registration.Document = MakeUnique<FLayoutSurfaceDocument>(Document, FontFilePath);
-	Registration.Target = MakeUnique<FRasterizerSurfaceRenderTarget>(Width, Height, Format);
+	Registration.Document = MakeUnique<FLayoutSurfaceDocument>(Document, Adapter);
+	Registration.Target = MakeUnique<FRasterizerSurfaceRenderTarget>(Width, Height, Format, Adapter);
 	return Registration;
 }
 

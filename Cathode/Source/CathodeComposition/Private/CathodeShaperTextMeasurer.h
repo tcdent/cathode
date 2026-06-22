@@ -29,6 +29,15 @@ public:
 	virtual float MeasureWidth(const FString& Text, FLayoutFontRef Font) override;
 	virtual void GetFontMetrics(FLayoutFontRef Font, float& OutAscent, float& OutDescent, float& OutHeight) override;
 
+	// The raster-side shaping service (slice 2) — the SAME-BYTES ANCHOR. This adapter is SHARED between the
+	// document backer (Layout measures via ITextMeasurer) and the render-target backer (the mapper shapes for the
+	// raster), so the FLayoutFontRef Layout resolved maps to the SAME FFontHandle + bytes the shaper shapes and
+	// the Rasterizer draws — one font end-to-end. ShapeText resolves the ref + shapes via the same HarfBuzz shaper
+	// Layout measures with; GetFontBytes hands the registry's bytes for the FPositionedGlyphRun. (ShapeText is
+	// non-const: the shaper mutates its plan cache.)
+	bool ShapeText(FLayoutFontRef Font, const FString& Text, FShapedRun& OutShaped, float& OutFontSizePx);
+	bool GetFontBytes(FFontHandle Handle, TArrayView<const uint8>& OutBytes) const;
+
 private:
 	struct FResolvedFont
 	{
