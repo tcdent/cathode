@@ -5,6 +5,7 @@
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, ILayoutDocumentSource
 #include "CathodeRaster.h"   // FBitmapData (the real Blend2D bitmap the opaque Buffer.Handle resolves to)
+#include "CathodeResolver.h" // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver (slice 3)
 #include "CathodeSurfaces.h" // FSurface, FSurfaceId, FSurfaceReadiness, FSurfaceReadinessSeam
 
 #include "Interfaces/IPluginManager.h"
@@ -100,6 +101,41 @@ namespace
 		}
 		virtual FString GetSubtreeHtml(int32 /*NodeId*/) const override { return FString(); }
 		virtual FString GetDocumentCss() const override { return TextCss(); }
+	};
+
+	bool IsGreenPixel(const uint8* Px, int32 Stride, int32 X, int32 Y)
+	{
+		// PremultipliedBGRA8: bytes [B,G,R,A]. Opaque green (#00ff00) -> B=0,G=255,R=0,A=255.
+		const uint8* P = Px + Y * Stride + X * 4;
+		return P[1] > 200 && P[0] < 60 && P[2] < 60 && P[3] > 100;
+	}
+
+	// The slice-3 LINKED-RESOURCE document: @import's the PRODUCTION-staged slice3.css (which sets a distinct green
+	// box). The green rule lives ONLY in the external fixture — NOT inline, NOT GetDocumentCss — so the rendered
+	// green proves the PRODUCTION resolver LOADED the linked resource from the default-root. A null resolver -> the
+	// @import never loads -> no green (the default; the null-resolver control).
+	class FInlineLinkedDocument final : public Cathode::ILayoutDocumentSource
+	{
+	public:
+		virtual int32 GetRootNode() const override { return 0; }
+		virtual int32 GetParentNode(int32 /*NodeId*/) const override { return INDEX_NONE; }
+		virtual void GetChildNodes(int32 /*NodeId*/, TArray<int32>& OutChildren) const override { OutChildren.Reset(); }
+		virtual bool IsLayoutBoundary(int32 /*NodeId*/) const override { return true; }
+
+		virtual FString GetDocumentHtml() const override
+		{
+			// A baseline inline box (always renders, regardless of the resolver) so a frame relays in BOTH the
+			// resolver and null-control surfaces — the null-control then produces a real 0-green frame instead of
+			// an empty no-paint-op frame (which would not relay). The linked green div's rule lives ONLY in the
+			// external slice3.css, so it renders green ONLY with the production resolver. The baseline navy box is
+			// at (4,4) — outside the green box region (24,24)-(64,64) and not green — so it never affects the count.
+			return TEXT("<html><head><style>@import url('slice3.css');</style></head><body>")
+				TEXT("<div style=\"position:absolute;left:4px;top:4px;width:6px;height:6px;background-color:#000080;\"></div>")
+				TEXT("<div id=\"cathode-023-target\"></div>")
+				TEXT("</body></html>");
+		}
+		virtual FString GetSubtreeHtml(int32 /*NodeId*/) const override { return FString(); }
+		virtual FString GetDocumentCss() const override { return FString(); } // the green rule is ONLY in the external slice3.css
 	};
 }
 
@@ -374,6 +410,111 @@ bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
 	return true;
 #else
 	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersTextAtMeasuredWidth requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed text render did not execute — a non-Win64 pass would be vacuous."));
+	return false;
+#endif
+}
+
+// 023 slice 3 — the A2 PRODUCTION RESOLVER through the composed tick. A linked-CSS document (@import slice3.css,
+// whose green-box rule lives ONLY in the external production-staged fixture) renders the linked green box through
+// the PRODUCTION resolver (CathodeComposition constructs CreateResourceResolver(CreateUEFileBundleSource(
+// GetDefaultResourceRoot())) + SetResourceResolver — the production CALLER, over the production default-root
+// /Game/Cathode, NOT a test-root). The NULL-RESOLVER CONTROL (bWireResolver=false) -> the @import never loads ->
+// no green -> the discriminator. Plus the in-tree DISPOSITIVE gate: the default-root literal == the
+// +DirectoriesToAlwaysStageAsUFS=/Game/Cathode staging path. (Cook-staging into the cooked pak is corroborated-
+// inference — an editor run reads on-disk; the empirical packaged read is a deferred packaged-build pass.)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCompositionResolverTickTest,
+	"Cathode.Composition.Tick.ComposedFrameRendersLinkedResource",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCompositionResolverTickTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+#if PLATFORM_WINDOWS
+	// (1) THE DEFAULT-ROOT <-> STAGING MATCH (in-tree, dispositive): the production default-root literal MUST equal
+	// the staging path. GetDefaultResourceRoot() = ProjectContentDir()/Cathode == /Game/Cathode (the
+	// +DirectoriesToAlwaysStageAsUFS=/Game/Cathode entry; /Game/ is the ProjectContentDir mount). A mismatch would
+	// ship a content root the cook can't stage.
+	const FString DefaultRoot = GetDefaultResourceRoot();
+	TestEqual(TEXT("the production default-root == ProjectContentDir()/Cathode (matches the +DirectoriesToAlwaysStageAsUFS=/Game/Cathode staging path)"), DefaultRoot, FPaths::ProjectContentDir() / TEXT("Cathode"));
+
+	// The linked fixture must be on disk at the production default-root (editor: Content/Cathode/slice3.css).
+	const FString LinkedCssPath = DefaultRoot / TEXT("slice3.css");
+	if (!FPaths::FileExists(LinkedCssPath)) { AddError(FString::Printf(TEXT("the linked CSS fixture is not at the production default-root: %s"), *LinkedCssPath)); return false; }
+
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
+	if (!Plugin.IsValid()) { AddError(TEXT("could not locate the Cathode plugin base dir")); return false; }
+	const FString FontPath = Plugin->GetBaseDir() / TEXT("Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf");
+	if (!FPaths::FileExists(FontPath)) { AddError(FString::Printf(TEXT("the OFL font fixture is not on disk: %s"), *FontPath)); return false; }
+
+	const int32 W = 128;
+	const int32 H = 128;
+	FInlineLinkedDocument Document; // MUST outlive the surfaces below
+
+	// (2) Read the linked GREEN box from the layout WITH the production resolver (the linked rule loaded). Mirrors
+	// the production caller's wiring: CreateUEFileBundleSource(DefaultRoot) -> CreateResourceResolver -> SetResourceResolver.
+	FBox2f GreenBox(ForceInit);
+	bool bFoundGreen = false;
+	{
+		FShaperTextMeasurer Measurer(FontPath);
+		TUniquePtr<IBundleSource> BundleSource = CreateUEFileBundleSource(DefaultRoot);
+		TUniquePtr<IResourceResolver> Resolver = BundleSource.IsValid() ? CreateResourceResolver(*BundleSource) : nullptr;
+		TUniquePtr<ILayoutEngine> Engine = CreateLiteHtmlLayoutEngine(Measurer);
+		if (!Engine.IsValid() || !Resolver.IsValid()) { AddError(TEXT("standalone resolver/engine construction failed")); return false; }
+		Engine->SetResourceResolver(Resolver.Get());
+		Engine->SetDocument(Document);
+		const FLayoutResult Result = Engine->Relayout(W);
+		for (const FLayoutPaintOp& Op : Result.PaintOps)
+		{
+			const bool bFill = (Op.Kind == ELayoutPaintOpKind::FillRect || Op.Kind == ELayoutPaintOpKind::FillBox);
+			if (bFill && Op.Color.R == 0 && Op.Color.G == 255 && Op.Color.B == 0) { GreenBox = Op.Rect; bFoundGreen = true; }
+		}
+	}
+	if (!bFoundGreen) { AddError(TEXT("the linked CSS rule did not load via the resolver — no green box in the layout result")); return false; }
+	TestTrue(FString::Printf(TEXT("the linked box is at the linked offset (Min=(%.1f,%.1f), expect ~(24,24))"), GreenBox.Min.X, GreenBox.Min.Y), GreenBox.Min.X >= 18.0f && GreenBox.Min.Y >= 18.0f);
+
+	// (3) Compose through the PRODUCTION caller + count green in the linked box: resolver (true) vs null control
+	// (false). The count is read INSIDE the lambda while the registry (the FSurface + the captured bitmap) is alive.
+	auto ComposeAndCountGreenInBox = [&](bool bWireResolver) -> int32
+	{
+		TUniquePtr<ISurfaceRegistry> Registry = CreateSurfaceRegistry();
+		if (!Registry.IsValid()) { return -1; }
+		FSurfaceRegistration Registration = MakeCompositionSurfaceRegistration(Document, W, H, ESurfacePixelFormat::PremultipliedBGRA8, FontPath, bWireResolver);
+		Registry->Register(MoveTemp(Registration));
+		FSurfaceReadiness Captured;
+		bool bRelayed = false;
+		Registry->DriveAll([&Captured, &bRelayed](const FSurfaceReadiness& R) { Captured = R; bRelayed = true; });
+		if (!bRelayed || !Captured.Frame.Buffer.IsValid()) { return -1; }
+		const FBitmapData* Bitmap = static_cast<const FBitmapData*>(Captured.Frame.Buffer.Handle);
+		if (Bitmap == nullptr || Bitmap->Pixels == nullptr) { return -1; }
+		const uint8* Px = static_cast<const uint8*>(Bitmap->Pixels);
+		const int32 Stride = Bitmap->Stride;
+		const int32 GL = FMath::Clamp(FMath::FloorToInt(GreenBox.Min.X), 0, W - 1);
+		const int32 GT = FMath::Clamp(FMath::FloorToInt(GreenBox.Min.Y), 0, H - 1);
+		const int32 GR = FMath::Clamp(FMath::CeilToInt(GreenBox.Max.X), 1, W);
+		const int32 GB = FMath::Clamp(FMath::CeilToInt(GreenBox.Max.Y), 1, H);
+		int32 Green = 0;
+		for (int32 Y = GT; Y < GB; ++Y) { for (int32 X = GL; X < GR; ++X) { if (IsGreenPixel(Px, Stride, X, Y)) { ++Green; } } }
+		return Green;
+	};
+
+	const int32 GreenWithResolver = ComposeAndCountGreenInBox(true);
+	const int32 GreenNullControl = ComposeAndCountGreenInBox(false);
+
+	AddInfo(FString::Printf(
+		TEXT("[WIN64-EXECUTED][023-RESOLVER] composed linked-resource tick: green-in-box(resolver)=%d green-in-box(null-control)=%d | linked-box x[%.0f,%.0f] y[%.0f,%.0f] default-root=%s dims=%dx%d"),
+		GreenWithResolver, GreenNullControl, GreenBox.Min.X, GreenBox.Max.X, GreenBox.Min.Y, GreenBox.Max.Y, *DefaultRoot, W, H));
+
+	if (GreenWithResolver < 0 || GreenNullControl < 0) { AddError(TEXT("a composed linked-resource tick failed to produce a ready bitmap")); return false; }
+	// (PRODUCTION RESOLVER) the linked CSS's green box rendered through the composed tick at the laid-out position.
+	TestTrue(FString::Printf(TEXT("[WIN64-EXECUTED] the linked resource's green rendered via the PRODUCTION resolver (green-in-box=%d > 0)"), GreenWithResolver), GreenWithResolver > 0);
+	// (NULL-RESOLVER CONTROL) without the resolver the @import never loads -> no green (the default) -> RED if leaked.
+	TestEqual(FString::Printf(TEXT("the null-resolver control rendered NO green (the linked rule never loaded; green=%d, expect 0)"), GreenNullControl), GreenNullControl, 0);
+
+	return true;
+#else
+	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersLinkedResource requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed linked-resource render did not execute."));
 	return false;
 #endif
 }

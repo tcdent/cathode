@@ -4,9 +4,11 @@
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, CreateLiteHtmlLayoutEngine
 #include "CathodeRaster.h"   // FPaintOp, FRasterGlyph, IRasterBackend, ISurfaceProducer, CreateBlend2DBackend, CreateSurfaceRasterizer
+#include "CathodeResolver.h" // IResourceResolver, IBundleSource, CreateResourceResolver, CreateUEFileBundleSource (slice 3)
 #include "CathodeSurfaces.h" // ISurfaceDocument, ISurfaceRenderTarget, the carries-it payloads
 #include "CathodeText.h"     // FShapedRun, FShapedGlyph (the mapper's text case shapes via the shared adapter)
 
+#include "Misc/Paths.h"      // FPaths::ProjectContentDir (the production default-root)
 #include "Templates/SharedPointer.h"
 #include "Templates/UniquePtr.h"
 
@@ -26,12 +28,22 @@ namespace
 class FLayoutSurfaceDocument final : public ISurfaceDocument
 {
 public:
-	FLayoutSurfaceDocument(const ILayoutDocumentSource& InDocument, TSharedRef<FShaperTextMeasurer> InAdapter)
+	FLayoutSurfaceDocument(const ILayoutDocumentSource& InDocument, TSharedRef<FShaperTextMeasurer> InAdapter, bool bWireResolver)
 		: Adapter(InAdapter)
+		, BundleSource(bWireResolver ? CreateUEFileBundleSource(GetDefaultResourceRoot()) : nullptr)
+		, Resolver(BundleSource.IsValid() ? CreateResourceResolver(*BundleSource) : nullptr)
 		, Engine(CreateLiteHtmlLayoutEngine(*Adapter))
 	{
 		if (Engine.IsValid())
 		{
+			// PRODUCTION resolver wiring (slice 3): the production CALLER constructs the resolver over the
+			// production default-root and injects it BEFORE SetDocument, so linked resources (@import/<link>)
+			// resolve from /Game/Cathode via the real FUEFileBundleSource. A null Resolver (bWireResolver=false)
+			// is the pre-hook behavior — linked rules never load -> defaults (the null-resolver control).
+			if (Resolver.IsValid())
+			{
+				Engine->SetResourceResolver(Resolver.Get());
+			}
 			Engine->SetDocument(InDocument); // the document source must outlive this surface (the public contract)
 		}
 	}
@@ -49,6 +61,8 @@ public:
 
 private:
 	TSharedRef<FShaperTextMeasurer> Adapter; // SHARED with the render-target backer; MUST precede Engine (held by ref)
+	TUniquePtr<IBundleSource> BundleSource;   // production file-bundle source over GetDefaultResourceRoot(); MUST precede Resolver
+	TUniquePtr<IResourceResolver> Resolver;   // production resolver; MUST precede Engine (engine holds it by pointer)
 	TUniquePtr<ILayoutEngine> Engine;
 	FLayoutResult LastResult;                // owns the paint ops the opaque batch points at, across the tick
 };
@@ -178,12 +192,23 @@ private:
 
 } // namespace
 
+FString GetDefaultResourceRoot()
+{
+	// The production content root: /Game/Cathode == ProjectContentDir()/Cathode. This literal MUST EQUAL the
+	// staging entry (+DirectoriesToAlwaysStageAsUFS=/Game/Cathode in Config/DefaultGame.ini) — a mismatch would
+	// ship a content root the cook cannot stage (the 019 coupling). /Game/ is the ProjectContentDir mount, so
+	// /Game/Cathode resolves to ProjectContentDir()/Cathode (the editor's Content/Cathode; the cooked pak after
+	// staging).
+	return FPaths::ProjectContentDir() / TEXT("Cathode");
+}
+
 FSurfaceRegistration MakeCompositionSurfaceRegistration(
 	const ILayoutDocumentSource& Document,
 	int32 Width,
 	int32 Height,
 	ESurfacePixelFormat Format,
-	const FString& FontFilePath)
+	const FString& FontFilePath,
+	bool bWireResourceResolver)
 {
 	// ONE adapter, SHARED by both backers — the same-bytes anchor: Layout measures, the mapper shapes, and the
 	// Rasterizer draws over the SAME font (one FFontHandle resolved from the same registry/bytes).
@@ -193,7 +218,7 @@ FSurfaceRegistration MakeCompositionSurfaceRegistration(
 	Registration.Width = Width;
 	Registration.Height = Height;
 	Registration.Format = Format;
-	Registration.Document = MakeUnique<FLayoutSurfaceDocument>(Document, Adapter);
+	Registration.Document = MakeUnique<FLayoutSurfaceDocument>(Document, Adapter, bWireResourceResolver);
 	Registration.Target = MakeUnique<FRasterizerSurfaceRenderTarget>(Width, Height, Format, Adapter);
 	return Registration;
 }

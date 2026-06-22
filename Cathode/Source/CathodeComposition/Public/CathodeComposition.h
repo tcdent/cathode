@@ -9,6 +9,12 @@ namespace Cathode
 
 class ILayoutDocumentSource; // CathodeLayout — the document to lay out (the real DOM at integration)
 
+// The PRODUCTION content root (sprint 023 slice 3, the A2 default-root): FPaths::ProjectContentDir()/Cathode.
+// The cooked content location for Cathode's HTML/CSS/JS/font resources; the production caller passes this as the
+// resolver root. (The first production ProjectContentDir() use in the plugin; staged via
+// +DirectoriesToAlwaysStageAsUFS=/Game/Cathode.)
+CATHODECOMPOSITION_API FString GetDefaultResourceRoot();
+
 // Build an FSurfaceRegistration whose neutral seams are backed by the REAL engines (the composition root's
 // single construction point; the device-spawn path Register's the result into an ISurfaceRegistry and DriveAll's
 // it):
@@ -23,11 +29,18 @@ class ILayoutDocumentSource; // CathodeLayout — the document to lay out (the r
 // registration is bound into. `FontFilePath` sources the measurer's font: production injects the A2-staged font
 // (slice 3); the slice-1 tick proof injects the committed OFL fixture. (Slice 1: the text path is WIRED but not
 // exercised — the measurer constructs Layout; glyph fill is slice 2.)
+// bWireResourceResolver (sprint 023 slice 3): when true (production default), the document backer constructs the
+// PRODUCTION resource resolver — CreateResourceResolver(CreateUEFileBundleSource(GetDefaultResourceRoot())) — and
+// injects it into the Layout engine before SetDocument, so linked resources (@import/<link>) resolve from the
+// production default-root /Game/Cathode (= GetDefaultResourceRoot()). false = no resolver (the null-resolver
+// control: linked rules never load -> defaults). The root is always the production default-root, never a test
+// override.
 CATHODECOMPOSITION_API FSurfaceRegistration MakeCompositionSurfaceRegistration(
 	const ILayoutDocumentSource& Document,
 	int32 Width,
 	int32 Height,
 	ESurfacePixelFormat Format,
-	const FString& FontFilePath);
+	const FString& FontFilePath,
+	bool bWireResourceResolver = true);
 
 } // namespace Cathode
