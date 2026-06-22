@@ -28,11 +28,18 @@ world-object layer 003 lacks.
 
 ## Deferred — with accountability
 
-### 1. Live cross-module wiring (the seams' real backings + the device-spawn caller)
-- **Reason:** Surfaces *defines + drives* the neutral seams; who *backs/calls* them is future. `ISurfaceDocument` ← 005 `ILayoutEngine` ([`CathodeLayout/COVERAGE.md`](../CathodeLayout/COVERAGE.md)); `ISurfaceRenderTarget` ← 003 `FSurfaceRasterizer` ([`CathodeRasterizer/COVERAGE.md`](../CathodeRasterizer/COVERAGE.md)); `FSurfaceReadinessSeam` → Texture Egress; `Register` is called by the device-spawn path.
-- **Dependency:** 005, 003, the Texture Egress component, and the device/world spawn path; an integration sprint.
-- **Unblocks:** the integration sprint.
-- **First-execution risk:** nothing renders or uploads across modules until the seams are wired. The seams exist + are produced/driven now (via recording impls); only the cross-module backings/caller are future. Surfaces stays "couples to none".
+### 1. Live cross-module wiring — the seam BACKINGS RETIRED (023); the device-spawn caller + Egress still deferred
+- **Retired by:** sprint 023 (the integration phase). The new composition root **CathodeComposition** backs the
+  neutral seams with the real engines, injected into `FSurface` (Surfaces stays Core-only — the backers live in
+  the composition root, never inside Surfaces): `ISurfaceDocument` ← `FLayoutSurfaceDocument` (the real
+  CathodeLayout `ILayoutEngine` + the production resource resolver over `/Game/Cathode`); `ISurfaceRenderTarget`
+  ← `FRasterizerSurfaceRenderTarget` (the real CathodeRasterizer producer via the `ISurfaceProducer`/
+  `CreateSurfaceRasterizer` factory + the `FLayoutPaintOp`→`FPaintOp` mapper). The per-frame tick is driven via
+  `ISurfaceRegistry::DriveAll` → `FSurface::RenderAndRelay`.
+- **Proven:** box fill, text (one `FFontHandle` through measure+shape+raster), and linked resources all render
+  through the composed tick (the `Cathode.Composition.Tick.*` tests; full Cathode 119/119).
+- **Still deferred:** the device/world spawn path (who calls `Register`) + Texture Egress (the
+  `FSurfaceReadinessSeam` → GPU copy, see #2) — the next epics, out of 023.
 
 ### 2. The buffer PIXELS + the single CPU→GPU copy
 - **Reason:** the front-buffer pixel content is the Rasterizer's (ultimately Blend2D's) vendor output, carried through (`FSurfaceBufferRef`, opaque) and **never asserted by value**; the actual copy of the dirty sub-rect into the surface's texture is Texture Egress's render-thread work (`RHIUpdateTexture2D`).
