@@ -61,6 +61,11 @@
 			"Name": "CathodeComposition",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeEgress",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

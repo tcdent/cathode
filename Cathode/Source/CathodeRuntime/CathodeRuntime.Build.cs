@@ -7,17 +7,16 @@ public class CathodeRuntime : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// The runtime module's complete Unreal dependency set. Per the architecture doc it
-		// depends only on Unreal modules and the bundled libraries: Core/CoreUObject are the
-		// base object/runtime layer, Engine owns UTexture2D egress, RHI/RenderCore drive the
-		// texture upload (regional RHIUpdateTexture2D), and Slate hosts the surface/texture.
+		// The runtime module's Unreal dependency set: Core/CoreUObject are the base object/runtime
+		// layer; Engine + Slate host the runtime's surface/device objects. The Texture Egress — the
+		// RHI texture upload (RHIUpdateTexture2D) — is its OWN module now (CathodeEgress, sprint 024,
+		// the sole RHI touchpoint), so RHI/RenderCore live THERE with it, not here; CathodeRuntime no
+		// longer touches the RHI/render path.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"RHI",
-			"RenderCore",
 			"Slate",
 		});
 
