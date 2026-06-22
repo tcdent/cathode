@@ -9,6 +9,13 @@ green against the real engine (full Cathode gate 107/107).
 > No COVERAGE.md existed for this module until 016 (the most foundational module had none — flagged by
 > the dev's cross-module state audit). This is the ratified close record.
 
+> **024 dep reconcile:** the Build.cs carried anticipatory `RHI` + `RenderCore` deps (commented "drive the
+> texture upload") for a texture-egress expected to live here. Sprint 024 built **CathodeEgress** as a dedicated
+> module — the sole RHI touchpoint — so those deps moved there and were **removed from CathodeRuntime** (the
+> slice-0 readback spike, temporarily hosted here for the RHI stack, was their only in-tree user and is retired).
+> CathodeRuntime no longer touches the RHI/render path; the anticipatory egress comment is retired. No dependent
+> broke on the removal (env's full link).
+
 ## Covered
 
 | responsibility | sprint | proof |

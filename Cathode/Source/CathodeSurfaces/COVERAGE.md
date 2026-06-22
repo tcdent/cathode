@@ -41,11 +41,21 @@ world-object layer 003 lacks.
 - **Still deferred:** the device/world spawn path (who calls `Register`) + Texture Egress (the
   `FSurfaceReadinessSeam` → GPU copy, see #2) — the next epics, out of 023.
 
-### 2. The buffer PIXELS + the single CPU→GPU copy
-- **Reason:** the front-buffer pixel content is the Rasterizer's (ultimately Blend2D's) vendor output, carried through (`FSurfaceBufferRef`, opaque) and **never asserted by value**; the actual copy of the dirty sub-rect into the surface's texture is Texture Egress's render-thread work (`RHIUpdateTexture2D`).
-- **Dependency:** the Rasterizer producing real pixels (execution sprint) + Texture Egress doing the GPU copy.
-- **Unblocks:** the execution-approval sprint + the Texture Egress component.
-- **First-execution risk:** no pixels reach a texture until the producer renders and Egress copies on the readiness event; our relay + bookkeeping are tested, the pixels/copy are the siblings'.
+### 2. The buffer PIXELS + the single CPU→GPU copy — RETIRED (024, CathodeEgress)
+- **Retired by:** sprint 024 (Texture Egress). **CathodeEgress** subscribes to `FSurfaceReadinessSeam`, owns a
+  UTexture2D per surface, and copies the dirty sub-rect(s) into the texture on the render thread
+  (`RHIUpdateTexture2D`, marshaled via `ENQUEUE_RENDER_COMMAND`) — the dirty-rect regional upload, **every-run
+  on-GPU readback-verified** (the hard gate, tcdent's ruling).
+- **The seam was NEUTRALIZED (024 slice 1a):** `FSurfaceBufferRef` is no longer an opaque `void* Handle` — it
+  carries a vendor-**NEUTRAL** `{Pixels, Stride, Width, Height, Format}` VIEW. The producer (CathodeComposition's
+  `FRasterizerSurfaceRenderTarget::GetReadyFrame`) populates it from its `FBitmapData` (a same-bytes pass-through
+  view + the `EPixelFormat→ESurfacePixelFormat` map); the egress consumes the VIEW (never a `BL*`/`FBitmapData`),
+  so Surfaces' seam stays neutral AND the egress takes no CathodeRasterizer dep. Surfaces still never reads the
+  pixels itself — the VALUES are the Rasterizer's, copied by Egress, never asserted by Surfaces. The change is
+  behavior-preserving (the existing composition tick tests reproduce their 023 content byte-identically off the
+  neutral view).
+- **Proven:** `Cathode.Egress.*` (the readback hard gate + the seam-spy + the regional sub-rect upload), full
+  Cathode 123/123. See `../CathodeEgress/COVERAGE.md`.
 
 ### 3. First-build compile of the module
 - **Reason:** this is a no-build/no-run scaffold sprint; the module has never been compiled.

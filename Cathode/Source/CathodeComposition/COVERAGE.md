@@ -23,7 +23,7 @@ CathodeDom. No dependents. This is the only new cross-engine dep site in the plu
 | **The composition-surface factory** | 023 | `MakeCompositionSurfaceRegistration(Document, W, H, Format, FontFilePath, bWireResourceResolver)` — the single construction point; the device-spawn path Registers the result and DriveAll's it. |
 
 **Proofs (Win64-content-gated, the composed tick, full Cathode 119/119):**
-- `Cathode.Composition.Tick.ComposedFrameRendersDocumentBox` (s1) — a div's color at its Layout-computed box (ink-in=637, ink-outside=0).
+- `Cathode.Composition.Tick.ComposedFrameRendersDocumentBox` (s1) — a div's color at its Layout-computed box (red-in-box=1600, red-outside=0, ink-outside=0; the box is 40×40 at the Layout offset). *(Corrected from an earlier mis-cited "ink-in=637" — the real s1 marker is red-in-box=1600; flagged during 024 1a.)*
 - `Cathode.Composition.Tick.ComposedFrameRendersTextAtMeasuredWidth` (s2) — the adapter's measured width (blue shrink-to-fit bg) + the shaper's red glyphs, two-color discriminated.
 - `Cathode.Composition.Tick.ComposedFrameRendersLinkedResource` (s3) — a linked CSS's green renders via the production resolver (green=1600) vs the null-resolver control (0).
 
