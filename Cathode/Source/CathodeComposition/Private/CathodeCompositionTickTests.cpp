@@ -4,7 +4,6 @@
 #include "CathodeShaperTextMeasurer.h"   // the standalone Layout (to read the Layout-computed box)
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, ILayoutDocumentSource
-#include "CathodeRaster.h"   // FBitmapData (the real Blend2D bitmap the opaque Buffer.Handle resolves to)
 #include "CathodeResolver.h" // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver (slice 3)
 #include "CathodeSurfaces.h" // FSurface, FSurfaceId, FSurfaceReadiness, FSurfaceReadinessSeam
 
@@ -25,8 +24,8 @@
 // Win64-only in the plugin, so the composed RUNTIME tick is Win64-gated (#if PLATFORM_WINDOWS; the #else
 // AddErrors — no vacuous #if'd-out green); the cross-platform STRUCTURAL proof is the module compiling + linking
 // (the build itself). The [WIN64-EXECUTED] marker emits the in-box/out-box pixel counts only the real render
-// produces. The pixel read is the REAL Blend2D FBitmapData via the opaque Buffer.Handle (the 022 GetData analog
-// at the Surface level), not a recording fake.
+// produces. The pixel read is the NEUTRAL front-buffer view (Buffer.Pixels/Stride) the producer populates from
+// its real Blend2D bitmap — the egress reads this SAME neutral seam (no vendor type pierced), not a recording fake.
 
 namespace
 {
@@ -208,11 +207,11 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the readiness is surface-addressed to the registered surface"), Captured.Surface.Value, SurfaceId.Value);
 	TestTrue(TEXT("the ready frame carries a valid front-buffer ref"), Captured.Frame.Buffer.IsValid());
 
-	// CONTENT (the load-bearing discriminator) — resolve the opaque Buffer.Handle to the REAL Blend2D FBitmapData.
-	const FBitmapData* Bitmap = static_cast<const FBitmapData*>(Captured.Frame.Buffer.Handle);
-	if (Bitmap == nullptr || Bitmap->Pixels == nullptr) { AddError(TEXT("the ready front buffer resolved to null pixels")); return false; }
-	const uint8* Px = static_cast<const uint8*>(Bitmap->Pixels);
-	const int32 Stride = Bitmap->Stride;
+	// CONTENT (the load-bearing discriminator) — read the NEUTRAL front-buffer view (Pixels/Stride) directly; no
+	// vendor type pierced (the egress reads this same neutral seam in 1b).
+	const uint8* Px = static_cast<const uint8*>(Captured.Frame.Buffer.Pixels);
+	const int32 Stride = Captured.Frame.Buffer.Stride;
+	if (Px == nullptr) { AddError(TEXT("the ready front buffer view has null pixels")); return false; }
 
 	const int32 BoxL = FMath::Clamp(FMath::FloorToInt(LayoutBox.Min.X), 0, W - 1);
 	const int32 BoxT = FMath::Clamp(FMath::FloorToInt(LayoutBox.Min.Y), 0, H - 1);
@@ -252,7 +251,7 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 
 	AddInfo(FString::Printf(
 		TEXT("[WIN64-EXECUTED][023-TICK] composed tick: red-in-box=%d (layout-box x[%d,%d] y[%d,%d]) red-outside=%d ink-outside=%d (gap=%d) | relayed=%d dims=%dx%d"),
-		RedInBox, BoxL, BoxR, BoxT, BoxB, RedOutside, InkOutside, Gap, bRelayed ? 1 : 0, Bitmap->Width, Bitmap->Height));
+		RedInBox, BoxL, BoxR, BoxT, BoxB, RedOutside, InkOutside, Gap, bRelayed ? 1 : 0, Captured.Frame.Buffer.Width, Captured.Frame.Buffer.Height));
 	if (InkOutside > 0) { AddInfo(FString::Printf(TEXT("[023-TICK][diag] outside-ink samples:%s"), *StraySamples)); }
 
 	// (a) the composed render produced the document's color AT its Layout-computed box (a no-render -> 0 -> RED).
@@ -348,10 +347,9 @@ bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the readiness relay fired"), bRelayed);
 	TestTrue(TEXT("the ready frame carries a valid front-buffer ref"), Captured.Frame.Buffer.IsValid());
 
-	const FBitmapData* Bitmap = static_cast<const FBitmapData*>(Captured.Frame.Buffer.Handle);
-	if (Bitmap == nullptr || Bitmap->Pixels == nullptr) { AddError(TEXT("the ready front buffer resolved to null pixels")); return false; }
-	const uint8* Px = static_cast<const uint8*>(Bitmap->Pixels);
-	const int32 Stride = Bitmap->Stride;
+	const uint8* Px = static_cast<const uint8*>(Captured.Frame.Buffer.Pixels);
+	const int32 Stride = Captured.Frame.Buffer.Stride;
+	if (Px == nullptr) { AddError(TEXT("the ready front buffer view has null pixels")); return false; }
 
 	const int32 BoxL = FMath::Clamp(FMath::FloorToInt(BlueBox.Min.X), 0, W - 1);
 	const int32 BoxT = FMath::Clamp(FMath::FloorToInt(BlueBox.Min.Y), 0, H - 1);
@@ -398,7 +396,7 @@ bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
 
 	AddInfo(FString::Printf(
 		TEXT("[WIN64-EXECUTED][023-TEXT] composed text tick: blue-right(x>=60)=%d red-in-box=%d ink-outside=%d | measured-box x[%d,%d] y[%d,%d] width=%.1f relayed=%d dims=%dx%d"),
-		BlueRight, RedInBox, InkOutside, BoxL, BoxR, BoxT, BoxB, MeasuredWidth, bRelayed ? 1 : 0, Bitmap->Width, Bitmap->Height));
+		BlueRight, RedInBox, InkOutside, BoxL, BoxR, BoxT, BoxB, MeasuredWidth, bRelayed ? 1 : 0, Captured.Frame.Buffer.Width, Captured.Frame.Buffer.Height));
 
 	// (ADAPTER) the MEASURED width is observable in the bitmap: the blue bg reached it (a stub-measurer -> RED).
 	TestTrue(FString::Printf(TEXT("[WIN64-EXECUTED] the blue bg reaches the MEASURED text width (blue past x=60: %d > 0)"), BlueRight), BlueRight > 0);
@@ -486,10 +484,9 @@ bool FCathodeCompositionResolverTickTest::RunTest(const FString& Parameters)
 		bool bRelayed = false;
 		Registry->DriveAll([&Captured, &bRelayed](const FSurfaceReadiness& R) { Captured = R; bRelayed = true; });
 		if (!bRelayed || !Captured.Frame.Buffer.IsValid()) { return -1; }
-		const FBitmapData* Bitmap = static_cast<const FBitmapData*>(Captured.Frame.Buffer.Handle);
-		if (Bitmap == nullptr || Bitmap->Pixels == nullptr) { return -1; }
-		const uint8* Px = static_cast<const uint8*>(Bitmap->Pixels);
-		const int32 Stride = Bitmap->Stride;
+		const uint8* Px = static_cast<const uint8*>(Captured.Frame.Buffer.Pixels);
+		const int32 Stride = Captured.Frame.Buffer.Stride;
+		if (Px == nullptr) { return -1; }
 		const int32 GL = FMath::Clamp(FMath::FloorToInt(GreenBox.Min.X), 0, W - 1);
 		const int32 GT = FMath::Clamp(FMath::FloorToInt(GreenBox.Min.Y), 0, H - 1);
 		const int32 GR = FMath::Clamp(FMath::CeilToInt(GreenBox.Max.X), 1, W);

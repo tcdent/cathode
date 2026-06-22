@@ -74,6 +74,20 @@ private:
 // via the SHARED adapter (the same FFontHandle Layout measured with), applies the glyph-run map (FShapedGlyph ->
 // FRasterGlyph), and emits a DrawGlyphRun op. The producer hands back its published front buffer + dirty rects via
 // the PUSH FFrameReadySeam — we capture + re-expose via GetReadyFrame. Backend MUST precede Producer (held by ref).
+
+// Map the Rasterizer's neutral EPixelFormat to Surfaces' neutral ESurfacePixelFormat (both mirror the same three
+// formats). The producer fills the neutral seam's Format from its captured bitmap; keep in sync if either grows.
+static ESurfacePixelFormat ToSurfaceFormat(EPixelFormat Format)
+{
+	switch (Format)
+	{
+	case EPixelFormat::OpaqueBGRA8:         return ESurfacePixelFormat::OpaqueBGRA8;
+	case EPixelFormat::Alpha8:              return ESurfacePixelFormat::Alpha8;
+	case EPixelFormat::PremultipliedBGRA8:
+	default:                                return ESurfacePixelFormat::PremultipliedBGRA8;
+	}
+}
+
 class FRasterizerSurfaceRenderTarget final : public ISurfaceRenderTarget
 {
 public:
@@ -168,7 +182,17 @@ public:
 		FSurfaceReadyFrame Frame;
 		if (bHaveFrame)
 		{
-			Frame.Buffer.Handle = &CapturedBitmap; // resolves to the real Blend2D FBitmapData at the consumer
+			// Populate the NEUTRAL pixel VIEW from the captured Blend2D FBitmapData (RQ2 (ii) — the seam carries no
+			// vendor type; Egress reads Pixels/Stride/dims/format, never an FBitmapData). A pass-through VIEW: the
+			// SAME Pixels pointer + Stride, no copy/conversion — the borrow contract is unchanged from the 023
+			// Handle (the async copy-at-callback that crosses the render-thread hop is Egress's, 1b). Format is
+			// populated but first READ downstream (1b picks PF_B8G8R8A8 from it); 1a's consumers read [B,G,R,A] off
+			// Pixels directly, so the format map is populated-not-bound here.
+			Frame.Buffer.Pixels = CapturedBitmap.Pixels;
+			Frame.Buffer.Stride = CapturedBitmap.Stride;
+			Frame.Buffer.Width = CapturedBitmap.Width;
+			Frame.Buffer.Height = CapturedBitmap.Height;
+			Frame.Buffer.Format = ToSurfaceFormat(CapturedBitmap.Format);
 			Frame.DirtyRects = CapturedRects;
 		}
 		return Frame;

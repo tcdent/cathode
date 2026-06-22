@@ -60,14 +60,24 @@ struct FSurfacePaintBatch
 	bool operator==(const FSurfacePaintBatch& Other) const { return Ops == Other.Ops; }
 };
 
-// An opaque reference to a surface's published (front) CPU buffer. Surfaces NEVER reads its pixels — it
-// carries this to Egress, which copies on the event ("the engine always references the buffer"). Resolves
-// to the Rasterizer's FBitmapData at integration. carries-it: assert identity, never pixel values.
+// A vendor-NEUTRAL view of a surface's published (front) CPU buffer — the pixel pointer + row stride + dims +
+// neutral format. The producer (003 via the composition root) POPULATES it from its FBitmapData; Egress reads
+// this view and copies the bytes on the event ("the engine always references the buffer"), NEVER piercing a
+// vendor type (RQ2 (ii): the seam is neutralized HERE — no void* into a BL*/FBitmapData). `Pixels` is a
+// BORROWED view of the producer's front buffer, valid only during the readiness callback — the 023 Handle's
+// borrow contract, UNCHANGED; the async copy-at-callback that lets it cross the render-thread hop is Egress's
+// (1b), not Surfaces'. Surfaces still never reads the pixels itself; the VALUES are the Rasterizer's, copied by
+// Egress, never asserted by Surfaces. carries-it for identity: == by the pixel pointer (the front buffer's
+// address is its identity, as the opaque Handle was).
 struct FSurfaceBufferRef
 {
-	const void* Handle = nullptr;
-	bool IsValid() const { return Handle != nullptr; }
-	bool operator==(const FSurfaceBufferRef& Other) const { return Handle == Other.Handle; }
+	const void* Pixels = nullptr; // first row, top-left; the producer's front-buffer bytes (borrowed, not owned)
+	int32 Stride = 0;             // bytes per row (>= Width * bytes-per-pixel; may be padded)
+	int32 Width = 0;
+	int32 Height = 0;
+	ESurfacePixelFormat Format = ESurfacePixelFormat::PremultipliedBGRA8; // populated by the producer; first READ by Egress (1b)
+	bool IsValid() const { return Pixels != nullptr; }
+	bool operator==(const FSurfaceBufferRef& Other) const { return Pixels == Other.Pixels; }
 };
 
 // A surface's ready frame: the published front buffer + the dirty rectangles. Both are RECEIVED from the
