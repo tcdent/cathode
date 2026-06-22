@@ -8,7 +8,10 @@ FDoubleBuffer::FDoubleBuffer(IRasterBackend& Backend, int32 InWidth, int32 InHei
 	, Height(InHeight)
 	, Format(InFormat)
 {
-	// Both buffers at the surface's native dimensions/format (rasterize at native, never upscale).
+	// Both buffers at the surface's native dimensions/format (rasterize at native, never upscale). Each bitmap is
+	// created with a DEFINED transparent initial state (FBlend2DBitmap::Create clears it) — load-bearing for the
+	// dirty-region accumulation model, which redraws only dirty rects and so relies on a clean initial buffer
+	// (browse 023; the clear lives at the real bitmap owner so it records no spurious paint op here).
 	Buffers[0] = Backend.CreateBitmap(InWidth, InHeight, InFormat);
 	Buffers[1] = Backend.CreateBitmap(InWidth, InHeight, InFormat);
 }

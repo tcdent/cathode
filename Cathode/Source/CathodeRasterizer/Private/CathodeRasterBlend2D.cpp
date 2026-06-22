@@ -78,7 +78,23 @@ public:
 	bool Create(int32 Width, int32 Height, EPixelFormat InFormat)
 	{
 		Format = InFormat;
-		return Image.create(Width, Height, ToBLFormat(InFormat)) == BL_SUCCESS;
+		if (Image.create(Width, Height, ToBLFormat(InFormat)) != BL_SUCCESS)
+		{
+			return false;
+		}
+		// A freshly-created BLImage has UNDEFINED pixels (create does not zero them). Define the initial state as
+		// transparent (clear_all -> all pixels 0 = transparent for PRGB32) so the dirty-region accumulation model
+		// has a clean base: FSurfaceRasterizer::RasterizeFrame redraws ONLY the dirty rects, so the area outside
+		// the first frame's dirty rects would otherwise show uninitialized garbage (browse 023 — found in the
+		// first real composed render of a transparent-page surface; the 34->635 non-deterministic-across-builds
+		// ink-outside was the tell). Clearing HERE, at the real bitmap owner, defines every surface buffer's
+		// initial state on creation WITHOUT recording a paint op — the recording-backend tests use a separate
+		// FRecordingBitmap and are untouched (a clear orchestrated from FDoubleBuffer would have to go through the
+		// recorded dispatch API, breaking FrameTests' DispatchedCalls[0]==Clip).
+		BLContext ClearCtx(Image);
+		ClearCtx.clear_all();
+		ClearCtx.end();
+		return true;
 	}
 
 	virtual bool IsValid() const override { return !Image.is_empty(); }

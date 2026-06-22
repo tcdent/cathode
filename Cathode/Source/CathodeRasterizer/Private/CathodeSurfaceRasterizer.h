@@ -18,7 +18,7 @@ namespace Cathode
 //
 // Bespoke + testable via a recording backend (records the dispatch + supplies bitmap data) and a recording
 // output seam — never pixels.
-class FSurfaceRasterizer
+class FSurfaceRasterizer final : public ISurfaceProducer
 {
 public:
 	FSurfaceRasterizer(IRasterBackend& InBackend, int32 Width, int32 Height, const FRasterConfig& InConfig);
@@ -26,15 +26,15 @@ public:
 	bool IsValid() const { return DoubleBuffer.IsValid(); }
 
 	/** Wire the output seam future Surfaces / Texture Egress consume (the produced bitmap + dirty rects). */
-	void SetFrameReadySeam(FFrameReadySeam Seam) { OnFrameReady = MoveTemp(Seam); }
+	virtual void SetFrameReadySeam(FFrameReadySeam Seam) override { OnFrameReady = MoveTemp(Seam); }
 
 	/** Rasterize one frame from the input ops. Returns true iff a frame was produced + handed off (a real
 	 *  change occurred). Routes through the SAME DispatchPaintOps as Slice 4 — no re-implementation. */
-	bool RasterizeFrame(const TArray<FPaintOp>& Ops);
+	virtual bool RasterizeFrame(const TArray<FPaintOp>& Ops) override;
 
 	const FRasterConfig& GetConfig() const { return Config; }
-	int32 GetWidth() const { return DoubleBuffer.GetWidth(); }
-	int32 GetHeight() const { return DoubleBuffer.GetHeight(); }
+	virtual int32 GetWidth() const override { return DoubleBuffer.GetWidth(); }
+	virtual int32 GetHeight() const override { return DoubleBuffer.GetHeight(); }
 
 private:
 	IRasterBackend& Backend;

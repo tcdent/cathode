@@ -91,4 +91,12 @@ bool FSurfaceRasterizer::RasterizeFrame(const TArray<FPaintOp>& Ops)
 	return true;
 }
 
+// The public producer factory (sprint 023) — the single out-of-module construction point. The concrete
+// FSurfaceRasterizer (+ its FDoubleBuffer/FDirtyRegion) stay Private; the composition root gets only the
+// ISurfaceProducer behavior, the IRasterBackend/CreateBlend2DBackend idiom one layer up.
+TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRasterBackend& Backend, int32 Width, int32 Height, const FRasterConfig& Config)
+{
+	return MakeUnique<FSurfaceRasterizer>(Backend, Width, Height, Config);
+}
+
 } // namespace Cathode

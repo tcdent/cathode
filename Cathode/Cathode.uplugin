@@ -56,6 +56,11 @@
 			"Name": "CathodeVerify",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeComposition",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

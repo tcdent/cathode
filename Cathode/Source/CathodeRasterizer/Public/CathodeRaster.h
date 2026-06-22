@@ -232,6 +232,34 @@ public:
 // rasterizer swaps this implementation.
 CATHODERASTERIZER_API TUniquePtr<IRasterBackend> CreateBlend2DBackend();
 
+// The per-surface frame PRODUCER seam (sprint 023): the minimal public surface over the bespoke
+// FSurfaceRasterizer (the double-buffer + dirty-region + draw-dispatch producer) so the integration
+// composition root can CONSTRUCT and DRIVE one surface's producer WITHOUT the concrete class or its
+// buffering/dirty internals (FDoubleBuffer/FDirtyRegion stay Private) leaking into the public API — the
+// same abstract-interface + factory idiom as IRasterBackend/CreateBlend2DBackend. The Rasterizer stays a
+// leaf (Core + Blend2D); this exposes only the producer behavior the composition root injects behind
+// CathodeSurfaces' ISurfaceRenderTarget.
+class ISurfaceProducer
+{
+public:
+	virtual ~ISurfaceProducer() = default;
+
+	/** Rasterize one frame from the input ops; true iff a real change was produced + handed off (a
+	 *  frame-ready). On a change, the FFrameReadySeam fires with the published front buffer + dirty rects. */
+	virtual bool RasterizeFrame(const TArray<FPaintOp>& Ops) = 0;
+
+	/** Wire the output seam the produced front-buffer bitmap + dirty rects are handed to (on a change). */
+	virtual void SetFrameReadySeam(FFrameReadySeam Seam) = 0;
+
+	virtual int32 GetWidth() const = 0;
+	virtual int32 GetHeight() const = 0;
+};
+
+// Construct the per-surface producer (the bespoke double-buffer/dirty-region rasterizer) over a backend at
+// fixed dims + config. The single construction point for an out-of-module surface producer; the concrete
+// FSurfaceRasterizer (and its FDoubleBuffer/FDirtyRegion) stay Private.
+CATHODERASTERIZER_API TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRasterBackend& Backend, int32 Width, int32 Height, const FRasterConfig& Config);
+
 // Decode an encoded image's INTRINSIC dimensions from its raw bytes (the 003 decode-for-size), via Blend2D's
 // image decoder. Returns true + the real WxH for a decodable image; false + 0x0 for empty/undecodable input.
 // Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this at integration.
