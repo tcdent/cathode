@@ -40,8 +40,10 @@ public:
 	void Install(const FString& BundlePath, int32 Width, int32 Height, const FString& FontFilePath);
 
 	// Game-thread per host frame: drain the worker's frame-ready (learn the worker-assigned surface id) + the egress
-	// game-thread upload half. This is the production frame-ready cadence (no test poll).
-	void Pump();
+	// game-thread upload half. This is the production frame-ready cadence (no test poll). Returns the number of
+	// frame-ready messages drained this call (production ignores it; the S6 two-frame test waits on the v2 re-compose's
+	// fresh frame-ready via this count).
+	int32 Pump();
 
 	// The surface's GPU texture (the device material samples it). Null until the first composed frame arrives.
 	UTexture2D* GetTexture() const;
@@ -58,6 +60,13 @@ public:
 	// is exercised against the production wire. NOT a production path. (No per-method API macro — the CLASS is already
 	// CATHODECOMPOSITION_API-exported, so a per-method macro is a double-export, C2487.)
 	void ForceReacquireForTest();
+	// TEST-ONLY (028 S6): queue a worker-side JS mutation (the 018 API) to eval on the NEXT seam tick — it rides the
+	// SAME installed seam (no re-install) -> MarkNodeDirty on the shared engine -> the same DriveAll re-composes (v2).
+	// Thread-safe (the test sets it game-thread; the seam reads it worker-side).
+	void SetPendingMutationForTest(const FString& JsMutation);
+	// TEST-ONLY (028 S6): the per-surface doc BUILD count — proves v2 is NOT a rebuild (the seam build runs ONCE; the
+	// count stays 1 across v1->v2; the mutation drives the dirty-mark on the SAME doc, not a re-CreateDomDocument/re-eval).
+	int32 GetBuildCountForTest() const;
 #endif
 
 private:

@@ -1,4 +1,5 @@
 #include "CathodeComposition.h"
+#include "CathodeCompositionShared.h" // 028 S6 — the shared-engine variant (internal)
 
 #include "CathodeShaperTextMeasurer.h"
 
@@ -65,6 +66,30 @@ private:
 	TUniquePtr<IResourceResolver> Resolver;   // production resolver; MUST precede Engine (engine holds it by pointer)
 	TUniquePtr<ILayoutEngine> Engine;
 	FLayoutResult LastResult;                // owns the paint ops the opaque batch points at, across the tick
+};
+
+// --- 028 S6: ISurfaceDocument backed by a BORROWED (shared) Layout engine ----------------------------------
+//
+// The unify: the surface-load owner builds ONE real DOM-layout engine (the doc's mutation-marked engine) and the
+// composition renders off THAT engine, so a DOM mutation's MarkNodeDirty drives the re-compose. Unlike FLayoutSurfaceDocument
+// this constructs NO engine + does NO SetDocument/resolver wiring (the owner does that on the shared engine BEFORE this,
+// via CreateDomDocument's SetDocument + SetResourceResolver). Engine is BORROWED — the owner owns it + outlives the surface.
+class FBorrowedEngineSurfaceDocument final : public ISurfaceDocument
+{
+public:
+	explicit FBorrowedEngineSurfaceDocument(ILayoutEngine& InEngine) : Engine(InEngine) {}
+
+	virtual FSurfacePaintBatch RenderFrame(int32 AvailableWidth) override
+	{
+		LastResult = Engine.Relayout(AvailableWidth); // the SHARED engine — dirty (from the DOM mutation) -> re-feed -> ops
+		FSurfacePaintBatch Batch;
+		Batch.Ops = &LastResult.PaintOps;
+		return Batch;
+	}
+
+private:
+	ILayoutEngine& Engine;    // BORROWED — owned by the surface-load owner (must outlive this surface)
+	FLayoutResult LastResult; // owns the paint ops the opaque batch points at, across the tick
 };
 
 // --- ISurfaceRenderTarget backed by the real Rasterizer producer -------------------------------------------
@@ -244,6 +269,25 @@ FSurfaceRegistration MakeCompositionSurfaceRegistration(
 	Registration.Format = Format;
 	Registration.Document = MakeUnique<FLayoutSurfaceDocument>(Document, Adapter, bWireResourceResolver);
 	Registration.Target = MakeUnique<FRasterizerSurfaceRenderTarget>(Width, Height, Format, Adapter);
+	return Registration;
+}
+
+FSurfaceRegistration MakeCompositionSurfaceRegistrationShared(
+	ILayoutEngine& SharedEngine,
+	TSharedRef<FShaperTextMeasurer> SharedAdapter,
+	int32 Width,
+	int32 Height,
+	ESurfacePixelFormat Format)
+{
+	// 028 S6 — the composition renders off the owner's SHARED engine (the doc's mutation-marked engine), and the
+	// rasterizer uses the SAME measurer (the same-bytes anchor). No own-engine / SetDocument / resolver here — the owner
+	// wired the shared engine BEFORE this call.
+	FSurfaceRegistration Registration;
+	Registration.Width = Width;
+	Registration.Height = Height;
+	Registration.Format = Format;
+	Registration.Document = MakeUnique<FBorrowedEngineSurfaceDocument>(SharedEngine);
+	Registration.Target = MakeUnique<FRasterizerSurfaceRenderTarget>(Width, Height, Format, SharedAdapter);
 	return Registration;
 }
 
