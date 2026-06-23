@@ -37,6 +37,27 @@ void FCathodeRuntimeModule::ShutdownModule()
 	TeardownWorker();
 }
 
+void FCathodeRuntimeModule::InstallSurfaceRelayoutSeam(Cathode::FSurfaceRelayoutSeam Seam)
+{
+	// 028 S2 — the only production-reachable path to the (Private) worker's Phase-5 seam slot. POST the install onto
+	// the worker's inbound FIFO (applied on the WORKER thread, between ticks) — directly writing the seam from the
+	// game thread would RACE the worker's tick read of it. The auto-started worker runs the seam each tick on its own
+	// thread, so the composition runs on the worker.
+	if (Worker.IsValid())
+	{
+		Cathode::FCathodeRuntimeWorker* const WorkerPtr = Worker.Get();
+		WorkerPtr->PostInbound(Cathode::FHostInboundMessage{
+			[WorkerPtr, Seam = MoveTemp(Seam)]() mutable { WorkerPtr->SetSurfaceRelayoutSeam(MoveTemp(Seam)); } });
+	}
+}
+
+int32 FCathodeRuntimeModule::DrainOutbound(TArray<Cathode::FHostOutboundMessage>& Out)
+{
+	// Drain the worker's frame-ready outbound on the calling (game) thread — the host pumps the egress upload half per
+	// frame-ready. No-op (0) if no worker is live.
+	return Worker.IsValid() ? Worker->DrainOutbound(Out) : 0;
+}
+
 void FCathodeRuntimeModule::TeardownWorker()
 {
 	// SINGLE-SOURCE teardown (shared by ShutdownModule + the test-only StopRuntimeForTesting): Worker::Shutdown
@@ -56,6 +77,23 @@ void FCathodeRuntimeModule::StopRuntimeForTesting()
 	// After this the claim is free + no runtime is live (coherent), so an automation test can
 	// CreateJsRuntime() its own instance on the TEST thread.
 	TeardownWorker();
+}
+
+bool FCathodeRuntimeModule::IsWorkerRunningForTesting() const
+{
+	return Worker.IsValid();
+}
+
+void FCathodeRuntimeModule::RestartWorkerForTesting()
+{
+	// Restore the auto-started worker IF it was released (by a prior FScopedTestRuntime test). The single-instance
+	// claim is FREE post-release, so re-claim + Start is the SAME path as the auto-start (StartupModule). RESTORE-IF-
+	// RELEASED — no double-start when the worker is already live (e.g. the gate run in isolation).
+	if (!Worker.IsValid())
+	{
+		Worker = MakeUnique<Cathode::FCathodeRuntimeWorker>();
+		Worker->Start();
+	}
 }
 #endif
 

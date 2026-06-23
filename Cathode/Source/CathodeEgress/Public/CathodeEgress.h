@@ -25,14 +25,21 @@ class ITextureEgress
 public:
 	virtual ~ITextureEgress() = default;
 
-	// The readiness seam to hand to ISurfaceRegistry::DriveAll. On each surface CHANGE (only-on-change is
-	// Surfaces' contract — an idle surface emits nothing, so the egress uploads nothing): create/find the
-	// surface's UTexture2D, COPY the dirty bytes at the callback (the borrow is valid only here), and marshal
-	// the upload onto the render thread.
+	// The readiness seam to hand to ISurfaceRegistry::DriveAll. 028 S2 thread-split — this is the WORKER-side EMIT:
+	// on each surface CHANGE it COPIES the dirty bytes at the callback (the borrow is valid only here) and STORES the
+	// owned copy in a thread-safe per-surface holder (the stubbed double-buffer). It does ZERO UObject work — texture
+	// creation + the RHI upload are DEFERRED to PumpGameThreadUploads() on the game thread. Safe to drive from the
+	// worker thread (no UObject / no RHI off the game thread).
 	virtual FSurfaceReadinessSeam GetSeam() = 0;
 
+	// 028 S2 — the GAME-THREAD upload half: for each surface with pending copied bytes (from GetSeam's worker-emit),
+	// create/find its UTexture2D (CreateTransient/UpdateResource — UObject, game-thread only) and marshal the upload
+	// onto the render thread (the existing RHIUpdateTexture2D). MUST run on the game thread. The host drains the
+	// worker's frame-ready outbound and calls this to pump the uploads.
+	virtual void PumpGameThreadUploads() = 0;
+
 	// The surface's GPU texture (the device material samples it; tests read it back). Null until the surface's
-	// first frame has been seen.
+	// first frame has been pumped.
 	virtual UTexture2D* GetTexture(FSurfaceId Surface) const = 0;
 
 	// Drop a surface's texture (on unregister) — releases the GC hold so it can be collected.

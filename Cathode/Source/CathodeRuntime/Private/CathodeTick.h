@@ -5,6 +5,7 @@
 
 #include "CathodeJsRuntime.h"
 #include "CathodeMessageQueue.h"
+#include "CathodeRuntimeSeam.h" // FSurfaceRelayoutSeam + FHostOutboundMessage (moved to Public, 028 S2)
 
 namespace Cathode
 {
@@ -14,11 +15,8 @@ class ICathodeDiagnosticSink;
 class FCathodeScheduler;
 class FThreadAffinity;
 
-// Phase 5 delegation seam: the web-engine / Surfaces components relayout + raster dirtied surfaces and
-// report which produced a frame; Runtime Core only SEQUENCES the call and EMITS frame-ready. The
-// callback appends one outbound notification per surface that produced a frame. Default unset (no
-// surfaces wired yet); the real implementation belongs to those components' sprints.
-using FSurfaceRelayoutSeam = TFunction<void(TArray<FHostOutboundMessage>& /*OutFrameReady*/)>;
+// FSurfaceRelayoutSeam (the Phase-5 delegation seam) moved to Public/CathodeRuntimeSeam.h (028 S2) so the surface-load
+// owner can install it; Runtime Core still only SEQUENCES the call + EMITS frame-ready.
 
 // The ordered tick — the heart of Runtime Core. There is ONE definition of the phase sequence, here.
 // The worker's Run() loop calls Tick() each iteration; the tick specs call the SAME Tick() directly

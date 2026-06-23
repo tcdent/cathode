@@ -265,4 +265,12 @@ CATHODERASTERIZER_API TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRast
 // Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this at integration.
 CATHODERASTERIZER_API bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidth, int32& OutHeight);
 
+#if WITH_DEV_AUTOMATION_TESTS
+// 028 S2 — the AT-THE-RASTER worker-thread marker (test-only): the thread id the Blend2D raster (RasterizeFrame) last
+// genuinely ran on. Recorded INSIDE the raster (not the relayout seam) so a test reads where the COMPOSITION actually
+// executed — the real worker thread under (b), the game thread under the interim. 0 = no raster has run yet. This
+// closes the spike's seam-marker caveat (a raster dispatched off the seam's thread would record THAT thread here).
+CATHODERASTERIZER_API uint32 GetLastRasterThreadId();
+#endif
+
 } // namespace Cathode

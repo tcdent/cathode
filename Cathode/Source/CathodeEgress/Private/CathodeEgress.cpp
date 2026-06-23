@@ -117,6 +117,16 @@ namespace
 		int32 Height = 0;
 	};
 
+	// 028 S2 — a per-surface PENDING frame: the worker-emit's owned tight copies (the stubbed double-buffer cross),
+	// held until the game-thread pump creates the texture + uploads. PURE CPU bytes — NO UObject, safe off the game thread.
+	struct FPendingFrame
+	{
+		TArray<FAssembledRegion> Uploads;
+		int32 Width = 0;
+		int32 Height = 0;
+		ESurfacePixelFormat Format = ESurfacePixelFormat::PremultipliedBGRA8;
+	};
+
 	class FTextureEgress final : public ITextureEgress
 	{
 	public:
@@ -125,9 +135,75 @@ namespace
 		{
 		}
 
+		// 028 S2 — the WORKER-side emit (safe off the game thread): copy + store, ZERO UObject.
 		virtual FSurfaceReadinessSeam GetSeam() override
 		{
-			return [this](const FSurfaceReadiness& Readiness) { OnReadiness(Readiness); };
+			return [this](const FSurfaceReadiness& Readiness) { WorkerEmit(Readiness); };
+		}
+
+		// 028 S2 — the GAME-THREAD upload half: for each surface with pending copied bytes, create/find its texture
+		// (UObject) + marshal the render-thread upload from the stored copies.
+		virtual void PumpGameThreadUploads() override
+		{
+			// Snapshot + clear the holder under the lock (minimize the hold; the worker may emit concurrently). This
+			// lock IS the stubbed double-buffer cross-thread sync (S5 hardens it to a real triple-buffer).
+			TMap<FSurfaceId, FPendingFrame> Snapshot;
+			{
+				FScopeLock Lock(&HolderLock);
+				Snapshot = MoveTemp(PendingFrames);
+				PendingFrames.Reset();
+			}
+
+			for (TPair<FSurfaceId, FPendingFrame>& Entry : Snapshot)
+			{
+				const FSurfaceId Surface = Entry.Key;
+				FPendingFrame& Frame = Entry.Value;
+				if (Frame.Uploads.Num() == 0)
+				{
+					continue;
+				}
+
+				FEgressTexture& Tex = Textures.FindOrAdd(Surface);
+				if (!Tex.Texture.IsValid())
+				{
+					UTexture2D* NewTexture = UTexture2D::CreateTransient(Frame.Width, Frame.Height, ToTexturePixelFormat(Frame.Format));
+					if (NewTexture == nullptr)
+					{
+						Textures.Remove(Surface);
+						continue;
+					}
+					NewTexture->SRGB = true;       // PremultipliedBGRA8 is sRGB-encoded — matches the surface contract
+					NewTexture->UpdateResource();  // create the RHI resource (a render-thread init; precedes the upload by FIFO)
+					Tex.Texture.Reset(NewTexture);
+					Tex.Width = Frame.Width;
+					Tex.Height = Frame.Height;
+				}
+
+				FTextureResource* Resource = Tex.Texture->GetResource();
+				if (Resource == nullptr)
+				{
+					continue;
+				}
+
+				FEgressUploader UploaderForCommand = Uploader;
+				TArray<FAssembledRegion> Uploads = MoveTemp(Frame.Uploads);
+				ENQUEUE_RENDER_COMMAND(CathodeEgressUpload)(
+					[Resource, Uploads = MoveTemp(Uploads), Surface, UploaderForCommand](FRHICommandListImmediate& RHICmdList)
+					{
+						FRHITexture* TexRHI = Resource->GetTexture2DRHI();
+						for (const FAssembledRegion& Assembled : Uploads)
+						{
+							FEgressUpload Upload;
+							Upload.Texture = TexRHI;
+							Upload.Region = Assembled.Region;
+							Upload.SourcePitch = Assembled.SourcePitch;
+							Upload.SourceData = Assembled.Bytes.GetData();
+							Upload.SourceNumBytes = Assembled.Bytes.Num();
+							Upload.Surface = Surface;
+							UploaderForCommand(Upload);
+						}
+					});
+			}
 		}
 
 		virtual UTexture2D* GetTexture(FSurfaceId Surface) const override
@@ -139,13 +215,15 @@ namespace
 		virtual void Release(FSurfaceId Surface) override
 		{
 			Textures.Remove(Surface); // drops the TStrongObjectPtr -> the texture is GC-collectable
+			FScopeLock Lock(&HolderLock);
+			PendingFrames.Remove(Surface);
 		}
 
 	private:
-		// Game-thread readiness callback. Create/find the surface's texture, COPY the dirty bytes here (the borrow
-		// is valid only synchronously), and marshal the upload onto the render thread with the copy owned by the
-		// command.
-		void OnReadiness(const FSurfaceReadiness& Readiness)
+		// WORKER-side emit (028 S2): COPY the dirty bytes (the borrow is valid only synchronously — copy HERE) into an
+		// owned buffer + STORE in the per-surface holder. ZERO UObject / ZERO RHI -> safe on the worker thread. The
+		// game-thread PumpGameThreadUploads() does the texture creation + upload from the stored copy.
+		void WorkerEmit(const FSurfaceReadiness& Readiness)
 		{
 			const FSurfaceBufferRef& Buffer = Readiness.Frame.Buffer;
 			if (!Buffer.IsValid() || Buffer.Width <= 0 || Buffer.Height <= 0 || Buffer.Stride <= 0)
@@ -153,31 +231,6 @@ namespace
 				return;
 			}
 
-			FEgressTexture& Entry = Textures.FindOrAdd(Readiness.Surface);
-			if (!Entry.Texture.IsValid())
-			{
-				UTexture2D* NewTexture = UTexture2D::CreateTransient(Buffer.Width, Buffer.Height, ToTexturePixelFormat(Buffer.Format));
-				if (NewTexture == nullptr)
-				{
-					Textures.Remove(Readiness.Surface);
-					return;
-				}
-				NewTexture->SRGB = true;       // PremultipliedBGRA8 is sRGB-encoded — matches the surface contract
-				NewTexture->UpdateResource();  // create the RHI resource (a render-thread init; precedes the upload by FIFO)
-				Entry.Texture.Reset(NewTexture);
-				Entry.Width = Buffer.Width;
-				Entry.Height = Buffer.Height;
-			}
-
-			FTextureResource* Resource = Entry.Texture->GetResource();
-			if (Resource == nullptr)
-			{
-				return;
-			}
-
-			// Assemble one TIGHT command-owned copy per dirty rect, read from the STRIDED source AT THE CALLBACK (the
-			// borrow is valid only synchronously — copy here; never marshal the borrowed Pixels ptr across the async
-			// hop). Each upload's bytes + region are bounded to its rect (a few pixels for a few pixels).
 			const int32 Bpp = BytesPerPixel(Buffer.Format);
 			TArray<FAssembledRegion> Uploads = AssembleDirtyUploads(
 				Readiness.Frame.DirtyRects, Buffer.Width, Buffer.Height,
@@ -187,32 +240,18 @@ namespace
 				return;
 			}
 
-			const FSurfaceId Surface = Readiness.Surface;
-			FEgressUploader UploaderForCommand = Uploader;
-
-			// Marshal onto the render thread; the command OWNS the assembled tight copies (moved in). The RHI texture
-			// is resolved inside the command (after the resource's render-thread init has run, by FIFO ordering). One
-			// upload per dirty rect -> only the changed sub-rect(s) reach the GPU (the dirty-rect regional upload).
-			ENQUEUE_RENDER_COMMAND(CathodeEgressUpload)(
-				[Resource, Uploads = MoveTemp(Uploads), Surface, UploaderForCommand](FRHICommandListImmediate& RHICmdList)
-				{
-					FRHITexture* TexRHI = Resource->GetTexture2DRHI();
-					for (const FAssembledRegion& Assembled : Uploads)
-					{
-						FEgressUpload Upload;
-						Upload.Texture = TexRHI;
-						Upload.Region = Assembled.Region;
-						Upload.SourcePitch = Assembled.SourcePitch;
-						Upload.SourceData = Assembled.Bytes.GetData();
-						Upload.SourceNumBytes = Assembled.Bytes.Num();
-						Upload.Surface = Surface;
-						UploaderForCommand(Upload);
-					}
-				});
+			FScopeLock Lock(&HolderLock);
+			FPendingFrame& Pending = PendingFrames.FindOrAdd(Readiness.Surface);
+			Pending.Uploads = MoveTemp(Uploads);
+			Pending.Width = Buffer.Width;
+			Pending.Height = Buffer.Height;
+			Pending.Format = Buffer.Format;
 		}
 
 		FEgressUploader Uploader;
-		TMap<FSurfaceId, FEgressTexture> Textures;
+		TMap<FSurfaceId, FEgressTexture> Textures;     // GAME-thread — the UObject textures
+		FCriticalSection HolderLock;                   // the stubbed double-buffer cross-thread sync (S5 hardens it)
+		TMap<FSurfaceId, FPendingFrame> PendingFrames; // the worker writes; the game thread drains
 	};
 } // namespace
 

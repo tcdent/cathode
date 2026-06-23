@@ -2,8 +2,20 @@
 
 #include "CathodePaintDispatch.h"
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "HAL/PlatformTLS.h"
+#include "Templates/Atomic.h"
+#endif
+
 namespace Cathode
 {
+
+#if WITH_DEV_AUTOMATION_TESTS
+// 028 S2 — the AT-THE-RASTER worker-thread marker (test-only): set INSIDE RasterizeFrame to the thread the Blend2D
+// raster genuinely runs on. GetLastRasterThreadId() reads it back (declared in CathodeRaster.h).
+namespace { TAtomic<uint32> GLastRasterThreadId{ 0 }; }
+uint32 GetLastRasterThreadId() { return GLastRasterThreadId.Load(); }
+#endif
 
 namespace
 {
@@ -57,6 +69,11 @@ bool FSurfaceRasterizer::RasterizeFrame(const TArray<FPaintOp>& Ops)
 	TUniquePtr<IRasterContext> Context = Backend.BeginContext(*Back, Config);
 	if (Context.IsValid())
 	{
+#if WITH_DEV_AUTOMATION_TESTS
+		// 028 S2 at-the-raster marker: record the thread the Blend2D raster GENUINELY runs on (the real worker thread
+		// under (b); the game thread under the interim). Set-iff-the-raster-runs (so a no-compose leaves the prior/0).
+		GLastRasterThreadId = FPlatformTLS::GetCurrentThreadId();
+#endif
 		// RASTERIZE DIRTY REGIONS ONLY: clip to each dirty rect and redraw the ops within it, so only the
 		// changed sub-rectangles are re-rasterized — never the whole surface. Routes through the SAME
 		// DispatchPaintOps as Slice 4 (no fork).

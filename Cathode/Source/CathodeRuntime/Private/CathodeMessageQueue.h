@@ -4,6 +4,8 @@
 #include "Containers/Queue.h"
 #include "Templates/Function.h"
 
+#include "CathodeRuntimeSeam.h" // FHostOutboundMessage (moved to Public, 028 S2)
+
 namespace Cathode
 {
 
@@ -15,13 +17,8 @@ struct FHostInboundMessage
 	TFunction<void()> Apply;
 };
 
-// A worker -> host outbound notification (e.g. "frame ready"). The surface identity and dirty-rect it
-// will carry are the Surfaces / Texture Egress components' concern; modelled minimally here so the
-// boundary's FIFO contract is exercisable now.
-struct FHostOutboundMessage
-{
-	int32 SurfaceTag = 0; // placeholder payload — Surfaces defines the real fields later.
-};
+// FHostOutboundMessage (the worker -> host "frame ready" notification) moved to Public/CathodeRuntimeSeam.h (028 S2)
+// so the surface-load owner + CathodeEgress can produce/consume it cross-module.
 
 // A thread-safe FIFO message queue: many producer threads enqueue, the single worker thread drains in
 // order. Backed by an MPSC queue; OUR contract is the FIFO drain-to-empty that Slice 4's tick relies

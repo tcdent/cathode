@@ -125,7 +125,7 @@ bool FCathodeEgressReadbackTest::RunTest(const FString& Parameters)
 	const FSurfaceId Surface = RegisterSynthetic(*Registry, Source.GetData(), Stride, W, H);
 
 	// Drive the production path: the egress copies + marshals + uploads into ITS OWN UTexture2D.
-	Registry->DriveAll(Egress->GetSeam());
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 
 	UTexture2D* Texture = Egress->GetTexture(Surface);
@@ -226,7 +226,7 @@ bool FCathodeEgressSeamSpyTest::RunTest(const FString& Parameters)
 	const FSurfaceId Surface = RegisterSynthetic(*Registry, Source.GetData(), Stride, W, H);
 
 	// Drive once (a real change) -> one upload.
-	Registry->DriveAll(Egress->GetSeam());
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 
 	// === The spy's UNIQUE load-bearing gates (the readback cannot see these) ===
@@ -259,7 +259,7 @@ bool FCathodeEgressSeamSpyTest::RunTest(const FString& Parameters)
 
 	// ON-CHANGE (the spy's unique job): an IDLE drive (no surface change) must NOT invoke the uploader. A readback
 	// would read the stale-but-correct texture and pass trivially -> only the spy binds idle.
-	Registry->DriveAll(Egress->GetSeam());
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 	TestEqual(TEXT("[WIN64-EXECUTED] an idle drive (no surface change) invoked the uploader ZERO additional times"), Spy.Count, 1);
 	return true;
@@ -375,8 +375,8 @@ bool FCathodeEgressRegionalSeamSpyTest::RunTest(const FString& Parameters)
 	Frames.Add({ R });                    // frame 2: only the offset sub-rect
 	const FSurfaceId Surface = RegisterSequenced(*Registry, Bitmap.GetData(), Stride, W, H, MoveTemp(Frames));
 
-	Registry->DriveAll(Egress->GetSeam()); FlushRenderingCommands(); // frame 1 (full)
-	Registry->DriveAll(Egress->GetSeam()); FlushRenderingCommands(); // frame 2 (sub-rect)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1 (full)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2 (sub-rect)
 
 	TestEqual(TEXT("[WIN64-EXECUTED] two single-region uploads over two change-frames"), Spy.Count, 2);
 	TestTrue(TEXT("[WIN64-EXECUTED] every upload ran on the render thread"), Spy.bInRenderThread);
@@ -411,7 +411,7 @@ bool FCathodeEgressRegionalSeamSpyTest::RunTest(const FString& Parameters)
 		R.Width(), R.Height(), R.Min.X, R.Min.Y, W * H * 4));
 
 	// on-change: an idle drive (frames exhausted) -> no additional upload
-	Registry->DriveAll(Egress->GetSeam()); FlushRenderingCommands();
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands();
 	TestEqual(TEXT("[WIN64-EXECUTED] an idle drive invoked the uploader ZERO additional times"), Spy.Count, 2);
 	return true;
 #else
@@ -442,9 +442,9 @@ bool FCathodeEgressRegionalReadbackTest::RunTest(const FString& Parameters)
 	Frames.Add({ R });                    // frame 2: only R
 	const FSurfaceId Surface = RegisterSequenced(*Registry, Bitmap.GetData(), Stride, W, H, MoveTemp(Frames));
 
-	Registry->DriveAll(Egress->GetSeam()); FlushRenderingCommands(); // frame 1: upload the full A
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1: upload the full A
 	FillSubRect(Bitmap, Stride, R);                                  // change ONLY R -> pattern B (B-dominant)
-	Registry->DriveAll(Egress->GetSeam()); FlushRenderingCommands(); // frame 2: upload ONLY R (now B)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2: upload ONLY R (now B)
 
 	UTexture2D* Texture = Egress->GetTexture(Surface);
 	if (Texture == nullptr) { AddError(TEXT("[024-EGRESS-REGIONAL] no egress texture")); return false; }
