@@ -135,15 +135,21 @@ bool FCathodeDomDocAccessorsTest::RunTest(const FString& Parameters)
 
 	// documentElement === the <html> root (RootWrapper = CreateElement('html')).
 	TestTrue(TEXT("document.documentElement === the <html> root"), EvalBool("document.documentElement === __html"));
-	// body: NO <body> yet -> null.
-	TestTrue(TEXT("document.body === null when there is no <body>"), EvalBool("document.body === null"));
+	// 028 body-seed: a fresh doc now SEEDS <body> (the mount contract), so document.body is the SEEDED element
+	// (non-null) on a fresh doc — not null. document.body === the seeded <body> (identity), then the no-body
+	// accessor path preserved (remove the body -> null).
+	const FDomNodeId SeededBodyId = Doc->FindBody();
+	TestTrue(TEXT("document.body resolves the SEEDED <body> on a fresh doc (non-null)"), SeededBodyId != INDEX_NONE);
+	if (SeededBodyId != INDEX_NONE)
+	{
+		JS_SetPropertyStr(Context, Global, "__body", Doc->GetWrapperForNode(SeededBodyId).Release());
+		TestTrue(TEXT("document.body === the seeded <body> element (identity)"), EvalBool("document.body === __body"));
 
-	// Add a <body>; document.body === that element (S2 identity).
-	FJsValue BodyW = Doc->CreateElement(TEXT("body"));
-	Root->AppendChild(BodyW);
-	JS_SetPropertyStr(Context, Global, "__body", JS_DupValue(Context, BodyW.GetValue()));
+		// The no-body accessor path: remove the seeded <body> -> document.body === null.
+		Root->RemoveChild(Doc->GetWrapperForNode(SeededBodyId));
+		TestTrue(TEXT("document.body === null after the <body> is removed (the no-body accessor path)"), EvalBool("document.body === null"));
+	}
 	JS_FreeValue(Context, Global);
-	TestTrue(TEXT("document.body === the <body> element (identity)"), EvalBool("document.body === __body"));
 
 	return true;
 }

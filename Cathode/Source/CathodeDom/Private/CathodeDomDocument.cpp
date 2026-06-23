@@ -25,6 +25,16 @@ FDomDocument::FDomDocument(ICathodeJsRuntime& InRuntime, INativeClassRegistry& I
 		RootNodeId = Root->GetNodeId();
 	}
 	Layout.SetDocument(*this); // the DOM registers itself as 005's layout source (structure + markup)
+
+	// 028 S1 — the body-seed (tcdent's mount contract, locked 2026-06-22): seed documentElement > [head, body], the
+	// THREE nodes ONLY — no root div, no #app/#root, no config (apps mount into document.body). Seeded AFTER
+	// SetDocument so AppendChild's Structure dirty-mark (CathodeDomNode.cpp:118) has a layout source; head precedes
+	// body (document order). FindBody (CathodeDom.h:298) then resolves document.body — the mount target.
+	if (FDomNode* Root = NodeFromWrapper(RootWrapper))
+	{
+		Root->AppendChild(CreateElement(TEXT("head")));
+		Root->AppendChild(CreateElement(TEXT("body")));
+	}
 }
 
 // === TEARDOWN (007's pattern: gc-at-runtime + JS_FreeRuntime fallback) ===

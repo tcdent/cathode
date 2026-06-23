@@ -169,4 +169,68 @@ bool FCathodeDomDocumentDisposeReclaimTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// 028 S1 — the body-seed (the tcdent mount contract, locked 2026-06-22). A FRESH FDomDocument's CTOR seeds
+// documentElement > [head, body] — the THREE nodes ONLY (no root div / #app / config). document.body/head resolve as
+// the mount/structure targets; an appendChild into body lands on the real retained tree. Every assertion is DIRECT
+// off the source-of-truth FDomNode tree (Model-A: the children ARE the wrapper refs), never a mediated
+// querySelector/getComputedStyle/JS read-back (the direct-vs-indirect discipline).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomBodySeedTest,
+	"Cathode.Dom.Document.BodySeed",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomBodySeedTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	// A JUST-CONSTRUCTED document — the ctor seeds the mount contract (the change), NOT a manual create.
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+
+	// (A) THE EXACT CHILD SET — documentElement's children are EXACTLY [head, body]: count==2, in order, NOTHING
+	// extra (a root div / #app seed would be a 3rd child -> this REDs). The mount-contract's "nothing else" IS count==2.
+	FDomNode* Root = Doc->FindNode(Doc->GetRootNodeId());
+	if (Root == nullptr) { AddError(TEXT("[028-BODYSEED] documentElement (the root) is null")); return false; }
+	TArray<FDomNodeId> RootKids;
+	Root->GetChildNodes(RootKids);
+	TestEqual(TEXT("[028-BODYSEED] documentElement has EXACTLY 2 children — head + body, nothing extra (no root div / #app / config)"), RootKids.Num(), 2);
+	if (RootKids.Num() == 2)
+	{
+		const FDomNode* Head = Doc->FindNode(RootKids[0]);
+		const FDomNode* Body = Doc->FindNode(RootKids[1]);
+		TestTrue(TEXT("[028-BODYSEED] documentElement's FIRST child is <head> (document.head non-null)"),
+			Head != nullptr && Head->GetTagName() == TEXT("head"));
+		TestTrue(TEXT("[028-BODYSEED] documentElement's SECOND child is <body> (head precedes body — document order)"),
+			Body != nullptr && Body->GetTagName() == TEXT("body"));
+	}
+
+	// (C) FRESH-DOC document.body NON-NULL — the ctor seeded it; a no-seed ctor -> FindBody == INDEX_NONE -> RED.
+	const FDomNodeId BodyId = Doc->FindBody();
+	TestTrue(TEXT("[028-BODYSEED] document.body resolves NON-NULL on a JUST-CONSTRUCTED doc (FindBody != INDEX_NONE — the ctor seeded body)"),
+		BodyId != INDEX_NONE);
+
+	// (B) THE DIRECT-TREE APPENDCHILD — append a probe into body; assert DIRECT off the body FDomNode's
+	// GetChildNodes (the retained C++ source-of-truth), NOT a querySelector / getComputedStyle / JS read-back.
+	if (BodyId != INDEX_NONE)
+	{
+		FDomNode* Body = Doc->FindNode(BodyId);
+		const FJsValue ProbeW = Doc->CreateElement(TEXT("div"));
+		const FDomNode* Probe = Doc->NodeFromWrapper(ProbeW);
+		const FDomNodeId ProbeId = (Probe != nullptr) ? Probe->GetNodeId() : INDEX_NONE;
+		if (Body != nullptr) { Body->AppendChild(ProbeW); }
+
+		TArray<FDomNodeId> BodyKids;
+		if (Body != nullptr) { Body->GetChildNodes(BodyKids); }
+		TestTrue(TEXT("[028-BODYSEED] appendChild into document.body LANDS on the real source-of-truth tree (body FDomNode's GetChildNodes contains the probe — DIRECT, not a mediated read)"),
+			BodyKids.Contains(ProbeId));
+	}
+
+	AddInfo(FString::Printf(TEXT("[028-BODYSEED] fresh-doc seed: documentElement children=%d (expect 2: head, body) | document.body resolved=%d"),
+		RootKids.Num(), BodyId != INDEX_NONE ? 1 : 0));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

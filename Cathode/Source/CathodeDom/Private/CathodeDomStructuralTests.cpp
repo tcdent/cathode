@@ -119,6 +119,11 @@ bool FCathodeDomDirtyMarkTest::RunTest(const FString& Parameters)
 	FDomNode* Parent = Doc->NodeFromWrapper(ParentW);
 	const FDomNodeId ParentId = IdOf(*Doc, ParentW);
 
+	// 028 body-seed: the ctor seeded head+body (2 AppendChild Structure dirty-marks at construction). createElement
+	// above does NOT dirty-mark, so the only marks present are the seed's — clear them so this test measures ONLY its
+	// own mutations below.
+	Layout.DirtyMarks.Reset();
+
 	// createElement does NOT dirty-mark (a detached node is not a tree mutation).
 	TestEqual(TEXT("createElement does not dirty-mark"), Layout.DirtyMarks.Num(), 0);
 

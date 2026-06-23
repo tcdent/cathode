@@ -73,10 +73,17 @@ bool FCathodeDomSerializeTest::RunTest(const FString& Parameters)
 	// Serialization now emits the data-node-id correlation handle (sprint 011 [c] T1) FIRST on each element,
 	// before the sorted author attributes (it is what the layout engine reads back to map litehtml's placed
 	// element to our NodeId). Built with the ACTUAL NodeIds (not hard-coded) so the match stays exact.
-	TestEqual(TEXT("GetDocumentHtml serializes the whole tree (with data-node-id)"),
+	// 028 S1 body-seed: the ctor now seeds documentElement > [head, body], so the whole-tree serialization carries
+	// the (empty) head+body before the appended div. Read the seeded head/body NodeIds from the root's children so
+	// the exact match stays NodeId-accurate.
+	TArray<int32> RootKidsForSerialize;
+	Doc->GetChildNodes(Doc->GetRootNode(), RootKidsForSerialize); // [head, body, div]
+	const int32 HeadId = RootKidsForSerialize.Num() > 0 ? RootKidsForSerialize[0] : INDEX_NONE;
+	const int32 SeededBodyId = RootKidsForSerialize.Num() > 1 ? RootKidsForSerialize[1] : INDEX_NONE;
+	TestEqual(TEXT("GetDocumentHtml serializes the whole tree (with data-node-id; 028 body-seed: head+body precede the div)"),
 		Doc->GetDocumentHtml(),
-		FString::Printf(TEXT("<html data-node-id=\"%d\"><div data-node-id=\"%d\" id=\"a\">hi</div></html>"),
-			Doc->GetRootNode(), DivId));
+		FString::Printf(TEXT("<html data-node-id=\"%d\"><head data-node-id=\"%d\"></head><body data-node-id=\"%d\"></body><div data-node-id=\"%d\" id=\"a\">hi</div></html>"),
+			Doc->GetRootNode(), HeadId, SeededBodyId, DivId));
 	TestEqual(TEXT("GetSubtreeHtml serializes the subtree (with data-node-id)"),
 		Doc->GetSubtreeHtml(DivId),
 		FString::Printf(TEXT("<div data-node-id=\"%d\" id=\"a\">hi</div>"), DivId));
