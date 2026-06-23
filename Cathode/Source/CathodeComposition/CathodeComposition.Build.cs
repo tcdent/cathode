@@ -24,6 +24,18 @@ public class CathodeComposition : ModuleRules
 			"CathodeDom",        // the real DOM document source (ILayoutDocumentSource, wired beyond slice 1)
 		});
 
+		// 028 S5 — the PRODUCTION owner-wire (FCompositionSurfaceOwner). PRIVATE: only the owner's .cpp uses these; the
+		// owner's public header forward-decls ITextureEgress + UTexture2D, so consumers (the device) DON'T transitively
+		// link them — the device deps ONLY CathodeComposition (the runtime/egress/binding stay confined to this root).
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"CoreUObject",     // UTexture2D (the owner's GetTexture return; complete in the .cpp)
+			"Engine",          // Engine/Texture2D.h
+			"CathodeRuntime",  // FCathodeRuntimeModule: InstallSurfaceRelayoutSeam / DrainOutbound / PostWorkerJob
+			"CathodeEgress",   // CreateTextureEgress, ITextureEgress (the egress holder + the game-thread pump)
+			"CathodeBinding",  // CreateNativeClassRegistry (the worker-side JS class registry for the per-surface doc)
+		});
+
 		// TEST-ONLY (non-Shipping): Projects for IPluginManager — the slice-1 tick proof resolves the committed
 		// OFL font fixture via the plugin base dir. A Shipping CathodeComposition carries neither.
 		if (Target.Configuration != UnrealTargetConfiguration.Shipping)

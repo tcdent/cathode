@@ -81,15 +81,19 @@ unlit/emissive nodes), the MID creation call site, and the device mesh/placement
 
 *Realized (026 slice 1–2):* the game-side module `UptimeCathodeDevice` (deps the Cathode plugin + Engine;
 the main `Uptime` stays Cathode-free — the engines reach only the device module's link). `UCathodeDeviceSubsystem`
-(`UTickableWorldSubsystem`, RQ4) owns the DOM + the surface registry + the egress, and `DriveAll(egress.GetSeam())`
-each Tick. `ACathodeDeviceActor` is the screen quad (`/Engine/BasicShapes/Plane`) carrying a device-owned MID of the
+(`UTickableWorldSubsystem`, RQ4) holds ONE `FCompositionSurfaceOwner` (CathodeComposition), which installs the
+production relayout seam on the **worker** (the worker builds the per-surface `FDomDocument`, reads+evals the author
+bundle, composes); the subsystem **Pumps** the owner each Tick (drain the worker frame-ready + the egress upload half).
+(028 S5 — the game-thread `DriveSurfaces` interim is RETIRED; the composition runs on the worker.)
+`ACathodeDeviceActor` is the screen quad (`/Engine/BasicShapes/Plane`) carrying a device-owned MID of the
 unlit/emissive **texture-sampling** `M_CathodeScreen` (emissive = a `TextureSampleParameter2D` named `SurfaceTexture`,
 not a constant); `RefreshSurfaceBinding` binds `egress.GetTexture()` to `SurfaceTexture` **post-first-drive** (the
 egress texture is null until the first drive — binding at `BeginPlay` would bind null) and **rebinds on a
-texture-ptr change** (the realloc guard — source-confirmed, not exercised under the RQ5-static floor). The display is
-proven empirically by `Cathode.Device.Display.RealDeviceSceneCapture` — the **real spawned device** sampling the
-**real composition** rendered through a created-world `SceneCapture2D`, the capture RT tracking the composed red box
-(R-dominant fraction `0.1152 ∈ [0.01, 0.60]`): the binding display **hard gate** (RQ3, tcdent). The single-gamma
+texture-ptr change** (the realloc guard — exercised by `Cathode.Device.Realloc.RebindOnRealloc` against the production
+wire). The production wire is proven by `Cathode.Device.Production.BundleWireAndDisplay` (028 S5) — the **real spawned
+device** sampling the **worker-composed bundle** through a created-world `SceneCapture2D`, the capture RT tracking the
+bundle GREEN (`G-dominant ∈ [0.01, 0.60]`) + production **at-the-raster == worker**: the binding display **hard gate**
+(RQ3, tcdent), folding the retired slice-2 display proof. The single-gamma
 sRGB chain held (the captured red was undistorted). The MID's shader-force is **test-only** (a created-world-automation
 enabler; production renders compiled shaders normally).
 

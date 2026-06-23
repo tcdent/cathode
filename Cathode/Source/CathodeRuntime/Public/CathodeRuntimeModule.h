@@ -37,6 +37,14 @@ public:
 	CATHODERUNTIME_API void InstallSurfaceRelayoutSeam(Cathode::FSurfaceRelayoutSeam Seam);
 	CATHODERUNTIME_API int32 DrainOutbound(TArray<Cathode::FHostOutboundMessage>& Out);
 
+	/**
+	 * 028 S5 — post an arbitrary job onto the worker's inbound FIFO (run ON the worker thread, between ticks). The
+	 * surface-load owner posts the per-surface FDomDocument::Dispose here at teardown — Dispose makes quickjs C-API
+	 * calls so it MUST run on the worker (the same FIFO mechanism InstallSurfaceRelayoutSeam uses for the seam-set).
+	 * No-op if no worker is live.
+	 */
+	CATHODERUNTIME_API void PostWorkerJob(TFunction<void()> Job);
+
 #if WITH_DEV_AUTOMATION_TESTS
 	/**
 	 * TEST-ONLY (sprint 011, finding-#1 unblock). Release the auto-started worker + its runtime so an

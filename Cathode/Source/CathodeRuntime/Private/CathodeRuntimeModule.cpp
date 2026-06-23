@@ -58,6 +58,16 @@ int32 FCathodeRuntimeModule::DrainOutbound(TArray<Cathode::FHostOutboundMessage>
 	return Worker.IsValid() ? Worker->DrainOutbound(Out) : 0;
 }
 
+void FCathodeRuntimeModule::PostWorkerJob(TFunction<void()> Job)
+{
+	// 028 S5 — post a job onto the worker FIFO (run on the WORKER thread, between ticks) — the same PostInbound path the
+	// seam-install uses. The owner posts the per-surface doc Dispose here at teardown (quickjs-affine). No-op if no worker.
+	if (Worker.IsValid())
+	{
+		Worker->PostInbound(Cathode::FHostInboundMessage{ MoveTemp(Job) });
+	}
+}
+
 void FCathodeRuntimeModule::TeardownWorker()
 {
 	// SINGLE-SOURCE teardown (shared by ShutdownModule + the test-only StopRuntimeForTesting): Worker::Shutdown

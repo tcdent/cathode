@@ -259,7 +259,9 @@ public:
 	// DISPOSE = the runtime release (007's pattern: gc-at-runtime + JS_FreeRuntime fallback). Drops the
 	// document's OWNED root ref WHILE THE RUNTIME IS ALIVE, so the tree reclaims by GC (acyclic refcount
 	// cascade now; cycles on the next JS_RunGC). "Dispose the document disposes the tree."
-	void Dispose();
+	// 028 S5: CATHODEDOM_API — the production owner (CathodeComposition) posts this onto the worker at surface teardown
+	// (cross-module). MUST run on the worker/runtime thread (quickjs C-API calls). The S3 InstallAsGlobal export precedent.
+	CATHODEDOM_API void Dispose();
 
 	// The C++ destructor is PASSIVE / CONTEXT-FREE — it touches NO runtime/context, so it is safe in ANY
 	// order (disposed or not, runtime alive or dead): it ABANDONS the root ref without freeing (Release — no
