@@ -307,7 +307,7 @@ public:
 	// CreateWrappedObject — NON-OWNING: the document is C++/TUniquePtr-owned, the wrapper never deletes it) and set
 	// globalThis.document. The PRODUCTION install method; the per-surface flow fires it at surface-load (the
 	// surface-load wiring is the routed forward roadmap item — document is per-surface, not per-runtime).
-	void InstallAsGlobal();
+	CATHODEDOM_API void InstallAsGlobal(); // 028 S3: exported — the worker-build gate test installs it cross-module
 
 	// NB: the document JS class has NO gc_mark (intentionally absent) + a NULL finalizer — it is C++/TUniquePtr-
 	// owned. Reclaim is Dispose() (drops RootWrapper) + the node gc_mark/T4 (intra-tree cycles); RootWrapper's C++
@@ -336,7 +336,7 @@ public:
 	virtual int32 GetParentNode(int32 NodeId) const override;
 	virtual void GetChildNodes(int32 NodeId, TArray<int32>& OutChildren) const override;
 	virtual bool IsLayoutBoundary(int32 NodeId) const override;
-	virtual FString GetDocumentHtml() const override;        // serialize the whole tree to markup
+	CATHODEDOM_API virtual FString GetDocumentHtml() const override; // serialize the whole tree to markup (028 S3: exported — the gate test reads it cross-module)
 	virtual FString GetSubtreeHtml(int32 NodeId) const override; // serialize a subtree (the efficient re-feed path)
 	virtual FString GetDocumentCss() const override;
 
@@ -411,6 +411,13 @@ JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArr
 CATHODEDOM_API TUniquePtr<FDomDocument> CreateDomDocument(
 	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout,
 	const ISelectorService* Selector = nullptr);
+
+#if WITH_DEV_AUTOMATION_TESTS
+// 028 S3 — the WORKER-BUILD marker (test-only): the thread CreateDomDocument (the JS DOM-build entry) last ran on.
+// The S3 gate asserts build-thread == raster-thread (== the same auto-started worker) AND != game — proving the
+// FDomDocument BUILD and the COMPOSE are CO-LOCATED on the worker. 0 = no build yet. Mirrors GetLastRasterThreadId (S2).
+CATHODEDOM_API uint32 GetLastDomBuildThreadId();
+#endif
 
 // Marshal a JS value to a DOM attribute/property STRING via 007's bounded vocabulary: String as-is, Number
 // stringified, Bool -> "true"/"false"; REJECTS exotic + non-scalar (Null/Undefined/Array/Record/NativeObject/

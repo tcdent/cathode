@@ -2,6 +2,11 @@
 
 #include "CathodeBoundMember.h" // sprint 012: the single binding-definition mechanism (install + enumerate)
 
+#if WITH_DEV_AUTOMATION_TESTS
+#include "HAL/PlatformTLS.h"
+#include "Templates/Atomic.h"
+#endif
+
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -347,9 +352,21 @@ FJsValue FDomDocument::CreateTextNode(const FString& Data)
 	return Wrapper;
 }
 
+#if WITH_DEV_AUTOMATION_TESTS
+// 028 S3 — the WORKER-BUILD marker (test-only): the thread CreateDomDocument (the JS-stack stand-up / the DOM-build
+// entry) last ran on. Read via GetLastDomBuildThreadId() (decl in CathodeDom.h). Proves the FDomDocument was BUILT on
+// the worker thread (build-thread == raster-thread == the same auto-started worker; != game, != a test-spawned /
+// FScopedTestRuntime thread). Mirrors the S2 at-the-raster marker.
+static TAtomic<uint32> GLastDomBuildThreadId{ 0 };
+uint32 GetLastDomBuildThreadId() { return GLastDomBuildThreadId.Load(); }
+#endif
+
 TUniquePtr<FDomDocument> CreateDomDocument(
 	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout, const ISelectorService* Selector)
 {
+#if WITH_DEV_AUTOMATION_TESTS
+	GLastDomBuildThreadId = FPlatformTLS::GetCurrentThreadId(); // 028 S3 — record the JS DOM-build thread (the worker)
+#endif
 	// sprint 012 slice 1: RegisterDomNodeClass now also installs the bound members onto the class proto, so it
 	// needs the live JSContext (002's confined context).
 	JSContext* const Context = static_cast<JSContext*>(Runtime.GetNativeContextHandle());

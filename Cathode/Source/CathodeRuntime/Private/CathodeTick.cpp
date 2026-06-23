@@ -110,7 +110,7 @@ void FCathodeTick::RelayoutAndEmitFrames(double NowSeconds)
 	}
 
 	TArray<FHostOutboundMessage> FrameReady;
-	Relayout(FrameReady);
+	Relayout(Runtime, FrameReady); // 028 S3 — pass the worker's runtime so the seam can build a real FDomDocument on the worker
 	for (FHostOutboundMessage& Message : FrameReady)
 	{
 		Outbound.Enqueue(MoveTemp(Message)); // Runtime Core emits frame-ready outbound.
