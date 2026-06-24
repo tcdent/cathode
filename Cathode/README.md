@@ -10,10 +10,11 @@ cookies, storage, history, or multi-tab).
 Cathode is MIT and has no dependency on `Source/Uptime`, so it remains a reusable Unreal plugin.
 The full design is in [`docs/browse/architecture.md`](../../../docs/browse/architecture.md).
 
-> **Status: scaffold (sprint 001).** This is the on-disk skeleton only. Nothing here is built,
-> linked, or activated — the plugin is **not** enabled and is invisible to the shared Unreal
-> build (see [Quarantine](#quarantine)). Integration is sprint 002; the authoring contract is
-> sprint 003.
+> **Status: active.** The runtime, the vendored HTML/CSS/JS engines, and the author-build gate are
+> built. `lib.cathode.d.ts` (the DOM/JS type surface) and `css-allow-list.toml` (the supported CSS
+> set) are **generated from the engine's own interfaces** (Model A — no hand-authored manifest, no
+> drift), and the gate **hard-fails at author-build-time** on unsupported usage — see
+> [Authoring gate](#authoring-gate).
 
 ## Layout
 
@@ -26,7 +27,7 @@ game/Plugins/Cathode/
     lib.cathode.d.ts                    #   DOM + JS type surface (generated from the FBoundMember bindings; 025 S1)
     css-allow-list.toml                 #   supported CSS properties (generated from litehtml string_id.h; 025 S2)
   Source/
-    CathodeRuntime/                     # the runtime module (scaffold; not compiled in 001)
+    CathodeRuntime/                     # a runtime module (compiled; Cathode declares 11)
       CathodeRuntime.Build.cs           #   deps: Core, CoreUObject, Engine, RHI, RenderCore, Slate; ThirdParty block stubbed
       Public/CathodeRuntimeModule.h
       Private/CathodeRuntimeModule.cpp  #   IMPLEMENT_MODULE(FCathodeRuntimeModule, CathodeRuntime)
@@ -61,19 +62,18 @@ bash game/Plugins/Cathode/install.sh
 It is idempotent: an existing clone is fetched and re-checked-out to its pin; a missing one is
 cloned fresh. See the script's header for the version-bump procedure.
 
-## Quarantine
+## Integration & enablement
 
-This scaffold cannot be seen, picked up, or broken by the shared Unreal build:
+Cathode is **integrated** into `uptime` and **project-enabled** — explicitly opted into, not on by default:
 
-- `Cathode.uplugin` carries an **explicit** `"EnabledByDefault": false` — the deliberate quarantine
-  choice, correct regardless of how the engine resolves an unset field. (The exact UE 5.7
-  `IsEnabledByDefault` semantics for a *project*-loaded plugin with the field omitted is the one open
-  confirmation 002 inherits; optionally closable via an `Engine/Source/Runtime/Projects` grep. We do
-  not rely on that behavior — the explicit `false` settles quarantine either way.)
-- Cathode is **absent** from `game/uptime.uproject` (`Plugins[]` and `Modules[]`); the `.uproject`
-  is untouched.
-- The descriptor references only the `CathodeRuntime` module, which has a real source directory and
-  `Build.cs`, so project generation parses cleanly.
+- `game/uptime.uproject` lists `Cathode` in `Plugins[]` with `"Enabled": true` — the project enables it
+  explicitly. (`UptimeCathodeDevice`, the in-world device plugin, is enabled the same way.)
+- `Cathode.uplugin` carries `"EnabledByDefault": false` — Cathode is **not** on by default for arbitrary
+  consumers; a project opts in deliberately (as `uptime.uproject` does), so it stays a clean, reusable
+  plugin that another project enables on purpose.
+- The descriptor declares Cathode's 11 runtime modules (`CathodeRuntime`, `CathodeLayout`, `CathodeDom`,
+  `CathodeText`, `CathodeRasterizer`, `CathodeSurfaces`, `CathodeBinding`, `CathodeResolver`,
+  `CathodeVerify`, `CathodeComposition`, `CathodeEgress`), each with real source + a `Build.cs`.
 
 ## Authoring gate
 
@@ -90,7 +90,13 @@ anything outside it. The gate is built from existing toolchains, driven by one s
   TypeScript compiler flags any unsupported API.
 - `css-allow-list.toml` — a small linter validates author CSS against it.
 
-In 001 these three are **structure-only skeletons**; the real surface is authored in sprint 003.
+**The author-build step is `npm run gate`** (the self-contained `Authoring/` Node package — tsc + css-tree +
+esbuild). A screen is a `screen.ts` + its own standalone `screen.css` (one `.css` per screen); `npm run gate`
+type-checks the `.ts` against `lib.cathode.d.ts` and lints the `.css` against `css-allow-list.toml` — both **bite**
+by absence (a banned web API is a tsc error, 025 S4; an unsupported CSS property a css-tree error, 025 S5; each at
+file/property:line) — and on PASS bundles the screen to the IIFE Cathode loads (`Authoring/screens/hello/` is a worked
+example; `Authoring/screens/banned/` shows the gate rejecting a non-conformant screen). It runs dev-machine/CI only (the
+build box has no Node); there is no CI workflow yet (a flagged residual — the human's call, repo-wide).
 The `game.*` host API is intentionally unspecified until the simulation's shape is known.
 
 ## Integration-deferred (sprint 002)

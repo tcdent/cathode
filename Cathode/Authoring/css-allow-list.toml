@@ -2,7 +2,7 @@
 # 025 S2 (Model A): the supported CSS-property set PROJECTED from litehtml's string_id.h parse-names
 # MINUS the 7 audited exclusions PLUS the 2 cathode_computed (opacity, letter-spacing). Regenerate via the
 # regenerate-mode test; the coherence test asserts this committed file == the regeneration off litehtml.
-# The S6 CSS linter validates authored CSS against this list.
+# The CSS linter validates authored CSS against this list.
 [properties]
 allow = [
     "align-content",

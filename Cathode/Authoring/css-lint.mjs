@@ -34,6 +34,9 @@ export function lintCssFile(cssPath, allow) {
 	const violations = [];
 	csstree.walk(ast, (node) => {
 		if (node.type === "Declaration") {
+			// CSS property names are CASE-INSENSITIVE per the CSS standard, so we lowercase before the membership test
+			// (the allow Set is lowercased too, in parseAllowList). This is correct + DISTINCT-BY-DOMAIN from the S3
+			// JS-path IsDeclaredCssProperty, which is CaseSensitive (JS identifiers are case-sensitive) — not a divergence.
 			const prop = node.property.toLowerCase();
 			if (prop.startsWith("--")) { return; }      // custom property — accepted
 			if (!allow.has(prop)) {

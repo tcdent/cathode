@@ -1,0 +1,6 @@
+{
+  "//": "025 S6 — the REAL-screen tsc config (PM ruling (a)): the conformant screen at screens/hello/ typechecks against",
+  "//2": "lib.cathode.d.ts (no `dom` lib), exactly as the fixtures do. The gate processes the real author location end-to-end.",
+  "extends": "./tsconfig.json",
+  "include": ["lib.cathode.d.ts", "screens/hello/**/*.ts"]
+}

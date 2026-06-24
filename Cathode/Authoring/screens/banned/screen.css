@@ -1,0 +1,6 @@
+/* screens/banned/screen.css — a NON-conformant stylesheet (the negative real-screen path): `gap` is unsupported (absent
+   from css-allow-list.toml — litehtml has no gap parse-name). The gate's css-tree lint MUST flag it at property:line. */
+.layout {
+	display: block;
+	gap: 8px; /* UNSUPPORTED — the css-tree gate bites */
+}

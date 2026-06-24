@@ -79,7 +79,7 @@ FString GenerateCssAllowListToml()
 	Out += TEXT("# 025 S2 (Model A): the supported CSS-property set PROJECTED from litehtml's string_id.h parse-names\n");
 	Out += TEXT("# MINUS the 7 audited exclusions PLUS the 2 cathode_computed (opacity, letter-spacing). Regenerate via the\n");
 	Out += TEXT("# regenerate-mode test; the coherence test asserts this committed file == the regeneration off litehtml.\n");
-	Out += TEXT("# The S6 CSS linter validates authored CSS against this list.\n");
+	Out += TEXT("# The CSS linter validates authored CSS against this list.\n");
 	Out += TEXT("[properties]\n");
 	Out += TEXT("allow = [\n");
 	for (const FString& Name : Set) { Out += TEXT("    \"") + Name + TEXT("\",\n"); }

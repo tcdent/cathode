@@ -1,0 +1,6 @@
+{
+  "//": "025 S6 — the BANNED real-screen tsc config: the gate asserts this run FAILS (screens/banned/screen.ts calls",
+  "//2": "fetch — a banned web API absent from lib.cathode.d.ts). The negative half of the real-screen-path proof.",
+  "extends": "./tsconfig.json",
+  "include": ["lib.cathode.d.ts", "screens/banned/**/*.ts"]
+}
