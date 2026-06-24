@@ -199,6 +199,7 @@ void AssembleContractGlobals(void* Context, FGlobalEnvironment& Env, FCathodeGlo
 	// signatures hand the sink/scheduler; the backings are already on the context opaque, so the closures only
 	// install the JS globals on the live context.
 	Env.OnInstallConsole = [Ctx](ICathodeDiagnosticSink&) { InstallConsole(Ctx); };
+	Env.OnInstallRejectionTracker = [&Runtime](ICathodeDiagnosticSink& RejectSink) { Runtime.InstallRejectionTracker(RejectSink); }; // 029 #18
 	Env.OnInstallTimers = [Ctx](FCathodeScheduler&) { InstallTimers(Ctx); };
 	Env.AssembleGlobals(Sink, Scheduler);
 }

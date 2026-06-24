@@ -1,5 +1,6 @@
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTeardown.h"
+#include "CathodeDiagnostics.h" // 029 #18 — ICathodeDiagnosticSink::ReportError for the rejection report
 
 #include "Containers/StringConv.h"
 
@@ -193,6 +194,39 @@ public:
 		}
 	}
 
+	virtual void InstallRejectionTracker(ICathodeDiagnosticSink& Sink) override
+	{
+		// 029 #18 — install the host promise-rejection tracker. The sink reaches us via this seam (the runtime doesn't
+		// hold it); the C thunk's opaque is `this` so the runtime owns the unhandled set + the report logic (like the
+		// interrupt thunk). The thunk fires on the is_handled BOOL — NOT JS_ExecutePendingJob's return.
+		RejectionSink = &Sink;
+		if (Runtime != nullptr)
+		{
+			JS_SetHostPromiseRejectionTracker(Runtime, &FQuickJsRuntime::RejectionTrackerThunk, this);
+		}
+	}
+
+	virtual void ReportUnhandledRejections() override
+	{
+		// Called by the tick AFTER the microtask drain-to-empty (the SETTLED boundary). The survivors — false-fired and
+		// never-later-handled — are the genuinely-unhandled rejections: report each to the sink, free the dup, clear.
+		if (RejectionSink != nullptr)
+		{
+			for (const TPair<void*, FUnhandledRejection>& Pair : UnhandledRejections)
+			{
+				RejectionSink->ReportError(Pair.Value.Error);
+			}
+		}
+		if (Context != nullptr)
+		{
+			for (const TPair<void*, FUnhandledRejection>& Pair : UnhandledRejections)
+			{
+				JS_FreeValue(Context, Pair.Value.Promise);
+			}
+		}
+		UnhandledRejections.Empty();
+	}
+
 	virtual void* GetNativeContextHandle() const override
 	{
 		// The live JSContext as an opaque void* for the JS Binding layer (sprint 007). The binding casts it
@@ -213,6 +247,61 @@ private:
 		return 0;
 	}
 
+	// 029 #18 — C thunk for JS_SetHostPromiseRejectionTracker. Signature MUST match the vendored typedef EXACTLY
+	// (quickjs.h:1134): void(JSContext*, JSValueConst promise, JSValueConst reason, bool is_handled, void* opaque) —
+	// quickjs-ng spells is_handled as C++ `bool` (NOT JS_BOOL). opaque is `this`. Adapts to the deferred-report below.
+	static void RejectionTrackerThunk(JSContext* Ctx, JSValueConst Promise, JSValueConst Reason, bool bIsHandled, void* Opaque)
+	{
+		FQuickJsRuntime* Self = static_cast<FQuickJsRuntime*>(Opaque);
+		if (Self != nullptr)
+		{
+			Self->OnPromiseRejection(Ctx, Promise, Reason, bIsHandled);
+		}
+	}
+
+	void OnPromiseRejection(JSContext* Ctx, JSValueConst Promise, JSValueConst Reason, bool bIsHandled)
+	{
+		void* const Key = JS_VALUE_GET_PTR(Promise); // the promise object ptr — a stable per-promise key
+		if (bIsHandled)
+		{
+			// A handler was added LATER -> this rejection is NOT unhandled after all. Remove it + free the dup we held.
+			if (FUnhandledRejection* Existing = UnhandledRejections.Find(Key))
+			{
+				JS_FreeValue(Ctx, Existing->Promise);
+				UnhandledRejections.Remove(Key);
+			}
+			return;
+		}
+		// is_handled == FALSE: rejected with no handler (yet). Track it — DUP the promise (keep it alive as the held key)
+		// + capture the reason NOW (the reason value is only valid for this call). The REPORT is deferred to the drain.
+		if (UnhandledRejections.Contains(Key)) { return; } // defensive — quickjs fires the false edge once per promise
+		FUnhandledRejection Entry;
+		Entry.Promise = JS_DupValue(Ctx, Promise);
+		ExtractError(Ctx, Reason, Entry.Error);
+		UnhandledRejections.Add(Key, MoveTemp(Entry));
+	}
+
+	// Map a JS value (a rejection reason) to our FJsError — message + stack (mirrors TakePendingError, but from a given
+	// value rather than the pending exception). Vendor-shaped extraction; JS_GetPropertyStr on a non-object is undefined-safe.
+	static void ExtractError(JSContext* Ctx, JSValueConst Value, FJsError& Out)
+	{
+		if (const char* MessageUtf8 = JS_ToCString(Ctx, Value))
+		{
+			Out.Message = UTF8_TO_TCHAR(MessageUtf8);
+			JS_FreeCString(Ctx, MessageUtf8);
+		}
+		JSValue Stack = JS_GetPropertyStr(Ctx, Value, "stack");
+		if (!JS_IsUndefined(Stack))
+		{
+			if (const char* StackUtf8 = JS_ToCString(Ctx, Stack))
+			{
+				Out.Stack = UTF8_TO_TCHAR(StackUtf8);
+				JS_FreeCString(Ctx, StackUtf8);
+			}
+		}
+		JS_FreeValue(Ctx, Stack);
+	}
+
 	void ReleaseHeldValues()
 	{
 		// First ordered teardown step. Release the JS-touching values Runtime Core holds before the
@@ -220,6 +309,18 @@ private:
 		// reset it here so nothing dangles. Later slices release DOM tree roots, host-bound callables,
 		// and cached exceptions here too.
 		InterruptHandler = nullptr;
+
+		// 029 #18 — free the dup'd promises held for unhandled-rejection tracking BEFORE the context is destroyed
+		// (the JS<->native lifetime hazard: a dup outliving its context is exactly the out-of-order teardown bite).
+		if (Context != nullptr)
+		{
+			for (const TPair<void*, FUnhandledRejection>& Pair : UnhandledRejections)
+			{
+				JS_FreeValue(Context, Pair.Value.Promise);
+			}
+		}
+		UnhandledRejections.Empty();
+		RejectionSink = nullptr;
 	}
 
 	void TapTeardown(ETeardownStep Step)
@@ -238,6 +339,16 @@ private:
 	JSContext* Context = nullptr;
 	bool bOwnsInstanceClaim = false;
 	FInterruptHandler InterruptHandler; // our policy closure; released first in teardown
+
+	// 029 #18 — author-JS unhandled-rejection tracking. JS_SetHostPromiseRejectionTracker fires (is_handled=FALSE) when a
+	// promise rejects with no handler, and fires AGAIN (is_handled=TRUE) if a handler is added LATER (the double-fire). We
+	// DEFER the report: this map holds the dup'd promise + its captured reason; a later handle REMOVES it (free the dup);
+	// ReportUnhandledRejections (called by the tick AFTER the microtask drain-to-empty — the SETTLED boundary, once no jobs
+	// pend a still-unhandled rejection is genuinely unhandled) reports the SURVIVORS to the sink + clears. The is_handled
+	// BOOL is the fire-decision — NOT JS_ExecutePendingJob's tri-state return (a throwing-but-CAUGHT .then returns 1/Executed).
+	struct FUnhandledRejection { JSValue Promise; FJsError Error; };
+	TMap<void*, FUnhandledRejection> UnhandledRejections; // key: the promise object ptr (JS_VALUE_GET_PTR), stable per promise
+	ICathodeDiagnosticSink* RejectionSink = nullptr;      // set at install (the seam, where the sink is available); not owned
 };
 
 } // namespace

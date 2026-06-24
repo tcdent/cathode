@@ -95,6 +95,11 @@ void FCathodeTick::DrainMicrotasks()
 			}
 		}
 	}
+
+	// 029 #18 — the drain is empty: the SETTLED boundary. Report the genuinely-unhandled author-JS rejections (the
+	// tracker's deferred survivors — is_handled=false, never-later-handled) to the diagnostic sink + clear. A later-caught
+	// rejection was already removed by the tracker's is_handled=true edge before now, so it does NOT surface here.
+	Runtime.ReportUnhandledRejections();
 }
 
 void FCathodeTick::RelayoutAndEmitFrames(double NowSeconds)

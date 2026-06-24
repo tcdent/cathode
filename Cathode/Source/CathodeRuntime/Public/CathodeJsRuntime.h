@@ -53,6 +53,10 @@ struct FEvalResult
  *  bespoke policy — this is only the typed callback the engine invokes. */
 using FInterruptHandler = TFunction<bool()>;
 
+// 029 #18 — the host promise-rejection tracker's report target. Full type in CathodeDiagnostics.h (Private); the public
+// interface only forward-declares it (in-module callers — the contract-globals seam, the tick — include the full type).
+class ICathodeDiagnosticSink;
+
 /**
  * One JavaScript runtime plus its global context, owned as a single logical unit. Exactly one of
  * these exists per Cathode runtime — the single-instance guarantee is Runtime Core's to enforce,
@@ -90,6 +94,15 @@ public:
 
 	/** Per-runtime stack ceiling, in bytes. */
 	virtual void SetMaxStackSize(SIZE_T StackBytes) = 0;
+
+	/** 029 #18 — install the host promise-rejection tracker, routing GENUINELY-unhandled author-JS rejections to the
+	 *  diagnostic sink. Set via the contract-globals seam (where the sink is available). Non-pure default no-op so
+	 *  mock/non-engine runtimes stay unchanged; the engine-backed runtime overrides it. */
+	virtual void InstallRejectionTracker(ICathodeDiagnosticSink& /*Sink*/) {}
+
+	/** 029 #18 — report the unhandled rejections that survived the microtask drain (the SETTLED boundary) to the sink +
+	 *  clear. The tick calls this AFTER its drain-to-empty. Non-pure default no-op (mocks unchanged). */
+	virtual void ReportUnhandledRejections() {}
 
 	/** The live JS context as an OPAQUE handle, for the JS Binding layer (sprint 007). Returns the engine's
 	 *  context cast to void* so this header stays JS_*-free; CathodeBinding casts it back internally and

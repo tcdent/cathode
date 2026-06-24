@@ -25,6 +25,7 @@ public:
 	// Registration seams, set by the owning components (future). A set seam is invoked, in order, during
 	// assembly; an unset seam is the deliberate not-yet-wired placeholder.
 	TFunction<void(ICathodeDiagnosticSink&)> OnInstallConsole; // wired target: the diagnostic sink
+	TFunction<void(ICathodeDiagnosticSink&)> OnInstallRejectionTracker; // 029 #18: installs JS_SetHostPromiseRejectionTracker -> the sink
 	TFunction<void(FCathodeScheduler&)> OnInstallTimers;       // wired target: the scheduler
 	TFunction<void()> OnInstallGameBridge;                     // empty: Host Bridge (game.*), future
 	TFunction<void()> OnInstallDocument;                       // empty: DOM document/mount root, future
@@ -36,6 +37,10 @@ public:
 		if (OnInstallConsole)
 		{
 			OnInstallConsole(Sink); // console.* routes into the diagnostic sink
+		}
+		if (OnInstallRejectionTracker)
+		{
+			OnInstallRejectionTracker(Sink); // 029 #18: the host promise-rejection tracker routes unhandled rejections into the sink
 		}
 		if (OnInstallTimers)
 		{
