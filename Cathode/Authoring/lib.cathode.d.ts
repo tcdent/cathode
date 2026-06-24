@@ -3,7 +3,6 @@
 // tables (signatures from each member's own field). Regenerate via the regenerate-mode test; the coherence
 // test asserts this committed file == the regeneration. Authors compile against this file with a tsconfig
 // that OMITS "dom" -- any unsupported web API (fetch/localStorage/innerHTML/...) is a type error.
-export {};
 
 // --- Standard globals (Cathode-provided; BOUND to the install set; an install add/remove flows through) ---
 declare const console: { log(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void; };

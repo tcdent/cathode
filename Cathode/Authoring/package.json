@@ -1,0 +1,15 @@
+{
+  "name": "cathode-authoring",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cathode author-side build gate (025 S4+). tsc (DOM/JS gate against lib.cathode.d.ts, no `dom` lib) + esbuild (IIFE bundle) + css-tree (the S5 CSS linter). Self-contained; runs dev-machine/CI ONLY — NOT the UE/make build (the Windows build box has no Node). Authored fresh per internalize-by-authoring; no coupling to panels/.",
+  "type": "module",
+  "scripts": {
+    "gate": "node gate.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "esbuild": "^0.25.0",
+    "css-tree": "^3.1.0"
+  }
+}

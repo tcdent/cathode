@@ -75,7 +75,10 @@ FString GenerateAuthoringDts()
 	Out += TEXT("// tables (signatures from each member's own field). Regenerate via the regenerate-mode test; the coherence\n");
 	Out += TEXT("// test asserts this committed file == the regeneration. Authors compile against this file with a tsconfig\n");
 	Out += TEXT("// that OMITS \"dom\" -- any unsupported web API (fetch/localStorage/innerHTML/...) is a type error.\n");
-	Out += TEXT("export {};\n\n");
+	// NO `export {};` here: the .d.ts must be an AMBIENT-GLOBAL script, NOT a module — so its globals/interfaces resolve
+	// in author code WITHOUT an import. (025 S4 proved an `export {};` makes it a module -> tsc rejects even console/document
+	// -> the gate is broken. The ambient form is the only one where the gate discriminates supported-vs-banned.)
+	Out += TEXT("\n");
 
 	// --- the standard globals: BOUND to the install set (GetContractGlobalNames + document via InstallAsGlobal). One
 	// global per install-set NAME; the SIGNATURE hand-authored per name (no source for runtime-installed signatures) --

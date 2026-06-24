@@ -1,0 +1,19 @@
+{
+  "//": "025 S4 — the Cathode author-side tsc config. The DOM/JS GATE: `lib` OMITS \"dom\", and lib.cathode.d.ts (the S1",
+  "//lib": "ambient surface — NOT a module; no `export {}`) is the ONLY DOM/JS surface. Any web API outside it (fetch,",
+  "//api": "localStorage, innerHTML, ...) is UNDECLARED -> a tsc type error. This config builds the POSITIVE fixture clean;",
+  "//neg": "tsconfig.negative.json reuses it for the negative (banned-usage) fixture, which MUST fail. types:[] excludes",
+  "//typ": "@types/* (esp. @types/node's global fetch) so the only ambient surface is lib.cathode.d.ts.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["lib.cathode.d.ts", "fixtures/positive/**/*.ts"]
+}

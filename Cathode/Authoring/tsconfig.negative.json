@@ -1,0 +1,7 @@
+{
+  "//": "025 S4 — the NEGATIVE-fixture tsc config: same compilerOptions as tsconfig.json (no `dom` lib; lib.cathode.d.ts",
+  "//2": "the only surface) but compiling the BANNED-usage fixture. The gate asserts this run FAILS (tsc non-zero) — the",
+  "//3": "load-bearing bite. A clean-only gate is half a gate.",
+  "extends": "./tsconfig.json",
+  "include": ["lib.cathode.d.ts", "fixtures/negative/**/*.ts"]
+}
