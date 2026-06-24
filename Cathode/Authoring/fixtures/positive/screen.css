@@ -1,0 +1,22 @@
+/* POSITIVE CSS fixture (025 S5) — conformant: every property is in css-allow-list.toml (the supported set). It INCLUDES
+   opacity + letter-spacing (the 2 cathode_computed) so the gate proves the +2 PASS — a linter that knew only the
+   litehtml 108 would silently drop them. Must lint CLEAN. (The inverse failure mode to the negative fixture: if this ever
+   fails, the allow-list or the parse regressed.) */
+.greeting {
+	display: block;
+	color: #e0e0e0;
+	background-color: #101010;
+	margin: 8px;
+	padding: 4px 8px;
+	font-family: monospace;
+	font-size: 14px;
+	line-height: 1.4;
+	opacity: 0.9;            /* cathode_computed (+2) — MUST be accepted */
+	letter-spacing: 0.5px;   /* cathode_computed (+2) — MUST be accepted */
+	--brand: #00aaff;        /* custom property — accepted (author theming, like the runtime `--` gate) */
+}
+
+.greeting:hover {
+	opacity: 1;
+	border: 1px solid #00aaff;
+}

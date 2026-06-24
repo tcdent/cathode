@@ -1,13 +1,16 @@
-// Cathode author-side build GATE (025 S4). Runs on the dev machine / CI ONLY — never the UE/make build (the Windows
-// build box has no Node; these files sit on its tree unused). Three steps:
-//   1. tsc the POSITIVE fixture against lib.cathode.d.ts (no `dom` lib)  -> must PASS  (the supported surface compiles).
-//   2. tsc the NEGATIVE fixture (fetch/localStorage/innerHTML)           -> must FAIL  (the load-bearing banned-API bite).
-//   3. esbuild the POSITIVE -> an IIFE bundle (what Cathode loads).
-// Exit 0 = gate PASS; non-zero = gate FAIL. (S5 adds the css-tree CSS linter; S6 wires this into an author-build target.)
+// Cathode author-side build GATE (025 S4+S5). Runs on the dev machine / CI ONLY — never the UE/make build (the Windows
+// build box has no Node; these files sit on its tree unused). FOUR checks (one gate; any failure hard-fails the whole gate):
+//   1. tsc the POSITIVE fixture against lib.cathode.d.ts (no `dom` lib)  -> must PASS  (the supported DOM/JS surface compiles).
+//   2. tsc the NEGATIVE fixture (fetch/localStorage/innerHTML)           -> must FAIL  (the load-bearing banned-API bite, S4).
+//   3. css-tree lint the POSITIVE/NEGATIVE .css vs css-allow-list.toml   -> positive PASS, negative FAIL (the CSS bite, S5).
+//   4. esbuild the POSITIVE -> an IIFE bundle (what Cathode loads).
+// Exit 0 = gate PASS; non-zero = gate FAIL. (S6 wires this into an author-build target / CI; the tsc and css-tree checks
+// are INDEPENDENT mechanisms — each its own positive+negative pair.)
 import { execFileSync } from "node:child_process";
 import { build } from "esbuild";
 import { mkdirSync } from "node:fs";
 import { platform } from "node:os";
+import { parseAllowList, lintCssFile } from "./css-lint.mjs";
 
 const TSC = "./node_modules/.bin/tsc" + (platform() === "win32" ? ".cmd" : "");
 
@@ -48,7 +51,28 @@ if (!neg.ok) {
 	console.error("[gate] FAIL: the negative fixture COMPILED CLEAN — the gate did NOT bite (banned APIs were accepted)!");
 }
 
-// 3. esbuild the POSITIVE -> IIFE (only if the gate held).
+// 3. CSS LINT (S5): css-tree membership vs css-allow-list.toml (the S2 artifact, parsed at lint time — the bind). A
+// property NOT in the allow-list is a violation at property:line (membership-by-absence, no hand denylist). Independent
+// of the tsc checks (its own positive+negative pair).
+const allow = parseAllowList("css-allow-list.toml");
+const posCss = lintCssFile("fixtures/positive/screen.css", allow);
+if (posCss.length === 0) {
+	console.log(`[gate] PASS: positive CSS fixture lints clean (${allow.size} allow-list props parsed; incl. opacity + letter-spacing — the +2 cathode_computed PASS)`);
+} else {
+	failed = true;
+	console.error("[gate] FAIL: the positive CSS fixture has UNSUPPORTED properties (the allow-list bind or the parse regressed):");
+	for (const v of posCss) { console.error(`        ${v.property} (fixtures/positive/screen.css:${v.line})`); }
+}
+const negCss = lintCssFile("fixtures/negative/banned.css", allow);
+if (negCss.length > 0) {
+	console.log("[gate] PASS: negative CSS fixture HARD-FAILS the linter on unsupported properties (the load-bearing CSS bite, property:line):");
+	for (const v of negCss) { console.log(`        ${v.property} (fixtures/negative/banned.css:${v.line})`); }
+} else {
+	failed = true;
+	console.error("[gate] FAIL: the negative CSS fixture linted CLEAN — the CSS gate did NOT bite (unsupported props accepted)!");
+}
+
+// 4. esbuild the POSITIVE -> IIFE (only if the gate held).
 if (!failed) {
 	mkdirSync("dist", { recursive: true });
 	await build({

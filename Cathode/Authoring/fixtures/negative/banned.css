@@ -1,0 +1,11 @@
+/* NEGATIVE CSS fixture (025 S5) — the LOAD-BEARING bite. Each property below is UNSUPPORTED: absent from
+   css-allow-list.toml because litehtml has no parse-name for it (no grid, no gap, no animation/transition/transform) and
+   it is not one of the 2 cathode_computed. The linter MUST flag each at property:line (membership-by-absence — NOT a hand
+   denylist). A clean-only gate proves nothing; this is the discriminating half. */
+.layout {
+	grid-template-columns: 1fr 1fr;   /* UNSUPPORTED — no grid in litehtml */
+	gap: 8px;                         /* UNSUPPORTED — gap descoped, absent from the allow-list */
+	animation: spin 1s linear;        /* UNSUPPORTED — no animation */
+	transition: opacity 0.2s;         /* UNSUPPORTED — no transition (opacity IS supported, but `transition` the property is not) */
+	transform: rotate(5deg);          /* UNSUPPORTED — no transform */
+}
