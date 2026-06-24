@@ -1830,6 +1830,21 @@ static const FBoundMember GKeyboardEventMembers[] =
 #undef CATHODE_EVENT_METHOD
 } // namespace
 
+// 025 S1 — codegen accessors: expose the PRODUCTION node/event/keyboard binding tables (file-local above) so
+// GenerateAuthoringDts projects the SAME tables InstallBoundMembers registers.
+void GetDomNodeBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
+{
+	OutMembers = GDomNodeMembers; OutCount = UE_ARRAY_COUNT(GDomNodeMembers);
+}
+void GetDomEventBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
+{
+	OutMembers = GEventMembers; OutCount = UE_ARRAY_COUNT(GEventMembers);
+}
+void GetDomKeyboardEventBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
+{
+	OutMembers = GKeyboardEventMembers; OutCount = UE_ARRAY_COUNT(GKeyboardEventMembers);
+}
+
 void RegisterDomEventClasses(INativeClassRegistry& Registry, JSContext* Context,
 	JSClassID* OutEventClassId, JSClassID* OutKeyboardEventClassId)
 {

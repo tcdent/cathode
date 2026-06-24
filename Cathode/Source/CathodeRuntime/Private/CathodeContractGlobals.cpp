@@ -1,4 +1,5 @@
 #include "CathodeContractGlobals.h"
+#include "CathodeContractGlobalNames.h" // 025 S1 — the dllexport decl of GetContractGlobalNames (so the def below exports)
 
 #include "CathodeClock.h"
 #include "CathodeDiagnostics.h"
@@ -141,6 +142,11 @@ JSValue CancelAnimationFrameThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int 
 	return JS_UNDEFINED;
 }
 
+// 025 S1 — the SINGLE SOURCE for the CathodeContractGlobals global-level names: the installs below reference these
+// entries (the JS_SetPropertyStr global name) and GetContractGlobalNames() exposes them, so the authoring .d.ts globals
+// section + its guard BIND to the actual install set (an add/remove HERE flows through to the codegen + the guard).
+static const char* const GContractGlobalNames[] = { "console", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame" };
+
 void InstallConsole(JSContext* Ctx)
 {
 	JSValue Global = JS_GetGlobalObject(Ctx);
@@ -148,21 +154,32 @@ void InstallConsole(JSContext* Ctx)
 	JS_SetPropertyStr(Ctx, Console, "log",   JS_NewCFunction(Ctx, &ConsoleThunk<EConsoleLevel::Log>,   "log",   1));
 	JS_SetPropertyStr(Ctx, Console, "warn",  JS_NewCFunction(Ctx, &ConsoleThunk<EConsoleLevel::Warn>,  "warn",  1));
 	JS_SetPropertyStr(Ctx, Console, "error", JS_NewCFunction(Ctx, &ConsoleThunk<EConsoleLevel::Error>, "error", 1));
-	JS_SetPropertyStr(Ctx, Global, "console", Console);
+	JS_SetPropertyStr(Ctx, Global, GContractGlobalNames[0], Console); // "console"
 	JS_FreeValue(Ctx, Global);
 }
 
 void InstallTimers(JSContext* Ctx)
 {
 	JSValue Global = JS_GetGlobalObject(Ctx);
-	JS_SetPropertyStr(Ctx, Global, "setTimeout",            JS_NewCFunction(Ctx, &SetTimeoutThunk,            "setTimeout",            2));
-	JS_SetPropertyStr(Ctx, Global, "clearTimeout",          JS_NewCFunction(Ctx, &ClearTimeoutThunk,          "clearTimeout",          1));
-	JS_SetPropertyStr(Ctx, Global, "requestAnimationFrame", JS_NewCFunction(Ctx, &RequestAnimationFrameThunk, "requestAnimationFrame", 1));
-	JS_SetPropertyStr(Ctx, Global, "cancelAnimationFrame",  JS_NewCFunction(Ctx, &CancelAnimationFrameThunk,  "cancelAnimationFrame",  1));
+	JS_SetPropertyStr(Ctx, Global, GContractGlobalNames[1], JS_NewCFunction(Ctx, &SetTimeoutThunk,            "setTimeout",            2));
+	JS_SetPropertyStr(Ctx, Global, GContractGlobalNames[2], JS_NewCFunction(Ctx, &ClearTimeoutThunk,          "clearTimeout",          1));
+	JS_SetPropertyStr(Ctx, Global, GContractGlobalNames[3], JS_NewCFunction(Ctx, &RequestAnimationFrameThunk, "requestAnimationFrame", 1));
+	JS_SetPropertyStr(Ctx, Global, GContractGlobalNames[4], JS_NewCFunction(Ctx, &CancelAnimationFrameThunk,  "cancelAnimationFrame",  1));
 	JS_FreeValue(Ctx, Global);
 }
 
 } // namespace
+
+// 025 S1 — the install-set NAME accessor (the single source above). The authoring .d.ts codegen emits one global per
+// name (signatures hand-authored per name); its guard asserts the .d.ts globals == this set — so a CathodeContractGlobals
+// add/remove flows through. (document is installed separately via FDomDocument::InstallAsGlobal — a documented known
+// the codegen adds beside this set, per-surface.)
+TArray<FString> GetContractGlobalNames()
+{
+	TArray<FString> Names;
+	for (const char* Name : GContractGlobalNames) { Names.Add(ANSI_TO_TCHAR(Name)); }
+	return Names;
+}
 
 void AssembleContractGlobals(void* Context, FGlobalEnvironment& Env, FCathodeGlobalsContext& GlobalsCtx,
 	ICathodeJsRuntime& Runtime, ICathodeDiagnosticSink& Sink, FCathodeScheduler& Scheduler, ICathodeClock& Clock)

@@ -656,4 +656,11 @@ FString GetDomDocumentDescriptorJson()
 	return EnumerateBoundMembersJson(GDomDocumentMembers, UE_ARRAY_COUNT(GDomDocumentMembers));
 }
 
+// 025 S1 — codegen accessor: expose the PRODUCTION document binding table for GenerateAuthoringDts (the same table
+// InstallBoundMembers registers).
+void GetDomDocumentBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
+{
+	OutMembers = GDomDocumentMembers; OutCount = UE_ARRAY_COUNT(GDomDocumentMembers);
+}
+
 } // namespace Cathode
