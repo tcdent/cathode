@@ -26,6 +26,31 @@ namespace
 	}
 	FString CssAllowListTomlPath() { const FString D = PluginBaseDir(); return D.IsEmpty() ? FString() : (D / TEXT("Authoring/css-allow-list.toml")); }
 	FString CssAllowListCppPath()  { const FString D = PluginBaseDir(); return D.IsEmpty() ? FString() : (D / TEXT("Source/CathodeDom/Private/CathodeCssAllowListGenerated.cpp")); }
+	FString CssPropertiesHPath()   { const FString D = PluginBaseDir(); return D.IsEmpty() ? FString() : (D / TEXT("Source/ThirdParty/litehtml/include/litehtml/css_properties.h")); }
+
+	// Extract css_properties.h computed-member identifiers (m_<name>). RELOCATED from CathodeDomCssCapabilityTests at 025 S3
+	// (the mirror retired): the member set CROSS-CHECKS the 3 parse-but-not-computed exclusions (font-variant/counter-reset/
+	// counter-increment) stay member-LESS — a litehtml-RECLASSIFICATION trigger (NOT covered by the -7 guard, which only
+	// proves they're real litehtml NAMES). A member DECLARATION is "<type> m_<name>;" (token followed by ';', not '(').
+	void ParseCssPropertyMembers(const FString& Header, TSet<FString>& Out)
+	{
+		TArray<FString> Lines;
+		Header.ParseIntoArrayLines(Lines);
+		for (const FString& Line : Lines)
+		{
+			int32 Idx = Line.Find(TEXT("m_"), ESearchCase::CaseSensitive, ESearchDir::FromStart, 0);
+			while (Idx != INDEX_NONE)
+			{
+				int32 End = Idx + 2;
+				while (End < Line.Len() && (FChar::IsAlnum(Line[End]) || Line[End] == TEXT('_'))) { ++End; }
+				if (End < Line.Len() && Line[End] == TEXT(';') && End > Idx + 2)
+				{
+					Out.Add(Line.Mid(Idx + 2, End - (Idx + 2)));
+				}
+				Idx = Line.Find(TEXT("m_"), ESearchCase::CaseSensitive, ESearchDir::FromStart, End);
+			}
+		}
+	}
 }
 
 // --- THE DRIVER (regenerate-mode; writes BOTH artifacts only when cathode.RegenCssAllowList=1) ---
@@ -120,6 +145,32 @@ bool FCathodeCssAllowListRuntimeSetTest::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("[025-S2] baked runtime set=%d projected=%d"), B.Num(), P.Num()));
 	TestTrue(TEXT("[025-S2] the baked runtime set (CathodeCssAllowListGenerated.cpp) == the projection (litehtml -7 +2) — S3's runtime source matches the codegen"),
 		P.Difference(B).Num() == 0 && B.Difference(P).Num() == 0);
+	return true;
+}
+
+// --- THE EXCLUSION MEMBER CROSS-CHECK (RELOCATED from the 013 capability coherence test at 025 S3, mirror retired) ---
+// The 3 parse-but-not-computed exclusions (font-variant, counter-reset, counter-increment) are REAL litehtml parse names
+// (the -7 guard proves that) but must stay MEMBER-LESS in css_properties.h — if litehtml ever adds a computed member for
+// one, its exclusion needs reclassification review. css_properties.h-based, mirror-independent (survives the S3 retire).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCathodeCssAllowListExclusionMembersTest, "Cathode.Authoring.CssAllowList.ExclusionMembers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FCathodeCssAllowListExclusionMembersTest::RunTest(const FString& Parameters)
+{
+	FString CssPropsH;
+	const FString Path = CssPropertiesHPath();
+	if (Path.IsEmpty() || !FFileHelper::LoadFileToString(CssPropsH, *Path)) { AddError(TEXT("[025-S3] could not read css_properties.h")); return false; }
+	TSet<FString> ComputedMembers;
+	ParseCssPropertyMembers(CssPropsH, ComputedMembers);
+	TestTrue(TEXT("[025-S3] the css_properties.h member parse found a real computed-surface set (sanity)"), ComputedMembers.Num() > 40);
+
+	static const TCHAR* const ParseButNotComputed[] = { TEXT("font-variant"), TEXT("counter-reset"), TEXT("counter-increment") };
+	for (const TCHAR* Pnc : ParseButNotComputed)
+	{
+		const FString MemberForm = FString(Pnc).Replace(TEXT("-"), TEXT("_"));
+		TestFalse(FString::Printf(TEXT("[025-S3] parse-but-not-computed '%s' stays MEMBER-LESS in css_properties.h (a member-add flags reclassification)"), Pnc),
+			ComputedMembers.Contains(MemberForm));
+	}
+	AddInfo(FString::Printf(TEXT("[025-S3] exclusion member cross-check: %d css_properties.h members parsed; the 3 parse-but-not-computed (font-variant/counter-reset/counter-increment) stay MEMBER-LESS"), ComputedMembers.Num()));
 	return true;
 }
 
