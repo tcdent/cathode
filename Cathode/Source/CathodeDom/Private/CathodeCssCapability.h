@@ -2,11 +2,13 @@
 
 #include "CoreMinimal.h"
 
-// The CSS capability declaration's RUNTIME MIRROR (013 slice 1, ruling B) — a hand-authored C++ form of
-// capability-manifest.toml [css] (the single source). The runtime consumers read THIS (element.style validation now;
-// getComputedStyle's exposed-props later); the build-time linter reads the manifest TOML; a COHERENCE TEST binds
-// them (mirror == manifest [css] AND every PRESENT name ⊆ litehtml's string_id.h parse names) — the no-drift guard
-// that codegen would otherwise be. NO CathodeDom->litehtml runtime dependency: the mirror is a static neutral list.
+// The CSS capability declaration's RUNTIME MIRROR (013 slice 1, ruling B) — a hand-authored C++ supported-CSS set.
+// The runtime consumers read THIS (element.style validation now; getComputedStyle's exposed-props later); a COHERENCE
+// TEST binds its Present partition to litehtml (mirror Present == string_id.h parse-names MINUS the 7 exclusions) — the
+// no-drift guard that codegen would otherwise be. NO CathodeDom->litehtml runtime dependency: a static neutral list.
+// 025: capability-manifest.toml is RETIRED (Model A — css-allow-list.toml is now generated off litehtml by the codegen,
+// see CathodeCssAllowList). This mirror is TRANSITIONAL: 025 S3 re-points the runtime consumers to the baked
+// CathodeCssAllowListGenerated set and retires this hand-authored mirror.
 
 namespace Cathode
 {

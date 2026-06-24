@@ -1,11 +1,12 @@
 #include "CathodeCssCapability.h"
 
-// THE MATERIALIZED MIRROR of capability-manifest.toml [css] (013 slice 1). SETTLED METHOD (browse-design re-ratified):
+// THE RUNTIME MIRROR — a hand-authored supported-CSS set (013 slice 1). SETTLED METHOD (browse-design re-ratified):
 // the supported set is litehtml's OWN parse-name table string_id.h:163-295 MINUS 7 source-cited exclusions = 108 present
 // (NOT a member-filter — that silently drops shorthands like flex-flow whose decomposition is in litehtml's non-vendored
 // .cpp). The file-derived completeness test (CathodeDomCssCapabilityTests) asserts this == string_id.h:163-295 minus the
-// exclusions, and cross-checks the 3 parse-but-not-computed exclusions stay member-less. Keep this lockstep with the
-// manifest [css]. The ~14 nonstandard axis longhands are present at the keep-literal default pending tcdent's tail.
+// exclusions, and cross-checks the 3 parse-but-not-computed exclusions stay member-less. The ~14 nonstandard axis longhands
+// are present at the keep-literal default pending tcdent's tail. 025: capability-manifest.toml is RETIRED (Model A — the
+// css-allow-list is now codegen'd off litehtml, see CathodeCssAllowList); this mirror is TRANSITIONAL, retired at 025 S3.
 
 namespace Cathode
 {

@@ -1,19 +1,118 @@
-# Cathode CSS allow-list — the supported-property manifest the CSS linter validates against.
-#
-# 001 SKELETON: structure only. This file is GENERATED from capability-manifest.toml [css]
-# at build time; the real property set is NOT hand-authored here — the capability manifest
-# is the single source. The actual properties are enumerated in the authoring-contract
-# sprint (003). Categories below show the shape, not the final set.
-#
-# Coverage tracks litehtml (CSS 2/3, flexbox; NO grid; partial CSS3), extended only where
-# Cathode forks litehtml for a specific need. The linter rejects any author CSS property
-# outside this list with a file + line, matching the DOM/JS gate's behaviour.
-
+# css-allow-list.toml -- the Cathode authoring CSS allow-list (GENERATED -- do not hand-edit).
+# 025 S2 (Model A): the supported CSS-property set PROJECTED from litehtml's string_id.h parse-names
+# MINUS the 7 audited exclusions PLUS the 2 cathode_computed (opacity, letter-spacing). Regenerate via the
+# regenerate-mode test; the coherence test asserts this committed file == the regeneration off litehtml.
+# The S6 CSS linter validates authored CSS against this list.
 [properties]
-# Structure-only category placeholders — (003) fills the actual property names:
-# box_model   = []   # display, margin, padding, border, width, height, box-sizing, ...
-# flexbox     = []   # flex, flex-direction, flex-wrap, justify-content, align-items, ...
-# typography  = []   # font-family, font-size, font-weight, line-height, font-feature-settings, ...
-# color       = []   # color, background, background-color, opacity, ...
-# positioning = []   # position, top, right, bottom, left, z-index, ...
-# (CSS grid is intentionally ABSENT — outside litehtml's coverage.)
+allow = [
+    "align-content",
+    "align-items",
+    "align-self",
+    "background",
+    "background-attachment",
+    "background-clip",
+    "background-color",
+    "background-image",
+    "background-origin",
+    "background-position",
+    "background-position-x",
+    "background-position-y",
+    "background-repeat",
+    "background-size",
+    "border",
+    "border-bottom",
+    "border-bottom-color",
+    "border-bottom-left-radius",
+    "border-bottom-left-radius-x",
+    "border-bottom-left-radius-y",
+    "border-bottom-right-radius",
+    "border-bottom-right-radius-x",
+    "border-bottom-right-radius-y",
+    "border-bottom-style",
+    "border-bottom-width",
+    "border-collapse",
+    "border-color",
+    "border-left",
+    "border-left-color",
+    "border-left-style",
+    "border-left-width",
+    "border-radius",
+    "border-radius-x",
+    "border-radius-y",
+    "border-right",
+    "border-right-color",
+    "border-right-style",
+    "border-right-width",
+    "border-spacing",
+    "border-style",
+    "border-top",
+    "border-top-color",
+    "border-top-left-radius",
+    "border-top-left-radius-x",
+    "border-top-left-radius-y",
+    "border-top-right-radius",
+    "border-top-right-radius-x",
+    "border-top-right-radius-y",
+    "border-top-style",
+    "border-top-width",
+    "border-width",
+    "bottom",
+    "box-sizing",
+    "caption-side",
+    "clear",
+    "color",
+    "content",
+    "cursor",
+    "display",
+    "flex",
+    "flex-basis",
+    "flex-direction",
+    "flex-flow",
+    "flex-grow",
+    "flex-shrink",
+    "flex-wrap",
+    "float",
+    "font",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "height",
+    "justify-content",
+    "left",
+    "letter-spacing",
+    "line-height",
+    "list-style",
+    "list-style-image",
+    "list-style-position",
+    "list-style-type",
+    "margin",
+    "margin-bottom",
+    "margin-left",
+    "margin-right",
+    "margin-top",
+    "max-height",
+    "max-width",
+    "min-height",
+    "min-width",
+    "opacity",
+    "order",
+    "overflow",
+    "padding",
+    "padding-bottom",
+    "padding-left",
+    "padding-right",
+    "padding-top",
+    "position",
+    "right",
+    "text-align",
+    "text-decoration",
+    "text-indent",
+    "text-transform",
+    "top",
+    "vertical-align",
+    "visibility",
+    "white-space",
+    "width",
+    "z-index",
+]

@@ -2,6 +2,7 @@
 
 #include "CathodeDom.h"
 #include "CathodeCssCapability.h"
+#include "CathodeCssAllowList.h" // 025 S2 — the moved enumeration (ParseLitehtmlPropertyNames, CssAuditedExclusions, CssCathodeComputed); single-sourced here, no longer duplicated below
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTesting.h"
 
@@ -15,9 +16,11 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 // 013 slice 1 — the CSS capability declaration's COHERENCE GUARD + the element.style ACCEPT-AND-IGNORE proof.
-// COHERENCE (the no-drift guard ruling-B uses instead of codegen): the hand-authored C++ mirror == capability-
-// manifest.toml [css] AND every PRESENT name ⊆ litehtml's string_id.h parse names — both read as FILES so the test
-// catches vendor drift. The guard BITES if the mirror is perturbed off the manifest (set-equality fails).
+// COHERENCE: the hand-authored C++ mirror's Present partition == litehtml's string_id.h parse-names MINUS the 7 audited
+// exclusions (read as FILES so the test catches vendor drift). The guard BITES if the mirror is perturbed off the engine.
+// 025 S2 UPDATE: the capability-manifest.toml is RETIRED (Model B), so the former mirror==manifest lockstep is removed;
+// the mirror is now proven against litehtml (the engine) directly. The mirror itself lives till S3 (where the runtime
+// consumer re-points to the baked CathodeCssAllowListGenerated set; the codegen's own coherence is in CathodeCssAllowListTests).
 
 namespace
 {
@@ -42,48 +45,8 @@ FString CathodePluginDir()
 	return Plugin.IsValid() ? Plugin->GetBaseDir() : FString();
 }
 
-// Extract every `name = "X"` from the manifest [css] block (a line-based parse — no TOML lib needed).
-void ParseManifestCssNames(const FString& Toml, TSet<FString>& Out)
-{
-	TArray<FString> Lines;
-	Toml.ParseIntoArrayLines(Lines);
-	bool bInCss = false;
-	for (const FString& Line : Lines)
-	{
-		const FString Trim = Line.TrimStartAndEnd();
-		if (Trim.StartsWith(TEXT("[")) ) { bInCss = Trim.Equals(TEXT("[css]")); continue; }
-		if (!bInCss) { continue; }
-		int32 NameIdx;
-		if (Trim.FindChar(TEXT('\"'), NameIdx)) // a { name = "X", ... } entry
-		{
-			const int32 Close = Trim.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, NameIdx + 1);
-			if (Trim.Contains(TEXT("name")) && Close > NameIdx)
-			{
-				Out.Add(Trim.Mid(NameIdx + 1, Close - NameIdx - 1));
-			}
-		}
-	}
-}
-
-// Derive litehtml's CSS property NAMES from string_id.h's `// CSS property names` block (`_name_,` -> "name").
-void ParseLitehtmlPropertyNames(const FString& StringIdH, TSet<FString>& Out)
-{
-	TArray<FString> Lines;
-	StringIdH.ParseIntoArrayLines(Lines);
-	bool bInBlock = false;
-	for (const FString& Line : Lines)
-	{
-		const FString Trim = Line.TrimStartAndEnd();
-		if (Trim.Contains(TEXT("// CSS property names"))) { bInBlock = true; continue; }
-		if (!bInBlock) { continue; }
-		if (Trim.StartsWith(TEXT("_")) && Trim.EndsWith(TEXT("_,")))
-		{
-			FString Id = Trim.LeftChop(2);                       // drop the trailing "_,"
-			while (Id.StartsWith(TEXT("_"))) { Id = Id.RightChop(1); } // drop ALL leading "_" (so __litehtml_ -> litehtml-)
-			Out.Add(Id.Replace(TEXT("_"), TEXT("-")));           // _flex_direction_ -> "flex-direction"
-		}
-	}
-}
+// ParseManifestCssNames + ParseLitehtmlPropertyNames retired/moved at 025 S2: the manifest is retired (Model B), and
+// ParseLitehtmlPropertyNames now lives in CathodeCssAllowList (the production codegen home, included above) — single-sourced.
 
 // Extract css_properties.h computed-member identifiers (m_<name>). SETTLED ROLE (browse-design ratified the inverted
 // method): NOT the inclusion filter — a member-filter silently drops shorthands whose decomposition lives in litehtml's
@@ -112,41 +75,19 @@ void ParseCssPropertyMembers(const FString& Header, TSet<FString>& Out)
 	}
 }
 
-// THE 7 AUDITED EXCLUSIONS — single source for every capability test (subtracted from the string_id.h:163-295 universe).
-// 3 parse-but-not-computed (font-variant/counter-reset/counter-increment) + 2 __litehtml internals + 2 *-baseurl url
-// internals. Source-cited in capability-manifest.toml [css]. Single-sourcing here keeps Coherence + CompletenessBites lockstep.
-const TArray<FString>& CssAuditedExclusions()
-{
-	static const TArray<FString> E = {
-		TEXT("litehtml-border-spacing-x"), TEXT("litehtml-border-spacing-y"),
-		TEXT("background-image-baseurl"), TEXT("list-style-image-baseurl"),
-		TEXT("font-variant"), TEXT("counter-reset"), TEXT("counter-increment"),
-	};
-	return E;
-}
+// CssAuditedExclusions moved to CathodeCssAllowList at 025 S2 (the production codegen home, included above) — single-sourced.
 
-// THE INVERTED ORACLE, single-sourced: present = string_id.h:163-295 parse-names MINUS the audited exclusions.
+// THE INVERTED ORACLE: present = string_id.h:163-295 parse-names MINUS the audited exclusions (calls the moved
+// ParseLitehtmlPropertyNames + CssAuditedExclusions). This is the 108-name Present oracle (NO +2) — kept test-local
+// because it checks the mirror's Present PARTITION (108), distinct from the codegen's full allow-list set (110 = 108 + 2).
 void DeriveCssPresentSet(const FString& StringIdH, TSet<FString>& Out)
 {
 	ParseLitehtmlPropertyNames(StringIdH, Out);
 	for (const FString& Ex : CssAuditedExclusions()) { Out.Remove(Ex); }
 }
 
-// THE 2 FORWARD-DECLARED NON-LITEHTML props — an EXPLICIT CLOSED list (same closed/cited discipline as CssAuditedExclusions).
-// Each is Axis-3-IN but NOT a litehtml parse name, so it is HAND-AUTHORED OUTSIDE the file-derivation; it must stay a closed
-// audited set, never an open bucket. Both are out of the 108 file-derived and both are now ECssPropertyStatus::CathodeComputed
-// (own-inline parsed at getComputedStyle read; rendering deferred). Migration is property-dependent:
-//   opacity        — 014 slice 2; CathodeComputed TERMINAL (litehtml never parses opacity; compositing is the rasterizer's).
-//   letter-spacing — 014 slice 1; CathodeComputed TRANSITIONAL (-> Present if litehtml ever parses it).
-// (build_how_pending retired at 014 slice 2 — opacity was its last entry. gap/row-gap/column-gap were build-how-committed;
-//  tcdent descoped them from 014 — NOT authored into the spec.)
-const TArray<FString>& CssForwardDeclaredNonLitehtml()
-{
-	static const TArray<FString> E = {
-		TEXT("opacity"), TEXT("letter-spacing"),
-	};
-	return E;
-}
+// The 2 forward-declared non-litehtml props (opacity, letter-spacing) moved to CathodeCssAllowList at 025 S2 as
+// CssCathodeComputed (the production codegen home, included above) — single-sourced; the test references it below.
 } // namespace
 
 // ===== COMPLETENESS GUARD (inverted method): mirror Present == string_id.h:163-295 parse-names MINUS the 7 audited
@@ -164,16 +105,15 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 	const FString Dir = CathodePluginDir();
 	if (Dir.IsEmpty()) { AddError(TEXT("could not resolve the Cathode plugin dir")); return false; }
 
-	FString Manifest, StringIdH;
-	const FString ManifestPath = FPaths::Combine(Dir, TEXT("Authoring"), TEXT("capability-manifest.toml"));
+	FString StringIdH;
 	const FString StringIdPath = FPaths::Combine(Dir, TEXT("Source"), TEXT("ThirdParty"), TEXT("litehtml"), TEXT("include"), TEXT("litehtml"), TEXT("string_id.h"));
-	if (!FFileHelper::LoadFileToString(Manifest, *ManifestPath)) { AddError(FString::Printf(TEXT("could not read %s"), *ManifestPath)); return false; }
 	if (!FFileHelper::LoadFileToString(StringIdH, *StringIdPath)) { AddError(FString::Printf(TEXT("could not read %s"), *StringIdPath)); return false; }
 
-	TSet<FString> ManifestNames, LitehtmlNames;
-	ParseManifestCssNames(Manifest, ManifestNames);
+	// 025 S2: the manifest is RETIRED (Model B); the mirror==manifest lockstep is removed (UPDATE-not-revert). The
+	// mirror==litehtml-derived coherence (the ENGINE source of truth) is KEPT below — the mirror lives till S3 (where it's
+	// replaced by the baked set + the css-allow-list regen-vs-committed coherence in CathodeCssAllowListTests).
+	TSet<FString> LitehtmlNames;
 	ParseLitehtmlPropertyNames(StringIdH, LitehtmlNames);
-	TestTrue(TEXT("the manifest [css] parse found a real set (sanity)"), ManifestNames.Num() > 10);
 	TestTrue(TEXT("the litehtml string_id property-name parse found a real set (sanity)"), LitehtmlNames.Num() > 20);
 
 	FString CssPropsH;
@@ -199,15 +139,14 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 
 	// Partition the mirror into Present / CathodeComputed — the only two statuses (BuildHowPending retired at 014 slice 2).
 	// CathodeComputed = the forward-declared non-litehtml props whose value Cathode owns (own-inline at getComputedStyle read).
-	TSet<FString> MirrorNames, MirrorPresent, MirrorCathodeComputed;
+	TSet<FString> MirrorPresent, MirrorCathodeComputed;
 	for (const FCssCapabilityEntry& E : GetCssCapabilityMirror())
 	{
-		MirrorNames.Add(E.Name);
 		(E.Status == ECssPropertyStatus::Present ? MirrorPresent : MirrorCathodeComputed).Add(E.Name);
 	}
 
-	// (1) mirror == manifest [css] lockstep — BITES if the two materializations drift.
-	TestTrue(TEXT("mirror == manifest [css] (same name set — lockstep)"), MirrorNames.Difference(ManifestNames).Num() == 0 && ManifestNames.Difference(MirrorNames).Num() == 0);
+	// (1) mirror == manifest [css] lockstep RETIRED at 025 S2 (the manifest is gone — Model B). The mirror's coherence is
+	// now proven against the ENGINE (litehtml string_id.h) directly via (2) below — mirror Present == the file-derived 108.
 
 	// (2) COMPLETENESS, BOTH directions: mirror Present == DerivedPresent (string_id.h:163-295 minus exclusions).
 	TestEqual(TEXT("mirror Present has no name OUTSIDE the derived set (no over-declaration)"), MirrorPresent.Difference(DerivedPresent).Num(), 0);
@@ -227,7 +166,7 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 	}
 
 	// (5) CLOSED-SET HYGIENE on the forward-declared 2 non-litehtml (reviewer standing gate; same discipline as the 7 exclusions).
-	const TSet<FString> NonLitehtmlAudited(CssForwardDeclaredNonLitehtml());
+	const TSet<FString> NonLitehtmlAudited(CssCathodeComputed());
 	// (5a) the CathodeComputed mirror entries are EXACTLY the closed audited list — not an open bucket (both directions).
 	TestEqual(TEXT("CathodeComputed mirror entries == the closed audited 2 (no over)"), MirrorCathodeComputed.Difference(NonLitehtmlAudited).Num(), 0);
 	TestEqual(TEXT("CathodeComputed mirror entries == the closed audited 2 (no under)"), NonLitehtmlAudited.Difference(MirrorCathodeComputed).Num(), 0);
@@ -237,7 +176,7 @@ bool FCathodeCssCapabilityCoherenceTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("mirror CathodeComputed is exactly 2"), MirrorCathodeComputed.Num(), 2);
 	TestEqual(TEXT("Present and CathodeComputed are DISJOINT (no overlap in 110 = 108 + 2)"), MirrorPresent.Intersect(MirrorCathodeComputed).Num(), 0);
 	// (5c) none of the 2 leaks into the 108 file-derivation (each forward-declared name is OUTSIDE the derived set).
-	for (const FString& Nl : CssForwardDeclaredNonLitehtml())
+	for (const FString& Nl : CssCathodeComputed())
 	{
 		TestFalse(FString::Printf(TEXT("forward-declared '%s' does NOT leak into the 108 file-derivation"), *Nl), DerivedPresent.Contains(Nl));
 	}
@@ -290,7 +229,7 @@ bool FCathodeCssCapabilityCompletenessBitesTest::RunTest(const FString& Paramete
 
 	// INDEPENDENCE (reviewer gate: the 108 file-derivation bites independently of the 2): none of the forward-declared
 	// non-litehtml props leaks into the file-derivation or the Present partition, so the perturbation below tests the 108 alone.
-	for (const FString& Nl : CssForwardDeclaredNonLitehtml())
+	for (const FString& Nl : CssCathodeComputed())
 	{
 		TestFalse(FString::Printf(TEXT("non-litehtml '%s' is OUTSIDE the file-derived 108 (bite domain independent of the 2)"), *Nl), DerivedPresent.Contains(Nl));
 		TestFalse(FString::Printf(TEXT("non-litehtml '%s' is OUTSIDE the mirror Present partition"), *Nl), MirrorPresent.Contains(Nl));
