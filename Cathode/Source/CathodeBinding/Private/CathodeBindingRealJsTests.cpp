@@ -268,4 +268,124 @@ bool FCathodeBindingMethodAccessThroughJsTest::RunTest(const FString& Parameters
 	return true;
 }
 
+// 029 #19 — REAL GC CYCLE RECLAMATION (CathodeBinding; CathodeBinding/COVERAGE.md:94, the 017 follow-on). A SYNTHETIC,
+// safe-gc_mark'd cross-heap cycle — its OWN test wrapper with a valid gc_mark + finalizer (NOT the document model;
+// document.gc_mark STAYS REMOVED, see [[reference_quickjs_gcmark_reclaim_not_survival]] — this is the cycle-reclaim PROOF,
+// not a gc_mark re-add). The reclaim DIRECTION (drop every external handle + release the root + a real JS_RunGC -> the
+// finalizer FIRES = reclaimed) with a leaks-WITHOUT-release CONTROL (root held -> NOT reclaimed): a gc_mark survival test
+// is vacuous (unmarked native refs over-retain, never premature-collect), so the reclaim direction is the proof and the
+// control is what makes it non-vacuous. Exercises the finalizer's JS_GetAnyOpaque + class-id (the 012 hazard, while live).
+namespace
+{
+using namespace Cathode;
+
+// The native holds a JS ref (the cycle's other half). gc_mark MARKS it (cycle visibility -> the collector traverses +
+// reclaims the cycle); the finalizer FREES it via FreeRT (the ctx-less, finalizer-safe path) + bumps the observable count.
+struct FCycleNative
+{
+	JSRuntime* Rt = nullptr;
+	FJsValue HeldRef;
+};
+int32 GCycleFinalizeCount = 0;
+
+void CycleGcMark(JSRuntime* Rt, JSValueConst Val, JS_MarkFunc* MarkFunc)
+{
+	JSClassID ClassId;
+	if (FCycleNative* N = static_cast<FCycleNative*>(JS_GetAnyOpaque(Val, &ClassId)))
+	{
+		N->HeldRef.Mark(Rt, MarkFunc); // make the held ref visible so the cross-heap cycle is collectible
+	}
+}
+
+void CycleFinalizer(JSRuntime* Rt, JSValueConst Val)
+{
+	JSClassID ClassId;
+	if (FCycleNative* N = static_cast<FCycleNative*>(JS_GetAnyOpaque(Val, &ClassId)))
+	{
+		N->HeldRef.FreeRT(Rt); // the finalizer has rt but no ctx -> the FreeRT (JS_FreeValueRT) path
+		++GCycleFinalizeCount;
+		delete N;
+	}
+}
+
+// Build ONE rooted cross-heap cycle on a runtime: a wrapped FCycleNative whose native holds a ref BACK to its own wrapper
+// (W -> native -> HeldRef = W). Roots a global "__root"; returns the C++ handle (the 2nd external root).
+FJsValue BuildRootedCycle(ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, JSClassID ClassId)
+{
+	JSContext* Ctx = static_cast<JSContext*>(Runtime.GetNativeContextHandle());
+	JSRuntime* Rt = JS_GetRuntime(Ctx);
+	FCycleNative* Native = new FCycleNative();
+	Native->Rt = Rt;
+	FJsValue W = Registry.CreateWrappedObject(ClassId, Native);
+	Native->HeldRef = FJsValue(Ctx, JS_DupValue(Ctx, W.GetValue())); // the cycle: native -> W
+	JSValue Global = JS_GetGlobalObject(Ctx);
+	JS_SetPropertyStr(Ctx, Global, "__root", JS_DupValue(Ctx, W.GetValue())); // external root #1 (the global)
+	JS_FreeValue(Ctx, Global);
+	return W; // external root #2 (the C++ handle)
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeBindingCycleReclaimTest,
+	"Cathode.Binding.Gc.CycleReclaim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeBindingCycleReclaimTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	// === RECLAIM: drop EVERY external handle + a real JS_RunGC -> the cycle collector reclaims it -> the finalizer FIRES. ===
+	{
+		FScopedTestRuntime Runtime;
+		if (!Runtime.IsValid() || !Runtime->IsValid()) { AddError(TEXT("reclaim: runtime failed to start")); return false; }
+		JSContext* Ctx = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
+		JSRuntime* Rt = JS_GetRuntime(Ctx);
+		GCycleFinalizeCount = 0;
+
+		TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(Runtime.Get());
+		FNativeClassDef Def; Def.Name = "CathodeCycleNative"; Def.Finalizer = &CycleFinalizer; Def.GcMark = &CycleGcMark;
+		const JSClassID ClassId = Registry->RegisterClass(Def);
+
+		FJsValue W = BuildRootedCycle(*Runtime, *Registry, ClassId);
+
+		// PRECONDITION — externally rooted, so a GC does NOT reclaim it (finalizer must NOT fire here).
+		JS_RunGC(Rt);
+		TestEqual(TEXT("[029-#19] precondition: NOT reclaimed while externally rooted (finalize count 0)"), GCycleFinalizeCount, 0);
+
+		// DROP every external handle: the global root + the C++ handle. Only the cycle's INTERNAL ref remains.
+		JSValue Global = JS_GetGlobalObject(Ctx);
+		JS_SetPropertyStr(Ctx, Global, "__root", JS_UNDEFINED);
+		JS_FreeValue(Ctx, Global);
+		W = FJsValue(); // release the C++ handle's ref
+
+		JS_RunGC(Rt); // the cross-heap cycle, now unrooted, is reclaimed by the real collector
+		TestEqual(TEXT("[029-#19] RECLAIMED after dropping every external handle: the finalizer FIRED (the cross-heap cycle was collected by a real JS_RunGC)"), GCycleFinalizeCount, 1);
+		AddInfo(FString::Printf(TEXT("[029-#19] reclaim: finalize count after the root release + JS_RunGC = %d (expected 1)"), GCycleFinalizeCount));
+	}
+
+	// === CONTROL (leaks-without-release): KEEP the root + JS_RunGC -> NOT reclaimed (the finalizer does NOT fire). The
+	// reclaim direction is the proof; this control is what makes it non-vacuous (a survival test would pass on a broken
+	// collector — over-retention never premature-collects). 2nd SEQUENTIAL runtime (FScopedTestRuntime is single-instance). ===
+	{
+		FScopedTestRuntime Runtime;
+		if (!Runtime.IsValid() || !Runtime->IsValid()) { AddError(TEXT("control: runtime failed to start")); return false; }
+		JSContext* Ctx = static_cast<JSContext*>(Runtime->GetNativeContextHandle());
+		JSRuntime* Rt = JS_GetRuntime(Ctx);
+		GCycleFinalizeCount = 0;
+
+		TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(Runtime.Get());
+		FNativeClassDef Def; Def.Name = "CathodeCycleNative"; Def.Finalizer = &CycleFinalizer; Def.GcMark = &CycleGcMark;
+		const JSClassID ClassId = Registry->RegisterClass(Def);
+
+		FJsValue W = BuildRootedCycle(*Runtime, *Registry, ClassId); // rooted (the global + W) and NOT released
+
+		JS_RunGC(Rt);
+		TestEqual(TEXT("[029-#19] CONTROL (leaks-without-release): NOT reclaimed while the root is held (finalize count 0) -- makes the reclaim direction non-vacuous"), GCycleFinalizeCount, 0);
+		AddInfo(FString::Printf(TEXT("[029-#19] control: finalize count with the root HELD + JS_RunGC = %d (expected 0)"), GCycleFinalizeCount));
+		// W releases at scope; the runtime teardown finalizes the cycle (FreeRT-safe) — not a test leak, just not GC-reclaimed here.
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
