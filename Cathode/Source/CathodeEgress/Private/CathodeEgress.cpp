@@ -174,6 +174,22 @@ namespace
 						Textures.Remove(Surface);
 						return;
 					}
+					// 029 #27 — CLEAR the texture on create: zero the mip BEFORE UpdateResource so the create uploads a CLEAN
+					// (0) texture. The dirty-rect upload then writes ONLY the rendered rects, leaving the MARGIN deterministic-0
+					// — vs the uninitialized CreateTransient GPU memory (= the prior test's residual) that drove the #30 out-box
+					// ORDER-SENSITIVITY (the egress-readback ISOLATION fix; lets the #30 floor restore 0.80 -> 0.85).
+					if (FTexturePlatformData* PlatformData = NewTexture->GetPlatformData())
+					{
+						if (PlatformData->Mips.Num() > 0)
+						{
+							FTexture2DMipMap& Mip = PlatformData->Mips[0];
+							if (void* MipData = Mip.BulkData.Lock(LOCK_READ_WRITE))
+							{
+								FMemory::Memzero(MipData, static_cast<SIZE_T>(Mip.BulkData.GetBulkDataSize()));
+							}
+							Mip.BulkData.Unlock();
+						}
+					}
 					NewTexture->SRGB = true;       // PremultipliedBGRA8 is sRGB-encoded — matches the surface contract
 					NewTexture->UpdateResource();  // create the RHI resource (a render-thread init; precedes the upload by FIFO)
 					Tex.Texture.Reset(NewTexture);
