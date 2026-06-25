@@ -1,0 +1,7 @@
+{
+  "//": "029 #app->body — the hello EXAMPLE screen's tsc config: type-checks the conformant body-mount + addEventListener",
+  "//2": "reference against lib.cathode.d.ts (no `dom` lib), exactly as the fixtures + status-card do. NO esbuild bundle —",
+  "//3": "hello is a gate-VALIDATED example, not a device bundle (status-card is the device bundle). Closes the kept-un-checked smell.",
+  "extends": "./tsconfig.json",
+  "include": ["lib.cathode.d.ts", "screens/hello/**/*.ts"]
+}

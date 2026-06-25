@@ -3,7 +3,7 @@
 // a clean-only gate proves nothing. (If any of these ever becomes a SUPPORTED, bound API, move it to the positive fixture.)
 fetch("https://example.com/data");                 // TS2304: Cannot find name 'fetch'  (no network egress in a Cathode screen)
 const saved = localStorage.getItem("session");      // TS2304: Cannot find name 'localStorage'  (no web storage)
-const root = document.getElementById("app");
+const root = document.body;
 if (root !== null) {
 	(root as HTMLElement).innerHTML = "<b>unsafe</b>"; // TS2339: Property 'innerHTML' does not exist on HTMLElement (no raw-HTML injection)
 }

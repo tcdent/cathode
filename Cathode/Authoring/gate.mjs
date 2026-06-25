@@ -7,6 +7,8 @@
 //   4. the REAL screen screens/status-card/ (a .ts + its standalone .css, PM ruling (a)) -> tsc + css-tree + esbuild PASS
 //      END-TO-END -> the IIFE Cathode loads (the production author-build flow, S6).
 //   5. the BANNED real screen screens/banned/ -> HARD-FAILS on the real author-build path (the bite end-to-end, S6).
+//   6. the EXAMPLE screen screens/hello/ (a body-mount + addEventListener reference) -> tsc + css-tree PASS, NO esbuild
+//      bundle (it's a gate-VALIDATED example, not a device bundle) — 029 #app->body, so a kept example is never un-checked.
 // Exit 0 = gate PASS; non-zero = gate FAIL. `npm run gate` IS the canonical author-build step (see the Cathode README's
 // Authoring gate). The tsc and css-tree checks are INDEPENDENT mechanisms — each its own positive+negative pair.
 import { execFileSync } from "node:child_process";
@@ -111,6 +113,23 @@ if (!bannedTs.ok && bannedCss.length > 0) {
 } else {
 	failed = true;
 	console.error(`[gate] FAIL: the banned real screen did NOT hard-fail on both axes (ts-ok=${bannedTs.ok}, css-violations=${bannedCss.length}) — the gate did not bite the real-screen path!`);
+}
+
+// 6. THE EXAMPLE screen (screens/hello/) — a conformant body-mount + addEventListener reference. Gate-VALIDATED (tsc vs
+// lib.cathode.d.ts + css-tree), with NO esbuild bundle (it is an example, not a device bundle — no unused IIFE; status-card
+// is the device bundle). Closes the "kept un-checked example" smell (029 #app->body): a reader copies hello only after the
+// gate has validated the pattern. addEventListener IS supported surface (the positive fixture exercises it too).
+const helloTs = tsc("tsconfig.screen-hello.json");
+const helloCss = lintCssFile("screens/hello/screen.css", allow);
+if (helloTs.ok && helloCss.length === 0) {
+	console.log("[gate] PASS: EXAMPLE screen screens/hello/ type-checks clean (tsc + css-tree; the body-mount + addEventListener reference, no bundle)");
+} else {
+	failed = true;
+	if (!helloTs.ok) { console.error("[gate] FAIL: the hello example .ts did NOT typecheck (the supported surface regressed):\n" + helloTs.out); }
+	if (helloCss.length > 0) {
+		console.error("[gate] FAIL: the hello example .css has UNSUPPORTED properties:");
+		for (const v of helloCss) { console.error(`        ${v.property} (screens/hello/screen.css:${v.line})`); }
+	}
 }
 
 console.log(failed ? "[gate] RESULT: FAIL" : "[gate] RESULT: PASS");
