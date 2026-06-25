@@ -523,7 +523,15 @@ private:
 		if (Doc)
 		{
 			Doc->render(Width);
-			Doc->draw(static_cast<litehtml::uint_ptr>(0), 0, 0, nullptr); // fires the container paint callbacks -> sink
+			// 029 #33 — pass a VALID full-viewport clip (NOT nullptr). litehtml's ROOT/canvas-background paint path (the
+			// html/body background propagated over the viewport) dereferences the clip pointer UNCONDITIONALLY to size the
+			// canvas fill — the ordinary element path (position::does_intersect) is null-guarded, but the root branch is NOT.
+			// A nullptr clip -> EXCEPTION_ACCESS_VIOLATION reading 0x0 the moment a body/html background-color renders
+			// (ordinary gate-allowed CSS). A viewport-sized clip lets the root bg flow into draw_background -> EmitFillRect,
+			// DRAWING the color over the viewport (a real fix, not a skip). The clip == get_client_rect (the media/layout viewport).
+			litehtml::position ViewportClip;
+			Container.get_client_rect(ViewportClip); // {0,0,ClientWidth,ClientHeight}
+			Doc->draw(static_cast<litehtml::uint_ptr>(0), 0, 0, &ViewportClip); // fires the container paint callbacks -> sink
 			// RETAIN the laid-out document + (re)build the NodeId<->element map (T1): get_placement() is valid
 			// after render(), so post-render geometry queries (QueryBox) resolve our NodeId to litehtml's placed
 			// element via the data-node-id attribute the DOM serializer emits.

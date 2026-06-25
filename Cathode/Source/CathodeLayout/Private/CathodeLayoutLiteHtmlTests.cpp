@@ -56,6 +56,26 @@ public:
 		OutHeight = 16.0f;
 	}
 };
+
+// 029 #33 — a body background-color (gate-allowed CSS) drives litehtml's ROOT/canvas-background paint path. This is the CSS
+// that NULL-derefed the draw (029 #4's abandoned blue-body-fill crashed the box). A single sized child + `body { background }`.
+class FBodyBackgroundSource final : public ILayoutDocumentSource
+{
+public:
+	virtual int32 GetRootNode() const override { return 1; }
+	virtual int32 GetParentNode(int32) const override { return INDEX_NONE; }
+	virtual void GetChildNodes(int32, TArray<int32>&) const override {}
+	virtual bool IsLayoutBoundary(int32) const override { return false; }
+	virtual FString GetDocumentHtml() const override
+	{
+		return TEXT("<div data-node-id=\"1\" style=\"width:100px;height:50px\"></div>");
+	}
+	virtual FString GetSubtreeHtml(int32) const override { return GetDocumentHtml(); }
+	virtual FString GetDocumentCss() const override
+	{
+		return TEXT("body { background-color: #0000ff; }"); // -> the root/canvas-background path (the #4 crash site)
+	}
+};
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -105,6 +125,47 @@ bool FCathodeLayoutLiteHtmlBoxTest::RunTest(const FString& Parameters)
 	// checked = boxes asserted against litehtml's own output.
 	AddInfo(FString::Printf(TEXT("[CATHODE-T1] %d boxes asserted against litehtml's computed output"), Boxes.Num()));
 	TestEqual(TEXT("three boxes were read from litehtml's computed layout"), Boxes.Num(), 3);
+
+	return true;
+}
+
+// 029 #33 — the body{background-color} CONTAINER-CRASH fix (the #4 follow-on). A body/html background-color drives litehtml's
+// ROOT/canvas-background paint path, which dereferenced the draw's clip pointer UNCONDITIONALLY -> EXCEPTION_ACCESS_VIOLATION
+// reading 0x0 on the nullptr clip CathodeLayout passed (so ordinary gate-allowed CSS crashed the device). The fix passes a
+// valid viewport clip (get_client_rect). THE CRASH->SURVIVE FLIP: reaching the assertions at all proves the draw SURVIVED
+// (a still-crashing build faults inside Relayout and never reaches them); the blue FillRect proves the body bg DREW (a real
+// fix, not a skip-the-draw mask).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeLayoutBodyBackgroundTest,
+	"Cathode.Layout.LiteHtml.BodyBackgroundColor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeLayoutBodyBackgroundTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	FStubMeasurer Measurer;
+	TUniquePtr<ILayoutEngine> Engine = CreateLiteHtmlLayoutEngine(Measurer);
+	FBodyBackgroundSource Source;
+	Engine->SetDocument(Source);
+
+	// This Relayout drives the root/canvas-background paint that CRASHED on the nullptr clip. Without the fix the box faults
+	// HERE (EXCEPTION_ACCESS_VIOLATION) and never returns -> reaching the asserts below IS the crash->survive evidence.
+	const FLayoutResult Result = Engine->Relayout(800);
+
+	int32 BlueFills = 0;
+	FBox2f BlueRect(ForceInit);
+	for (const FLayoutPaintOp& Op : Result.PaintOps)
+	{
+		if (Op.Kind == ELayoutPaintOpKind::FillRect && Op.Color.B > 200 && Op.Color.R < 60 && Op.Color.G < 60)
+		{
+			++BlueFills;
+			BlueRect = Op.Rect;
+		}
+	}
+	AddInfo(FString::Printf(TEXT("[029-#33] body{background-color:#0000ff} -> %d blue FillRect of %d paint ops (the draw SURVIVED the root/canvas-bg path that was EXCEPTION_ACCESS_VIOLATION on a nullptr clip)"), BlueFills, Result.PaintOps.Num()));
+	TestTrue(TEXT("[029-#33] body{background-color} DRAWS a blue fill (the root/canvas bg renders) -- and reaching this assert proves the draw did NOT crash (the crash->survive flip)"), BlueFills > 0);
+	TestTrue(TEXT("[029-#33] the body bg fill has a positive area (fills the viewport, not a degenerate rect)"), BlueRect.GetSize().X > 0.0f && BlueRect.GetSize().Y > 0.0f);
 
 	return true;
 }
