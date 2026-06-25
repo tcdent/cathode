@@ -1,0 +1,12 @@
+/* screens/status-card/screen.css — the status card's stylesheet (the gate css-lints this; conformant props only). The
+   028 device render uses the INLINE styles in screen.ts (the proven s4-author-bundle path — the device applies
+   element.style); this .css is the gate-validated authoring stylesheet for the screen. */
+.status-card {
+	display: block;
+	position: absolute;
+	background-color: #00ff00;
+	color: #101010;
+	padding: 6px;
+	font-family: monospace;
+	font-size: 14px;
+}

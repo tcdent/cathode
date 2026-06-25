@@ -4,7 +4,7 @@
 //   1. tsc the POSITIVE fixture against lib.cathode.d.ts (no `dom` lib)  -> PASS  (the supported DOM/JS surface, S4).
 //   2. tsc the NEGATIVE fixture (fetch/localStorage/innerHTML)           -> FAIL  (the DOM/JS banned-API bite, S4).
 //   3. css-tree lint the POSITIVE/NEGATIVE .css vs css-allow-list.toml   -> positive PASS, negative FAIL (the CSS bite, S5).
-//   4. the REAL screen screens/hello/ (a .ts + its standalone .css, PM ruling (a)) -> tsc + css-tree + esbuild PASS
+//   4. the REAL screen screens/status-card/ (a .ts + its standalone .css, PM ruling (a)) -> tsc + css-tree + esbuild PASS
 //      END-TO-END -> the IIFE Cathode loads (the production author-build flow, S6).
 //   5. the BANNED real screen screens/banned/ -> HARD-FAILS on the real author-build path (the bite end-to-end, S6).
 // Exit 0 = gate PASS; non-zero = gate FAIL. `npm run gate` IS the canonical author-build step (see the Cathode README's
@@ -75,28 +75,28 @@ if (negCss.length > 0) {
 	console.error("[gate] FAIL: the negative CSS fixture linted CLEAN — the CSS gate did NOT bite (unsupported props accepted)!");
 }
 
-// 4. THE REAL SCREEN end-to-end (S6, the production author-build flow): the conformant screen at screens/hello/ (a .ts +
+// 4. THE REAL SCREEN end-to-end (S6, the production author-build flow): the conformant screen at screens/status-card/ (a .ts +
 // its standalone screen.css, PM ruling (a)) — its .ts typechecks (no `dom` lib), its .css lints clean, and it bundles to
 // the IIFE Cathode loads. This processes the REAL author location end-to-end, not only the in-isolation fixtures above.
 const screenTs = tsc("tsconfig.screen.json");
-const screenCss = lintCssFile("screens/hello/screen.css", allow);
+const screenCss = lintCssFile("screens/status-card/screen.css", allow);
 if (screenTs.ok && screenCss.length === 0) {
 	mkdirSync("dist", { recursive: true });
 	await build({
-		entryPoints: ["screens/hello/screen.ts"],
+		entryPoints: ["screens/status-card/screen.ts"],
 		bundle: true,
 		format: "iife",
 		target: "es2022",
-		outfile: "dist/hello.iife.js",
+		outfile: "dist/status-card.iife.js",
 		logLevel: "silent",
 	});
-	console.log("[gate] PASS: REAL screen screens/hello/ passes END-TO-END (tsc + css-tree + esbuild -> dist/hello.iife.js)");
+	console.log("[gate] PASS: REAL screen screens/status-card/ passes END-TO-END (tsc + css-tree + esbuild -> dist/status-card.iife.js)");
 } else {
 	failed = true;
 	if (!screenTs.ok) { console.error("[gate] FAIL: the real screen's .ts did NOT typecheck (the supported surface regressed):\n" + screenTs.out); }
 	if (screenCss.length > 0) {
 		console.error("[gate] FAIL: the real screen's .css has UNSUPPORTED properties:");
-		for (const v of screenCss) { console.error(`        ${v.property} (screens/hello/screen.css:${v.line})`); }
+		for (const v of screenCss) { console.error(`        ${v.property} (screens/status-card/screen.css:${v.line})`); }
 	}
 }
 
