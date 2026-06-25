@@ -9,6 +9,8 @@
 #include "UObject/StrongObjectPtr.h"
 #include "PixelFormat.h"
 
+#include "CathodeTripleBuffer.h" // 029 #24 — the lock-free triple-buffer (the published-index release/acquire fence pairing)
+
 namespace Cathode
 {
 namespace
@@ -121,12 +123,15 @@ namespace
 	// held until the game-thread pump creates the texture + uploads. PURE CPU bytes — NO UObject, safe off the game thread.
 	struct FPendingFrame
 	{
+		FSurfaceId Surface;  // 029 #24 — the surface this frame is for (rides the slot; the game-thread upload keys Textures on it)
 		TArray<FAssembledRegion> Uploads;
 		int32 Width = 0;
 		int32 Height = 0;
 		ESurfacePixelFormat Format = ESurfacePixelFormat::PremultipliedBGRA8;
 	};
 
+	// 029 #24 — the egress holds a single-surface lock-free FTripleBuffer<FPendingFrame> (CathodeTripleBuffer.h): the worker
+	// publishes the latest frame, the game thread acquires it, with no per-frame HolderLock. #27 fans out to a per-surface map.
 	class FTextureEgress final : public ITextureEgress
 	{
 	public:
@@ -145,22 +150,19 @@ namespace
 		// (UObject) + marshal the render-thread upload from the stored copies.
 		virtual void PumpGameThreadUploads() override
 		{
-			// Snapshot + clear the holder under the lock (minimize the hold; the worker may emit concurrently). This
-			// lock IS the stubbed double-buffer cross-thread sync (S5 hardens it to a real triple-buffer).
-			TMap<FSurfaceId, FPendingFrame> Snapshot;
+			// 029 #24 — ACQUIRE the latest published frame LOCK-FREE (the triple-buffer acquire == the old snapshot-under-
+			// lock, minus the per-frame contention). Single-surface -> exactly one published frame; #27 fans out to a
+			// per-surface triple-buffer map + a per-surface drain loop.
+			FPendingFrame Frame;
+			if (!Frames.Acquire(Frame))
 			{
-				FScopeLock Lock(&HolderLock);
-				Snapshot = MoveTemp(PendingFrames);
-				PendingFrames.Reset();
+				return; // no new frame since the last pump
 			}
-
-			for (TPair<FSurfaceId, FPendingFrame>& Entry : Snapshot)
 			{
-				const FSurfaceId Surface = Entry.Key;
-				FPendingFrame& Frame = Entry.Value;
+				const FSurfaceId Surface = Frame.Surface;
 				if (Frame.Uploads.Num() == 0)
 				{
-					continue;
+					return;
 				}
 
 				FEgressTexture& Tex = Textures.FindOrAdd(Surface);
@@ -170,7 +172,7 @@ namespace
 					if (NewTexture == nullptr)
 					{
 						Textures.Remove(Surface);
-						continue;
+						return;
 					}
 					NewTexture->SRGB = true;       // PremultipliedBGRA8 is sRGB-encoded — matches the surface contract
 					NewTexture->UpdateResource();  // create the RHI resource (a render-thread init; precedes the upload by FIFO)
@@ -182,7 +184,7 @@ namespace
 				FTextureResource* Resource = Tex.Texture->GetResource();
 				if (Resource == nullptr)
 				{
-					continue;
+					return;
 				}
 
 				FEgressUploader UploaderForCommand = Uploader;
@@ -214,9 +216,8 @@ namespace
 
 		virtual void Release(FSurfaceId Surface) override
 		{
-			Textures.Remove(Surface); // drops the TStrongObjectPtr -> the texture is GC-collectable
-			FScopeLock Lock(&HolderLock);
-			PendingFrames.Remove(Surface);
+			Textures.Remove(Surface); // 029 #24 — drops the TStrongObjectPtr -> the texture is GC-collectable. Game-thread only;
+			// the triple-buffer's stale frame (if any) is never acquired after the owner's gone (no PumpGameThreadUploads after Dispose).
 		}
 
 	private:
@@ -240,18 +241,20 @@ namespace
 				return;
 			}
 
-			FScopeLock Lock(&HolderLock);
-			FPendingFrame& Pending = PendingFrames.FindOrAdd(Readiness.Surface);
+			// 029 #24 — publish LOCK-FREE: the deep-copy (above) is done; build the frame + publish it to the triple-buffer
+			// (a slot move + a release-exchange of the index). No HolderLock -> no per-frame contention with the game drain.
+			FPendingFrame Pending;
+			Pending.Surface = Readiness.Surface;
 			Pending.Uploads = MoveTemp(Uploads);
 			Pending.Width = Buffer.Width;
 			Pending.Height = Buffer.Height;
 			Pending.Format = Buffer.Format;
+			Frames.Publish(MoveTemp(Pending));
 		}
 
 		FEgressUploader Uploader;
 		TMap<FSurfaceId, FEgressTexture> Textures;     // GAME-thread — the UObject textures
-		FCriticalSection HolderLock;                   // the stubbed double-buffer cross-thread sync (S5 hardens it)
-		TMap<FSurfaceId, FPendingFrame> PendingFrames; // the worker writes; the game thread drains
+		FTripleBuffer<FPendingFrame> Frames;           // 029 #24 — the worker publishes, the game thread acquires (LOCK-FREE, single-surface; #27 -> a per-surface map)
 	};
 } // namespace
 

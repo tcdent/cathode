@@ -4,6 +4,7 @@
 #include "CathodeEgress.h"
 #include "CathodeEgressUploader.h"
 #include "CathodeSurfaces.h"
+#include "CathodeTripleBuffer.h" // 029 #24 — the lock-free triple-buffer (slot-logic unit test below)
 
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
@@ -492,6 +493,71 @@ bool FCathodeEgressRegionalReadbackTest::RunTest(const FString& Parameters)
 	AddError(TEXT("Cathode.Egress.Regional.SubRectContentAndUnchangedIntact requires Win64 (the box's real D3D RHI)."));
 	return false;
 #endif
+}
+
+// 029 #24 — the lock-free triple-buffer SLOT LOGIC (single-threaded). The CONCURRENCY (whole-frame-or-nothing) is proven by
+// the release/acquire fence-pairing ARGUMENT documented in CathodeTripleBuffer.h, NOT a stress race (the 028 Q4 lesson:
+// prove concurrency by the fence ORDERING). This test proves the slot ROTATION the fence ordering rides: no-publish ->
+// Acquire false; publish -> Acquire the WHOLE value intact; publish-twice -> the LATEST (intermediate dropped); acquire
+// with no new publish -> false (no stale re-read). A multi-field value (Id + a heap TArray + Tag) bites a partial move.
+namespace
+{
+	struct FTripleTestFrame
+	{
+		int32 Id = 0;
+		TArray<int32> Data; // a HEAP field — a partial/torn move would leave it inconsistent with the scalars
+		int32 Tag = 0;
+	};
+	FTripleTestFrame MakeTripleTestFrame(int32 Id, int32 Tag)
+	{
+		FTripleTestFrame F;
+		F.Id = Id;
+		F.Tag = Tag;
+		F.Data = { Id, Id + 1, Id + 2 };
+		return F;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeTripleBufferSlotLogicTest,
+	"Cathode.Egress.TripleBuffer.SlotLogic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeTripleBufferSlotLogicTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+	FTripleBuffer<FTripleTestFrame> Buf;
+	FTripleTestFrame Out;
+
+	// (1) empty -> Acquire returns false (no published value).
+	TestFalse(TEXT("[029-#24] empty triple-buffer: Acquire returns false (nothing published)"), Buf.Acquire(Out));
+
+	// (2) publish one -> Acquire returns it, WHOLE (every field together — a partial move would mismatch).
+	Buf.Publish(MakeTripleTestFrame(7, 70));
+	TestTrue(TEXT("[029-#24] after one publish, Acquire returns true"), Buf.Acquire(Out));
+	TestEqual(TEXT("[029-#24] the acquired Id is intact (7)"), Out.Id, 7);
+	TestEqual(TEXT("[029-#24] the acquired Tag is intact (70)"), Out.Tag, 70);
+	TestTrue(TEXT("[029-#24] the acquired HEAP field is intact ({7,8,9}) — whole-value move"), Out.Data == TArray<int32>({ 7, 8, 9 }));
+
+	// (3) a 2nd Acquire with NO new publish -> false (no stale re-read of the last value).
+	TestFalse(TEXT("[029-#24] a 2nd Acquire with no new publish returns false (no stale re-read)"), Buf.Acquire(Out));
+
+	// (4) publish TWICE without acquiring -> Acquire returns the LATEST (the intermediate is dropped — latest-wins, as the
+	//     old FindOrAdd-overwrite holder did).
+	Buf.Publish(MakeTripleTestFrame(11, 110));
+	Buf.Publish(MakeTripleTestFrame(22, 220));
+	TestTrue(TEXT("[029-#24] after two publishes, Acquire returns true"), Buf.Acquire(Out));
+	TestEqual(TEXT("[029-#24] Acquire returns the LATEST (22, not the dropped 11)"), Out.Id, 22);
+	TestEqual(TEXT("[029-#24] the latest Tag (220)"), Out.Tag, 220);
+	TestTrue(TEXT("[029-#24] the latest HEAP field ({22,23,24})"), Out.Data == TArray<int32>({ 22, 23, 24 }));
+
+	// (5) a 3rd cycle -> the 3 slots keep rotating correctly (no exhaustion / aliasing across cycles).
+	Buf.Publish(MakeTripleTestFrame(33, 330));
+	TestTrue(TEXT("[029-#24] a 3rd publish/acquire cycle acquires"), Buf.Acquire(Out));
+	TestEqual(TEXT("[029-#24] the 3rd cycle value (33)"), Out.Id, 33);
+	TestFalse(TEXT("[029-#24] and is then empty again (no stale)"), Buf.Acquire(Out));
+
+	return true;
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
