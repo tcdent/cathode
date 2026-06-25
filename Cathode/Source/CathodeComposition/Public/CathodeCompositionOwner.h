@@ -10,24 +10,33 @@ class UTexture2D;
 namespace Cathode
 {
 class ITextureEgress;
+class ICathodeGameBridge; // 029 #27 — the injected game.* backing (the #28-designed hook; defaults to the stub)
 struct FOwnerWorkerState;
 
+// 029 #27 — one surface to fan: its author bundle (a root-relative path read via the resolver, OR an inline JS string for a
+// test-only proof) + its pixel dimensions. The owner builds one FDomDocument + one ILayoutEngine + one egress texture per spec.
+struct FCompositionSurfaceSpec
+{
+	FString BundlePath;     // root-relative author bundle, read via the production resolver over /Game/Cathode
+	FString InlineBundleJs; // TEST-only: if non-empty, eval THIS string as the bundle instead of reading BundlePath
+	int32 Width = 0;
+	int32 Height = 0;
+};
+
 /**
- * 028 S5 — the PRODUCTION surface-load owner. The first production code to drive the worker composition path (S2-S4
- * proved it only test-locally via a gate-test seam install). On Install it puts the Phase-5 relayout seam onto the
- * auto-started worker; the worker (per tick) BUILDS the per-surface FDomDocument, READS+EVALUATES the author bundle (the
- * app self-mounts), and COMPOSES — the production realization of the S4 gate-test seam body. The owner holds the egress,
- * PUMPS the game-thread upload half (DrainOutbound + PumpGameThreadUploads) once per host frame, and DISPOSES the
- * per-surface doc ON THE WORKER at teardown (no leak).
+ * 028 S5 / 029 #27 — the PRODUCTION surface-load owner. Drives the worker composition path. On Install it puts the Phase-5
+ * relayout seam onto the auto-started worker; the worker (per tick) BUILDS each surface's FDomDocument over its own
+ * ILayoutEngine, repoints globalThis.document to it (M1), READS+EVALUATES that surface's author bundle (the app self-mounts),
+ * and COMPOSES. The owner holds the egress, PUMPS the game-thread upload half once per host frame, and DISPOSES the
+ * per-surface docs ON THE WORKER at teardown.
  *
- * It lives in CathodeComposition (the composition root, RQ2) so the CathodeRuntime/Egress/Binding deps are CONFINED
- * here; the device (actor + subsystem) holds ONE owner and drives Pump() from its game-thread Tick, staying narrow
- * (it never directly deps CathodeRuntime/Dom/Resolver — those flow through this owner).
+ * It lives in CathodeComposition (the composition root) so the CathodeRuntime/Egress/Binding deps are CONFINED here; the
+ * device (actor + subsystem) holds ONE owner and drives Pump() from its game-thread Tick.
  *
- * SCOPE: ONE surface (028's "one surface, one shared runtime" non-goal). Multi-surface (the single relayout seam
- * fanning to N surfaces) is a NAMED residual. The per-surface DOM uses a deferred no-op layout (the real DOM-layout is
- * S6's live two-frame). The egress holder's lock/deep-copy is correct as-is; the lock-free triple-buffer is a named
- * deferred optimization (an architecture follow-on), NOT owed here.
+ * 029 #27 — MULTI-SURFACE: the single relayout seam FANS to N surfaces (the founding's "one runtime, one global object, many
+ * surfaces": ONE shared JS runtime + ONE global game.* singleton + PER-SURFACE documents/engines/textures). game.* is a
+ * shared singleton (every surface reads the one world — intentional, NOT isolated); `document` is per-surface (the seam
+ * repoints globalThis.document before each surface's eval). The egress holds a per-surface lock-free triple-buffer map (#24/#27).
  */
 class CATHODECOMPOSITION_API FCompositionSurfaceOwner
 {
@@ -35,44 +44,47 @@ public:
 	FCompositionSurfaceOwner();
 	~FCompositionSurfaceOwner();
 
-	// Install the production relayout seam (game-thread; idempotent). The worker builds+reads+evals+composes the bundle
-	// at surface-load. BundlePath is the root-relative author bundle, read via the production resolver over /Game/Cathode.
-	void Install(const FString& BundlePath, int32 Width, int32 Height, const FString& FontFilePath);
+	// Install the production relayout seam (game-thread; idempotent). The worker fans the build over Specs: per surface it
+	// builds the doc/engine, repoints globalThis.document (M1), evals the bundle, and registers the surface.
+	// The device / firewalled caller: the seam creates the default production STUB game.* bridge (no ICathodeGameBridge type
+	// needed at THIS call site — keeps the device's source-dispositive firewall: it never #includes CathodeDom).
+	void Install(const TArray<FCompositionSurfaceSpec>& Specs, const FString& FontFilePath);
+	// The sim (later) / a test (now): INJECT the game.* backing, handed to InstallGameBridgeAsGlobal (the #28-designed hook).
+	// The owner takes ownership; the bridge outlives the worker's use. Callers of THIS overload see the full ICathodeGameBridge.
+	void Install(const TArray<FCompositionSurfaceSpec>& Specs, const FString& FontFilePath,
+		TUniquePtr<ICathodeGameBridge> Bridge);
 
-	// Game-thread per host frame: drain the worker's frame-ready (learn the worker-assigned surface id) + the egress
-	// game-thread upload half. This is the production frame-ready cadence (no test poll). Returns the number of
-	// frame-ready messages drained this call (production ignores it; the S6 two-frame test waits on the v2 re-compose's
-	// fresh frame-ready via this count).
+	// Game-thread per host frame: drain the worker's frame-ready + the egress game-thread upload half (per-surface). Returns
+	// the number of frame-ready messages drained this call (the S6 two-frame test waits on the v2 re-compose's fresh count).
 	int32 Pump();
 
-	// The surface's GPU texture (the device material samples it). Null until the first composed frame arrives.
-	UTexture2D* GetTexture() const;
+	// The worker-assigned FSurfaceId for the spec at Index (the order Specs were registered). Default-constructed until the
+	// first build completes (read after a Pump that drained a frame-ready). For the single-surface device: GetSurfaceId(0).
+	FSurfaceId GetSurfaceId(int32 Index) const;
 
-	// Teardown: uninstall the seam + POST the per-surface doc Dispose onto the worker (quickjs-affine). Idempotent.
+	// The surface's GPU texture (the device material samples it). Null until that surface's first composed frame arrives.
+	UTexture2D* GetTexture(FSurfaceId Surface) const;
+
+	// Teardown: uninstall the seam + POST the per-surface docs' Dispose onto the worker (quickjs-affine). Idempotent.
 	void Dispose();
 
 	// Is the production seam installed (the lead's lifetime/wire check).
 	bool IsInstalled() const { return bInstalled; }
 
 #if WITH_DEV_AUTOMATION_TESTS
-	// TEST-ONLY (027 realloc): release the old egress texture + POST a worker-side surface re-registration (a NEW
-	// FSurfaceId -> "changed" -> the next composed frame is a NEW egress texture ptr), so a consumer's rebind-on-realloc
-	// is exercised against the production wire. NOT a production path. (No per-method API macro — the CLASS is already
-	// CATHODECOMPOSITION_API-exported, so a per-method macro is a double-export, C2487.)
-	void ForceReacquireForTest();
-	// TEST-ONLY (028 S6): queue a worker-side JS mutation (the 018 API) to eval on the NEXT seam tick — it rides the
-	// SAME installed seam (no re-install) -> MarkNodeDirty on the shared engine -> the same DriveAll re-composes (v2).
-	// Thread-safe (the test sets it game-thread; the seam reads it worker-side).
-	void SetPendingMutationForTest(const FString& JsMutation);
-	// TEST-ONLY (028 S6): the per-surface doc BUILD count — proves v2 is NOT a rebuild (the seam build runs ONCE; the
-	// count stays 1 across v1->v2; the mutation drives the dirty-mark on the SAME doc, not a re-CreateDomDocument/re-eval).
+	// TEST-ONLY (027 realloc): release the old egress texture + POST a worker-side surface re-registration for surface Index.
+	void ForceReacquireForTest(int32 SurfaceIndex = 0);
+	// TEST-ONLY (028 S6 / 029 #27): queue a worker-side JS mutation for surface SurfaceIndex to eval on the NEXT seam tick
+	// (the seam repoints globalThis.document to that surface's doc before evaling) -> MarkNodeDirty on that surface's engine
+	// -> the same DriveAll re-composes (v2). Thread-safe (set game-thread, read worker-side).
+	void SetPendingMutationForTest(const FString& JsMutation, int32 SurfaceIndex = 0);
+	// TEST-ONLY (028 S6): the per-surface doc BUILD count — proves v2 is NOT a rebuild (the seam build runs ONCE total).
 	int32 GetBuildCountForTest() const;
 #endif
 
 private:
 	TUniquePtr<ITextureEgress> Egress;     // game-thread: Pump + GetTexture
-	TSharedPtr<FOwnerWorkerState> State;   // the worker-side doc/registry/bundle (built on the worker in the seam)
-	FSurfaceId Surface;                    // worker-assigned, learned via the frame-ready in Pump
+	TSharedPtr<FOwnerWorkerState> State;    // the worker-side per-surface docs/registry/bundles (built on the worker in the seam)
 	bool bInstalled = false;
 };
 

@@ -150,19 +150,26 @@ namespace
 		// (UObject) + marshal the render-thread upload from the stored copies.
 		virtual void PumpGameThreadUploads() override
 		{
-			// 029 #24 — ACQUIRE the latest published frame LOCK-FREE (the triple-buffer acquire == the old snapshot-under-
-			// lock, minus the per-frame contention). Single-surface -> exactly one published frame; #27 fans out to a
-			// per-surface triple-buffer map + a per-surface drain loop.
-			FPendingFrame Frame;
-			if (!Frames.Acquire(Frame))
+			// 029 #27 — snapshot the per-surface triple-buffers under the brief STRUCTURE lock (the worker may FindOrAdd a new
+			// surface concurrently — the lock makes the snapshot safe vs a bucket rehash), then drain each LOCK-FREE OUTSIDE the
+			// lock. The TSharedPtr snapshot refs keep the buffers alive even if a surface is Released mid-drain. #24 preserved:
+			// the per-frame data handoff (Acquire) is the lock-free atomic; the lock is only the cheap map-snapshot.
+			TArray<TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>> SurfaceBuffers;
 			{
-				return; // no new frame since the last pump
+				FScopeLock Lock(&FramesLock);
+				Frames.GenerateValueArray(SurfaceBuffers);
 			}
+			for (const TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>& TripleBuf : SurfaceBuffers)
 			{
+				FPendingFrame Frame;
+				if (!TripleBuf->Acquire(Frame))
+				{
+					continue; // no new frame for this surface since the last pump
+				}
 				const FSurfaceId Surface = Frame.Surface;
 				if (Frame.Uploads.Num() == 0)
 				{
-					return;
+					continue;
 				}
 
 				FEgressTexture& Tex = Textures.FindOrAdd(Surface);
@@ -172,7 +179,7 @@ namespace
 					if (NewTexture == nullptr)
 					{
 						Textures.Remove(Surface);
-						return;
+						continue; // 029 #27 — skip this surface, drain the rest
 					}
 					// 029 #27 — CLEAR the texture on create: zero the mip BEFORE UpdateResource so the create uploads a CLEAN
 					// (0) texture. The dirty-rect upload then writes ONLY the rendered rects, leaving the MARGIN deterministic-0
@@ -200,7 +207,7 @@ namespace
 				FTextureResource* Resource = Tex.Texture->GetResource();
 				if (Resource == nullptr)
 				{
-					return;
+					continue; // 029 #27 — skip this surface, drain the rest
 				}
 
 				FEgressUploader UploaderForCommand = Uploader;
@@ -232,8 +239,14 @@ namespace
 
 		virtual void Release(FSurfaceId Surface) override
 		{
-			Textures.Remove(Surface); // 029 #24 — drops the TStrongObjectPtr -> the texture is GC-collectable. Game-thread only;
-			// the triple-buffer's stale frame (if any) is never acquired after the owner's gone (no PumpGameThreadUploads after Dispose).
+			Textures.Remove(Surface); // game-thread — drops the TStrongObjectPtr -> the texture is GC-collectable.
+			// 029 #27 — also drop this surface's triple-buffer under the STRUCTURE lock. A TSharedPtr ref still held by an
+			// in-flight worker publish or a game-thread snapshot keeps the buffer alive until that ref releases (no dangle);
+			// the map entry is gone, so no future pump acquires it.
+			{
+				FScopeLock Lock(&FramesLock);
+				Frames.Remove(Surface);
+			}
 		}
 
 	private:
@@ -257,20 +270,42 @@ namespace
 				return;
 			}
 
-			// 029 #24 — publish LOCK-FREE: the deep-copy (above) is done; build the frame + publish it to the triple-buffer
-			// (a slot move + a release-exchange of the index). No HolderLock -> no per-frame contention with the game drain.
+			// 029 #24/#27 — the deep-copy (above) is done; build the frame. Fetch (or lazily create) THIS surface's
+			// triple-buffer under the brief STRUCTURE lock (the worker is the sole map-ADDER — a new surface's first publish),
+			// then publish LOCK-FREE on the held ref OUTSIDE the lock (the #24 atomic: a slot move + a release-exchange). The
+			// TSharedPtr ref keeps the buffer alive through the publish even if the game thread Removes the surface meanwhile.
 			FPendingFrame Pending;
 			Pending.Surface = Readiness.Surface;
 			Pending.Uploads = MoveTemp(Uploads);
 			Pending.Width = Buffer.Width;
 			Pending.Height = Buffer.Height;
 			Pending.Format = Buffer.Format;
-			Frames.Publish(MoveTemp(Pending));
+
+			TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe> TripleBuf;
+			{
+				FScopeLock Lock(&FramesLock);
+				TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>& Slot = Frames.FindOrAdd(Readiness.Surface);
+				if (!Slot.IsValid())
+				{
+					Slot = MakeShared<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>();
+				}
+				TripleBuf = Slot;
+			}
+			TripleBuf->Publish(MoveTemp(Pending)); // LOCK-FREE (the #24 atomic), outside the structure lock
 		}
 
 		FEgressUploader Uploader;
 		TMap<FSurfaceId, FEgressTexture> Textures;     // GAME-thread — the UObject textures
-		FTripleBuffer<FPendingFrame> Frames;           // 029 #24 — the worker publishes, the game thread acquires (LOCK-FREE, single-surface; #27 -> a per-surface map)
+		// 029 #27 (FORK B) — the per-surface lock-free triple-buffers. The per-frame DATA handoff stays LOCK-FREE: each
+		// FTripleBuffer's publish/acquire is the #24 atomic, untouched. FramesLock guards ONLY the MAP STRUCTURE (FindOrAdd /
+		// GenerateValueArray / Remove) — a cheap pointer-fetch, NOT the per-frame deep-copy contention #24 removed — because
+		// the worker's FindOrAdd (a new surface's first publish) can REHASH the bucket array CONCURRENT with the game thread's
+		// snapshot/find (UE TMap is unsafe under concurrent read+add; Find(X)-after-add(X) is ordered by the outbound release
+		// edge, but Find(X) still overlaps add(Y)). A lock is robust for ANY surface count (vs Reserve's hidden capacity bound).
+		// The buffers are TSharedPtr(ThreadSafe) so an in-flight worker publish-ref / game-thread snapshot-ref survives a
+		// concurrent Remove (no dangling pointer).
+		TMap<FSurfaceId, TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>> Frames;
+		FCriticalSection FramesLock;
 	};
 } // namespace
 

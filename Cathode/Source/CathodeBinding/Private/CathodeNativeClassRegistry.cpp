@@ -31,6 +31,18 @@ public:
 		}
 		JSRuntime* Runtime = JS_GetRuntime(Context);
 
+		// 029 #27 — IDEMPOTENT BY NAME, scoped to THIS registry (= this ONE runtime/context). CreateDomDocument re-registers
+		// the DOM classes once PER DOCUMENT; without this each call allocates a FRESH JS class id, and the consumers'
+		// process-global class-id (e.g. GDomNodeClassId) is reassigned to the LAST document's id — ORPHANING every earlier
+		// document's node wrappers (they still carry the old id, so their method thunks fail the JS_GetOpaque class-id check
+		// and THROW). Returning the cached id keeps the id STABLE across all documents in this runtime. A NEW runtime gets a
+		// NEW registry -> a fresh allocation (no stale process-global collision — the per-runtime-freshness invariant holds).
+		const FString Name(Def.Name);
+		if (const JSClassID* Cached = ClassIdByName.Find(Name))
+		{
+			return *Cached;
+		}
+
 		JSClassID ClassId = 0;
 		// TODO-PREBUILD(signature): JS_NewClassID is 2-arg (rt, &id) in -ng (quickjs.h:688); original quickjs
 		// was 1-arg (&id). Returns the allocated id.
@@ -49,6 +61,7 @@ public:
 		JS_NewClass(Runtime, ClassId, &ClassDef);
 
 		RegisteredClasses.Add(ClassId);
+		ClassIdByName.Add(Name, ClassId); // 029 #27 — cache so a re-register (per-document) returns this SAME id (id stays stable)
 		return ClassId;
 	}
 
@@ -81,6 +94,7 @@ public:
 private:
 	JSContext* Context;
 	TSet<JSClassID> RegisteredClasses;
+	TMap<FString, JSClassID> ClassIdByName; // 029 #27 — name -> id, so re-registration in this runtime is idempotent (stable id)
 };
 
 } // namespace
