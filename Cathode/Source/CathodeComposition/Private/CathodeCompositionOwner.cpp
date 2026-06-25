@@ -9,6 +9,7 @@
 #include "CathodeJsRuntime.h"          // ICathodeJsRuntime, Evaluate, EEvalKind
 #include "CathodeBinding.h"            // INativeClassRegistry, CreateNativeClassRegistry
 #include "CathodeDom.h"                // FDomDocument, CreateDomDocument
+#include "CathodeGameBridge.h"         // 029 #28 — ICathodeGameBridge, CreateStubGameBridge, InstallGameBridgeAsGlobal
 #include "CathodeLayout.h"             // ILayoutEngine, CreateLiteHtmlLayoutEngine
 #include "CathodeSelector.h"           // ISelectorService, CreateSelectorService (012 matcher — querySelector for the mutation)
 #include "CathodeResolver.h"           // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver
@@ -48,6 +49,7 @@ struct FOwnerWorkerState
 	TUniquePtr<ILayoutEngine> Engine;         // the SHARED real DOM-layout engine (replaces the S5 FStubDomLayout)
 	TUniquePtr<ISelectorService> Selector;    // 012 matcher — querySelector for the S6 mutation; the doc holds it by ptr (before Document)
 	TUniquePtr<FDomDocument> Document;
+	TUniquePtr<ICathodeGameBridge> GameBridge; // 029 #28 — the game.* host bridge backing (the stub for now); owned here so it outlives the context the thunks reach it from
 	TUniquePtr<ISurfaceRegistry> SurfaceRegistry;
 	FSurfaceId Surface;
 	TAtomic<int32> BuildCount{ 0 };           // S6: the seam build runs ONCE (==1 across v1->v2 -> not a rebuild)
@@ -101,6 +103,14 @@ void FCompositionSurfaceOwner::Install(const FString& BundlePath, int32 Width, i
 			if (S.Document.IsValid())
 			{
 				S.Document->InstallAsGlobal();
+				// 029 #28 — install the game.* host bridge as a DOCUMENTED-KNOWN global (design B — the COMPOSER call-site,
+				// beside document; NOT the contract-globals seam). The STUB backing for now; the sim hands in the real object
+				// later (the bridge isn't hardcoded — InstallGameBridgeAsGlobal takes the backing).
+				S.GameBridge = CreateStubGameBridge();
+				if (JSContext* GameCtx = static_cast<JSContext*>(Runtime.GetNativeContextHandle()))
+				{
+					InstallGameBridgeAsGlobal(GameCtx, *S.GameBridge);
+				}
 				TArray<uint8> BundleBytes;
 				if (S.BundleSource.IsValid() && S.BundleSource->Read(S.BundlePath, BundleBytes))
 				{

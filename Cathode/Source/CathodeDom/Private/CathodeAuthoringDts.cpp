@@ -25,6 +25,7 @@ namespace
 		{ TEXT("Document"),          TEXT("Node") },
 		{ TEXT("Event"),             nullptr },
 		{ TEXT("KeyboardEvent"),     TEXT("Event") },
+		{ TEXT("Game"),              nullptr }, // 029 #28 — the game.* host bridge surface (a standalone interface; `declare const game: Game`)
 	};
 
 	// Project ONE FBoundMember to a TS member declaration — name + signature BOTH from the binding's own fields (the
@@ -52,11 +53,12 @@ FString GenerateAuthoringDts()
 {
 	// Gather the PRODUCTION binding tables (the SAME tables InstallBoundMembers registers).
 	struct FTbl { const FBoundMember* Members = nullptr; int32 Count = 0; };
-	FTbl Tables[4];
+	FTbl Tables[5];
 	GetDomNodeBoundMembersForCodegen(Tables[0].Members, Tables[0].Count);
 	GetDomDocumentBoundMembersForCodegen(Tables[1].Members, Tables[1].Count);
 	GetDomEventBoundMembersForCodegen(Tables[2].Members, Tables[2].Count);
 	GetDomKeyboardEventBoundMembersForCodegen(Tables[3].Members, Tables[3].Count);
+	GetGameBoundMembersForCodegen(Tables[4].Members, Tables[4].Count); // 029 #28 — the game.* host bridge table (the SAME table the composer installs)
 
 	// Group every member under its declaring Iface (the per-member Iface flows through from the table).
 	TMap<FString, TArray<const FBoundMember*>> ByIface;
@@ -93,9 +95,11 @@ FString GenerateAuthoringDts()
 			{ TEXT("requestAnimationFrame"), TEXT("declare function requestAnimationFrame(callback: (time: number) => void): number;") },
 			{ TEXT("cancelAnimationFrame"),  TEXT("declare function cancelAnimationFrame(id: number): void;") },
 			{ TEXT("document"),              TEXT("declare const document: Document;") },
+			{ TEXT("game"),                  TEXT("declare const game: Game;") },
 		};
 		TArray<FString> GlobalNames = GetContractGlobalNames(); // the CathodeContractGlobals install set (the single source)
 		GlobalNames.Add(TEXT("document"));                     // the documented known: FDomDocument::InstallAsGlobal (per-surface)
+		GlobalNames.Add(TEXT("game"));                         // 029 #28 — the documented known: InstallGameBridgeAsGlobal (the composer, design B)
 		for (const FString& Name : GlobalNames)
 		{
 			if (const FString* Sig = GlobalSignatures.Find(Name)) { Out += *Sig + TEXT("\n"); }

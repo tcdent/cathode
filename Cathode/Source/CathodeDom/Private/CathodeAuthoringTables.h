@@ -13,5 +13,8 @@ void GetDomNodeBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& Ou
 void GetDomDocumentBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount);
 void GetDomEventBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount);
 void GetDomKeyboardEventBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount);
+// 029 #28 — the game.* host bridge table (CathodeGameBridge.cpp): the SAME GGameMembers the composer's
+// InstallGameBridgeAsGlobal installs, so the .d.ts game.* == the installed surface by construction.
+void GetGameBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount);
 
 } // namespace Cathode

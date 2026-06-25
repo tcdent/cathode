@@ -11,6 +11,7 @@ declare function clearTimeout(id: number): void;
 declare function requestAnimationFrame(callback: (time: number) => void): number;
 declare function cancelAnimationFrame(id: number): void;
 declare const document: Document;
+declare const game: Game;
 
 // --- Auxiliary referenced types (referenced by signatures; no binding table; RESOLVE-guarded) ---
 type EventListener = (event: Event) => void;
@@ -108,5 +109,10 @@ interface KeyboardEvent extends Event {
 	stopPropagation(): void;
 	readonly key: string;
 	readonly code: string;
+}
+
+interface Game {
+	readonly tickCount: number;
+	getEntityName(id: string): string | null;
 }
 

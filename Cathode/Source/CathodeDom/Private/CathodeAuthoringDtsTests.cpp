@@ -40,6 +40,7 @@ namespace
 		GetDomDocumentBoundMembersForCodegen(M, C);      for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
 		GetDomEventBoundMembersForCodegen(M, C);         for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
 		GetDomKeyboardEventBoundMembersForCodegen(M, C); for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
+		GetGameBoundMembersForCodegen(M, C);             for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); } // 029 #28
 	}
 }
 
@@ -94,6 +95,7 @@ bool FCathodeAuthoringDtsGuardsTest::RunTest(const FString& Parameters)
 		TSet<FString> Expected;
 		for (const FString& N : GetContractGlobalNames()) { Expected.Add(N); }
 		Expected.Add(TEXT("document"));
+		Expected.Add(TEXT("game")); // 029 #28 — the documented-known game.* global (InstallGameBridgeAsGlobal, the composer)
 		TSet<FString> Declared;
 		{
 			TArray<FString> Lines; Dts.ParseIntoArrayLines(Lines);
@@ -172,6 +174,7 @@ bool FCathodeAuthoringDtsGuardsTest::RunTest(const FString& Parameters)
 	GetDomDocumentBoundMembersForCodegen(M, C);      CheckTable(M, C);
 	GetDomEventBoundMembersForCodegen(M, C);         CheckTable(M, C);
 	GetDomKeyboardEventBoundMembersForCodegen(M, C); CheckTable(M, C);
+	GetGameBoundMembersForCodegen(M, C);             CheckTable(M, C); // 029 #28 — the game.* signatures resolve (Game, number, string)
 
 	AddInfo(FString::Printf(TEXT("[025-S1] guards: %d FBoundMember Ifaces covered; globals + referenced types resolve"), Ifaces.Num()));
 	return true;
