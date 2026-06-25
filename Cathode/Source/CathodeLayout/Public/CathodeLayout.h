@@ -101,7 +101,8 @@ struct FLayoutPaintOp
 	FBox2f Rect = FBox2f(ForceInit); // fill rect/box, image dest, clear, text bounds
 	FColor Color = FColor::Black;    // fill / text color
 
-	FString ImageSource;             // DrawImage — neutral ref (the Resource Resolver resolves bytes later)
+	FString ImageSource;             // DrawImage — the url() ref (kept for trace/debug; the bytes below are the source)
+	TArray<uint8> ImageBytes;        // 029 #4 — DrawImage RESOLVED bytes (the layout resolves ONCE with the baseurl + carries; the composition decodes+draws — no re-resolve). Owned, deep-copied by value through the op sink.
 
 	FString Text;                    // DrawText — un-shaped run (integration shapes via 004)
 	FLayoutFontRef Font;             // DrawText — font ref

@@ -265,6 +265,10 @@ CATHODERASTERIZER_API TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRast
 // Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this at integration.
 CATHODERASTERIZER_API bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidth, int32& OutHeight);
 
+// 029 #4 — decode an encoded image's PIXELS into an owned IRasterBitmap (the ADOPTED decoded image), for the composition's
+// DrawImage seam (vs DecodeImageSize, which is size-only + discards). Returns null on null/empty/undecodable input.
+CATHODERASTERIZER_API TUniquePtr<IRasterBitmap> DecodeImage(const uint8* EncodedData, int32 EncodedSize);
+
 #if WITH_DEV_AUTOMATION_TESTS
 // 028 S2 — the AT-THE-RASTER worker-thread marker (test-only): the thread id the Blend2D raster (RasterizeFrame) last
 // genuinely ran on. Recorded INSIDE the raster (not the relayout seam) so a test reads where the COMPOSITION actually

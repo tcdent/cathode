@@ -21,7 +21,8 @@ bool FCathodeLayoutPaintEmitTest::RunTest(const FString& Parameters)
 
 	TArray<FLayoutPaintOp> Sink;
 	EmitFillRect(Sink, FBox2f(FVector2f(1, 2), FVector2f(11, 12)), FColor(10, 20, 30, 40));
-	EmitDrawImage(Sink, FBox2f(FVector2f(0, 0), FVector2f(64, 64)), TEXT("logo.png"));
+	const TArray<uint8> ImgBytes{ 0xDE, 0xAD, 0xBE, 0xEF }; // 029 #4 — the layout-carried resolved bytes
+	EmitDrawImage(Sink, FBox2f(FVector2f(0, 0), FVector2f(64, 64)), TEXT("logo.png"), ImgBytes);
 	EmitDrawText(Sink, TEXT("hi"), FLayoutFontRef{ 7 }, FColor(1, 2, 3, 4), FVector2f(5, 6), FBox2f(FVector2f(5, 6), FVector2f(25, 18)));
 	EmitClipPush(Sink, FBox2f(FVector2f(0, 0), FVector2f(50, 50)));
 	EmitClipPop(Sink);
@@ -31,8 +32,9 @@ bool FCathodeLayoutPaintEmitTest::RunTest(const FString& Parameters)
 	{
 		TestTrue(TEXT("FillRect kind + our rect/color"), Sink[0].Kind == ELayoutPaintOpKind::FillRect
 			&& Sink[0].Rect == FBox2f(FVector2f(1, 2), FVector2f(11, 12)) && Sink[0].Color == FColor(10, 20, 30, 40));
-		TestTrue(TEXT("DrawImage kind + dest + source"), Sink[1].Kind == ELayoutPaintOpKind::DrawImage
-			&& Sink[1].Rect == FBox2f(FVector2f(0, 0), FVector2f(64, 64)) && Sink[1].ImageSource == FString(TEXT("logo.png")));
+		TestTrue(TEXT("DrawImage kind + dest + source + carried bytes"), Sink[1].Kind == ELayoutPaintOpKind::DrawImage
+			&& Sink[1].Rect == FBox2f(FVector2f(0, 0), FVector2f(64, 64)) && Sink[1].ImageSource == FString(TEXT("logo.png"))
+			&& Sink[1].ImageBytes == ImgBytes);
 		TestTrue(TEXT("DrawText kind + text/font/color/pos"), Sink[2].Kind == ELayoutPaintOpKind::DrawText
 			&& Sink[2].Text == FString(TEXT("hi")) && Sink[2].Font == FLayoutFontRef{ 7 }
 			&& Sink[2].Color == FColor(1, 2, 3, 4) && Sink[2].Position == FVector2f(5, 6));

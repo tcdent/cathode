@@ -150,6 +150,10 @@ public:
 		// views into its elements must stay valid (the FontBytes views borrow the registry, alive via the adapter).
 		TArray<TArray<FRasterGlyph>> GlyphBacking;
 		GlyphBacking.Reserve(LayoutOps.Num());
+		// 029 #4 — the decoded DrawImage bitmaps. FPaintOp.Image borrows a raw ptr into the held object, so these must
+		// outlive the synchronous RasterizeFrame below (the TUniquePtr's heap object survives any TArray reallocation).
+		TArray<TUniquePtr<IRasterBitmap>> ImageBacking;
+		ImageBacking.Reserve(LayoutOps.Num());
 
 		for (const FLayoutPaintOp& L : LayoutOps)
 		{
@@ -194,8 +198,24 @@ public:
 					Ops.Add(P);
 				}
 				break;
+			case ELayoutPaintOpKind::DrawImage:
+				{
+					// 029 #4 — the layout carried the RESOLVED bytes (L.ImageBytes); decode them HERE -> the bitmap the blit
+					// needs. Held in ImageBacking so it outlives the synchronous RasterizeFrame (like GlyphBacking).
+					if (L.ImageBytes.Num() == 0) { break; }          // a miss / declared-only no-op -> blank box (the proof REDs)
+					TUniquePtr<IRasterBitmap> Decoded = DecodeImage(L.ImageBytes.GetData(), L.ImageBytes.Num());
+					if (!Decoded.IsValid()) { break; }               // undecodable bytes -> skip the draw
+					const IRasterBitmap* const Bitmap = Decoded.Get();
+					ImageBacking.Add(MoveTemp(Decoded));
+					FPaintOp P;
+					P.Kind = EPaintOpKind::DrawImage;
+					P.Rect = L.Rect;
+					P.Image = Bitmap;                                // borrowed from ImageBacking (held across RasterizeFrame)
+					Ops.Add(P);
+				}
+				break;
 			default:
-				break; // DrawImage (slice 3 / resolver) / StrokeBorder (deferred stroke op) / ClipPush / ClipPop
+				break; // StrokeBorder (deferred stroke op) / ClipPush / ClipPop
 			}
 		}
 

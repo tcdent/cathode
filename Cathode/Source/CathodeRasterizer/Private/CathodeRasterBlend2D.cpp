@@ -97,6 +97,23 @@ public:
 		return true;
 	}
 
+	// 029 #4 — decode encoded image bytes (PNG/...) INTO this bitmap's BLImage, ADOPTING the decoded pixels (vs Create()'s
+	// blank). The bytes->bitmap path the composition DrawImage seam needs; DecodeImageSize (below) is size-only + discards.
+	bool CreateFromEncoded(const uint8* EncodedData, int32 EncodedSize)
+	{
+		if (EncodedData == nullptr || EncodedSize <= 0)
+		{
+			return false;
+		}
+		// read_from_data decodes the bytes into Image with its OWN decoded format; the blit (DrawImage -> blit_image) uses
+		// that format directly. Format stays the surface-default metadata (PremultipliedBGRA8) — it is not on the blit path.
+		if (Image.read_from_data(EncodedData, static_cast<size_t>(EncodedSize)) != BL_SUCCESS)
+		{
+			return false;
+		}
+		return !Image.is_empty() && Image.width() > 0 && Image.height() > 0;
+	}
+
 	virtual bool IsValid() const override { return !Image.is_empty(); }
 	virtual int32 GetWidth() const override { return Image.width(); }
 	virtual int32 GetHeight() const override { return Image.height(); }
@@ -314,6 +331,19 @@ bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidt
 	OutWidth = Image.width();
 	OutHeight = Image.height();
 	return OutWidth > 0 && OutHeight > 0;
+}
+
+// 029 #4 — decode encoded image bytes -> an owned IRasterBitmap (the ADOPTED decoded BLImage), for the composition's
+// DrawImage seam (the layout carries the resolved bytes; the composition decodes them here -> FPaintOp.Image -> blit).
+// Returns null on a null/empty/undecodable input (the caller skips the draw, leaving the box blank — the no-op the proof REDs).
+TUniquePtr<IRasterBitmap> DecodeImage(const uint8* EncodedData, int32 EncodedSize)
+{
+	TUniquePtr<FBlend2DBitmap> Bitmap = MakeUnique<FBlend2DBitmap>();
+	if (!Bitmap->CreateFromEncoded(EncodedData, EncodedSize))
+	{
+		return nullptr;
+	}
+	return Bitmap;
 }
 
 } // namespace Cathode

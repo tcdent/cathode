@@ -10,6 +10,8 @@
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+#include "Misc/FileHelper.h"  // 029 #4 — stage the inline bg-image fixture to disk at test time (A')
+#include "HAL/FileManager.h"  // 029 #4 — failure-safe cleanup of the staged fixture
 
 // 023 slice 1 — the COMPOSITION ROOT drives ONE composed frame tick end-to-end: FSurface::RenderAndRelay -> the
 // REAL Layout (ISurfaceDocument backer, RenderFrame -> paint ops) -> the REAL Rasterizer (ISurfaceRenderTarget
@@ -53,6 +55,50 @@ namespace
 		}
 		virtual FString GetSubtreeHtml(int32 /*NodeId*/) const override { return FString(); }
 		virtual FString GetDocumentCss() const override { return BoxCss(); }
+	};
+
+	// 029 #4 — a real 4x4 solid-RED (#ff0000, opaque) RGBA PNG (generated; exact bytes) — the color-bound background-image
+	// fixture (grayscale is dims-only; RED binds the proof to the DECODED bytes). Staged to disk at test time (A'), cleaned up.
+	static const uint8 GRedPng4x4[] = {
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0xA9, 0xF1, 0x9E, 0x7E, 0x00, 0x00, 0x00,
+		0x12, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
+		0x1F, 0x19, 0x33, 0x90, 0x2E, 0x00, 0x00, 0x3C, 0x40, 0x1F, 0xE1, 0x1A,
+		0xF3, 0xA5, 0x48, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+		0x42, 0x60, 0x82,
+	};
+
+	// The bg-image document: a positioned div whose background-image is the staged bg.png -> a DrawImage op at (20,20,32x32).
+	static const TCHAR* BgImageCss()
+	{
+		// ONLY a bg-image (no body/sibling fill): a body{background-color} fill NULL-DEREFS litehtml's root-background path
+		// on the box (029 #4 crash, exposed by FIX-1's first attempt) — so the proof does NOT add a fill. Instead the
+		// null-control's "no ready frame" (no resolver -> the bg-image is the only paint intent -> 0 effective ops) IS the
+		// no-image result (RED in-box 0), handled below. The discriminator stays: resolver -> RED in-box; null -> no RED.
+		return TEXT("html,body{margin:0;padding:0;} ")
+			TEXT("#img{position:absolute;left:20px;top:20px;width:32px;height:32px;background-image:url(bg.png);}");
+	}
+	class FInlineBgImageDocument final : public Cathode::ILayoutDocumentSource
+	{
+	public:
+		virtual int32 GetRootNode() const override { return 0; }
+		virtual int32 GetParentNode(int32 /*NodeId*/) const override { return INDEX_NONE; }
+		virtual void GetChildNodes(int32 /*NodeId*/, TArray<int32>& OutChildren) const override { OutChildren.Reset(); }
+		virtual bool IsLayoutBoundary(int32 /*NodeId*/) const override { return true; }
+		virtual FString GetDocumentHtml() const override
+		{
+			return FString::Printf(TEXT("<html><head><style>%s</style></head><body><div id=\"img\"></div></body></html>"), BgImageCss());
+		}
+		virtual FString GetSubtreeHtml(int32 /*NodeId*/) const override { return FString(); }
+		virtual FString GetDocumentCss() const override { return BgImageCss(); }
+	};
+
+	// An RAII guard: deletes the staged fixture on ANY scope exit (incl. a RED early-return) — failure-safe cleanup (A').
+	struct FStagedFixtureGuard
+	{
+		FString Path;
+		~FStagedFixtureGuard() { if (!Path.IsEmpty()) { IFileManager::Get().Delete(*Path, /*RequireExists*/false, /*EvenReadOnly*/true, /*Quiet*/true); } }
 	};
 
 	bool IsRedPixel(const uint8* Px, int32 Stride, int32 X, int32 Y)
@@ -512,6 +558,126 @@ bool FCathodeCompositionResolverTickTest::RunTest(const FString& Parameters)
 	return true;
 #else
 	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersLinkedResource requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed linked-resource render did not execute."));
+	return false;
+#endif
+}
+
+// 029 #4 — background-image rendering END-TO-END (A'): stage an inline RED PNG at the production default-root, the
+// PRODUCTION resolver resolves it, the layout carries the bytes (b), the composition decodes + blits -> RED in the
+// DrawImage box + a blank margin; the NULL-resolver control leaves the box blank. Bound to the RESOLVED bytes (staged
+// fixture -> resolver -> carried bytes -> decode -> draw). The fixture is staged + cleaned up failure-safe (RAII guard).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeCompositionBackgroundImageTest,
+	"Cathode.Composition.Tick.ComposedFrameRendersBackgroundImage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeCompositionBackgroundImageTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+#if PLATFORM_WINDOWS
+	const FString DefaultRoot = GetDefaultResourceRoot();
+	const FString BgPngPath = DefaultRoot / TEXT("bg.png");
+
+	// STAGE the inline fixture at the production default-root, then GUARD its cleanup (the dtor runs on EVERY exit below
+	// — incl. a RED early-return — so a failing run leaves NO stray fixture).
+	IFileManager::Get().MakeDirectory(*DefaultRoot, /*Tree*/ true);
+	const TArray<uint8> FixtureBytes(GRedPng4x4, UE_ARRAY_COUNT(GRedPng4x4));
+	if (!FFileHelper::SaveArrayToFile(FixtureBytes, *BgPngPath)) { AddError(FString::Printf(TEXT("[029-#4] could not stage the fixture: %s"), *BgPngPath)); return false; }
+	FStagedFixtureGuard Guard{ BgPngPath }; // deletes bg.png on ANY return below
+
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
+	if (!Plugin.IsValid()) { AddError(TEXT("[029-#4] could not locate the Cathode plugin base dir")); return false; }
+	const FString FontPath = Plugin->GetBaseDir() / TEXT("Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf");
+	if (!FPaths::FileExists(FontPath)) { AddError(FString::Printf(TEXT("[029-#4] the OFL font fixture is not on disk: %s"), *FontPath)); return false; }
+
+	const int32 W = 128;
+	const int32 H = 128;
+	FInlineBgImageDocument Document; // MUST outlive the surfaces below
+
+	// (1) THE LAYOUT carries (b): WITH the production resolver, the bg-image div produces a DrawImage op whose ImageBytes ==
+	// the staged fixture (resolved ONCE + carried). Capture the layout-computed dest box.
+	FBox2f ImageBox(ForceInit);
+	bool bFoundImage = false;
+	bool bBytesMatch = false;
+	{
+		FShaperTextMeasurer Measurer(FontPath);
+		TUniquePtr<IBundleSource> BundleSource = CreateUEFileBundleSource(DefaultRoot);
+		TUniquePtr<IResourceResolver> Resolver = BundleSource.IsValid() ? CreateResourceResolver(*BundleSource) : nullptr;
+		TUniquePtr<ILayoutEngine> Engine = CreateLiteHtmlLayoutEngine(Measurer);
+		if (!Engine.IsValid() || !Resolver.IsValid()) { AddError(TEXT("[029-#4] standalone resolver/engine construction failed")); return false; }
+		Engine->SetResourceResolver(Resolver.Get());
+		Engine->SetDocument(Document);
+		const FLayoutResult Result = Engine->Relayout(W);
+		for (const FLayoutPaintOp& Op : Result.PaintOps)
+		{
+			if (Op.Kind == ELayoutPaintOpKind::DrawImage && Op.ImageBytes.Num() > 0)
+			{
+				ImageBox = Op.Rect;
+				bFoundImage = true;
+				bBytesMatch = (Op.ImageBytes == FixtureBytes); // the layout carried the EXACT staged fixture bytes
+			}
+		}
+	}
+	if (!bFoundImage) { AddError(TEXT("[029-#4] the bg-image did not resolve via the resolver — no DrawImage op carrying bytes (the layout-carry leg)")); return false; }
+	TestTrue(TEXT("[029-#4] the layout carried the RESOLVED fixture bytes (b): the DrawImage op's ImageBytes == the staged GRedPng4x4"), bBytesMatch);
+	TestTrue(FString::Printf(TEXT("[029-#4] the DrawImage box is at the div's offset (Min=(%.1f,%.1f), expect ~(20,20))"), ImageBox.Min.X, ImageBox.Min.Y), ImageBox.Min.X >= 16.0f && ImageBox.Min.Y >= 16.0f);
+
+	// (2) COMPOSE through the PRODUCTION caller + count RED in the box AND in a gapped margin: resolver (true) vs null (false).
+	auto ComposeAndScan = [&](bool bWireResolver, int32& OutInBox, int32& OutMargin) -> bool
+	{
+		OutInBox = 0;
+		OutMargin = 0;
+		TUniquePtr<ISurfaceRegistry> Registry = CreateSurfaceRegistry();
+		if (!Registry.IsValid()) { return false; }
+		FSurfaceRegistration Registration = MakeCompositionSurfaceRegistration(Document, W, H, ESurfacePixelFormat::PremultipliedBGRA8, FontPath, bWireResolver);
+		Registry->Register(MoveTemp(Registration));
+		FSurfaceReadiness Captured;
+		bool bRelayed = false;
+		Registry->DriveAll([&Captured, &bRelayed](const FSurfaceReadiness& R) { Captured = R; bRelayed = true; });
+		if (!bRelayed || !Captured.Frame.Buffer.IsValid()) { return false; }
+		const uint8* Px = static_cast<const uint8*>(Captured.Frame.Buffer.Pixels);
+		const int32 Stride = Captured.Frame.Buffer.Stride;
+		if (Px == nullptr) { return false; }
+		const int32 BL = FMath::Clamp(FMath::FloorToInt(ImageBox.Min.X), 0, W - 1);
+		const int32 BT = FMath::Clamp(FMath::FloorToInt(ImageBox.Min.Y), 0, H - 1);
+		const int32 BR = FMath::Clamp(FMath::CeilToInt(ImageBox.Max.X), 1, W);
+		const int32 BB = FMath::Clamp(FMath::CeilToInt(ImageBox.Max.Y), 1, H);
+		for (int32 Y = 0; Y < H; ++Y)
+		{
+			for (int32 X = 0; X < W; ++X)
+			{
+				if (!IsRedPixel(Px, Stride, X, Y)) { continue; }
+				if (X >= BL && X < BR && Y >= BT && Y < BB) { ++OutInBox; }
+				else if (X >= BR + 8 || Y >= BB + 8) { ++OutMargin; } // a gapped region OUTSIDE the image box
+			}
+		}
+		return true;
+	};
+
+	int32 InBoxResolver = 0, MarginResolver = 0, InBoxNull = 0, MarginNull = 0;
+	const bool bComposedResolver = ComposeAndScan(true, InBoxResolver, MarginResolver);
+	const bool bComposedNull = ComposeAndScan(false, InBoxNull, MarginNull);
+
+	AddInfo(FString::Printf(
+		TEXT("[WIN64-EXECUTED][029-#4] composed background-image: RED in-box(resolver)=%d margin(resolver)=%d | in-box(null-control)=%d | image-box x[%.0f,%.0f] y[%.0f,%.0f] dims=%dx%d"),
+		InBoxResolver, MarginResolver, InBoxNull, ImageBox.Min.X, ImageBox.Max.X, ImageBox.Min.Y, ImageBox.Max.Y, W, H));
+
+	// ONLY the RESOLVER compose must yield a ready frame (it draws the image). The NULL control draws NO image, so with no
+	// other paint intent it yields NO frame -> InBoxNull stays 0 (the init) = the no-image result. So the null is checked by
+	// InBoxNull==0 below (no frame OR a frame with no RED -> both 0), NOT by requiring a frame (a fill to force one crashed).
+	if (!bComposedResolver) { AddError(TEXT("[029-#4] the RESOLVER composed background-image tick failed to produce a ready bitmap")); return false; }
+	// (PRODUCTION RESOLVER) the staged PNG resolved -> carried -> decoded -> DRAWN as RED in its layout box.
+	TestTrue(FString::Printf(TEXT("[WIN64-EXECUTED][029-#4] the background-image is DRAWN via the production pipeline (RED in-box=%d > 0; a declared-only no-op left it blank)"), InBoxResolver), InBoxResolver > 0);
+	// the image is CONTAINED in its box (no bright RED in the gapped margin) — not a full-surface fill.
+	TestEqual(FString::Printf(TEXT("[029-#4] the image is CONTAINED — no bright RED in the gapped margin (margin=%d, expect 0)"), MarginResolver), MarginResolver, 0);
+	// (NULL-RESOLVER CONTROL) without the resolver the bytes never resolve -> no image DRAWN -> NO RED (no frame, or a frame
+	// with no red; either way InBoxNull==0). Bound to the resolved bytes: only the resolver path yields RED.
+	TestEqual(FString::Printf(TEXT("[029-#4] the NULL-resolver control draws NO image (bytes never resolved -> no RED; in-box RED=%d, expect 0)"), InBoxNull), InBoxNull, 0);
+
+	return true; // FStagedFixtureGuard dtor deletes bg.png here (and on every early return above)
+#else
+	AddError(TEXT("Cathode.Composition.Tick.ComposedFrameRendersBackgroundImage requires Win64 (Blend2D/HarfBuzz/litehtml are Win64-only); the composed background-image render did not execute."));
 	return false;
 #endif
 }

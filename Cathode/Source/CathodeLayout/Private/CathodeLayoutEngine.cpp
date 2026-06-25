@@ -161,7 +161,8 @@ public:
 			const FBox2f Box = ToBox(Layer.border_box);
 			if (!Layer.image.empty())
 			{
-				EmitDrawImage(Sink, Box, UTF8_TO_TCHAR(Layer.image.c_str())); // bytes resolved by the Resource Resolver later
+				const FString ImageUrl = UTF8_TO_TCHAR(Layer.image.c_str());
+				EmitDrawImage(Sink, Box, ImageUrl, FindImageBytes(ImageUrl)); // 029 #4 — the layout-resolved bytes ride the op
 			}
 			else
 			{
@@ -188,7 +189,8 @@ public:
 	{
 		if (!Marker.image.empty())
 		{
-			EmitDrawImage(Sink, ToBox(Marker.pos), UTF8_TO_TCHAR(Marker.image.c_str()));
+			const FString MarkerUrl = UTF8_TO_TCHAR(Marker.image.c_str());
+			EmitDrawImage(Sink, ToBox(Marker.pos), MarkerUrl, FindImageBytes(MarkerUrl)); // 029 #4 — carry the resolved bytes
 		}
 		else
 		{
@@ -209,10 +211,15 @@ public:
 
 	void load_image(const char* src, const char* baseurl, bool /*redraw_on_ready*/) override
 	{
-		// sprint 009: resolve the image bytes via the resolver (available for the 003 draw at integration).
+		// 029 #4 — resolve ONCE here (the right boundary — load_image has the baseurl) + CACHE the bytes keyed by url, so
+		// draw_background/draw_list_marker carry them into the op WITHOUT re-resolving (vs the prior resolve-and-discard).
+		const FString Url = src ? FString(UTF8_TO_TCHAR(src)) : FString();
+		if (Url.IsEmpty() || ImageCache.Contains(Url)) { return; }
 		TArray<uint8> Bytes;
-		RouteImageBytes(Resolver, src ? FString(UTF8_TO_TCHAR(src)) : FString(),
-			baseurl ? FString(UTF8_TO_TCHAR(baseurl)) : FString(), Bytes);
+		if (RouteImageBytes(Resolver, Url, baseurl ? FString(UTF8_TO_TCHAR(baseurl)) : FString(), Bytes))
+		{
+			ImageCache.Add(Url, MoveTemp(Bytes));
+		}
 	}
 
 	// --- Config / inputs ---
@@ -280,6 +287,20 @@ private:
 	// 013 slice 4 (B/b1): handle -> {face, weight} captured at create_font, read back for font-family/font-weight.
 	struct FCapturedFont { FString Face; int32 Weight = 400; };
 	TMap<litehtml::uint_ptr, FCapturedFont> FontByHandle;
+
+	// 029 #4 — url -> resolved image bytes. Populated by load_image (the resolve-once boundary, with the baseurl), read by
+	// draw_background/draw_list_marker (carry into the op). Mirrors the FontByHandle populate-then-read pattern.
+	TMap<FString, TArray<uint8>> ImageCache;
+
+	// The cached bytes for a url; on a cache miss (a paint before load_image fired), resolve ONCE (empty baseurl ->
+	// root-relative only) + cache the result (incl. a miss, as empty, so a later paint of the same url doesn't re-resolve).
+	const TArray<uint8>& FindImageBytes(const FString& Url)
+	{
+		if (const TArray<uint8>* Cached = ImageCache.Find(Url)) { return *Cached; }
+		TArray<uint8> Bytes;
+		RouteImageBytes(Resolver, Url, FString(), Bytes); // miss -> Bytes stays empty
+		return ImageCache.Add(Url, MoveTemp(Bytes));
+	}
 };
 
 // 013 slice 4 — getComputedStyle value formatters (CSSOM resolved-value forms per Fork-A). litehtml-confined

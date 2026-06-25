@@ -21,12 +21,13 @@ void EmitFillBox(TArray<FLayoutPaintOp>& Sink, const FBox2f& Rect, const FColor&
 	Sink.Add(MoveTemp(Op));
 }
 
-void EmitDrawImage(TArray<FLayoutPaintOp>& Sink, const FBox2f& DestRect, const FString& Source)
+void EmitDrawImage(TArray<FLayoutPaintOp>& Sink, const FBox2f& DestRect, const FString& Source, const TArray<uint8>& Bytes)
 {
 	FLayoutPaintOp Op;
 	Op.Kind = ELayoutPaintOpKind::DrawImage;
 	Op.Rect = DestRect;
 	Op.ImageSource = Source;
+	Op.ImageBytes = Bytes; // 029 #4 — the layout-resolved bytes ride the op (the composition decodes+draws, no re-resolve)
 	Sink.Add(MoveTemp(Op));
 }
 

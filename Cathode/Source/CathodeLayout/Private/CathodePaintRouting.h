@@ -15,7 +15,7 @@ namespace Cathode
 // --- Emit: one neutral paint op per draw intent ---
 void EmitFillRect(TArray<FLayoutPaintOp>& Sink, const FBox2f& Rect, const FColor& Color);
 void EmitFillBox(TArray<FLayoutPaintOp>& Sink, const FBox2f& Rect, const FColor& Color); // box / border edge
-void EmitDrawImage(TArray<FLayoutPaintOp>& Sink, const FBox2f& DestRect, const FString& Source);
+void EmitDrawImage(TArray<FLayoutPaintOp>& Sink, const FBox2f& DestRect, const FString& Source, const TArray<uint8>& Bytes); // 029 #4 — Bytes: the layout-resolved image bytes (carried to the composition decode)
 void EmitDrawText(TArray<FLayoutPaintOp>& Sink, const FString& Text, FLayoutFontRef Font,
 	const FColor& Color, const FVector2f& Position, const FBox2f& Bounds);
 void EmitClipPush(TArray<FLayoutPaintOp>& Sink, const FBox2f& Rect);
