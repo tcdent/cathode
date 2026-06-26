@@ -71,6 +71,11 @@
 			"Name": "CathodeExample",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeExampleDevice",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

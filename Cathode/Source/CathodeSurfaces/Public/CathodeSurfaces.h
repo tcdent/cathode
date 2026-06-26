@@ -79,6 +79,20 @@ inline FString CathodeIntentToKey(ECathodeInputIntent Intent)
 	return FString();
 }
 
+// --- 031 S3: the Cathode-OWNED targetable-surface contract (the inversion — a host's targeting resolves a Cathode surface BY
+// this, never naming the in-world actor). An in-world host actor that BACKS a Cathode surface implements this (exposes its
+// FSurfaceId); the host's targeting (its IPlayerInteractable / player-ray — the INTEGRATOR's HOST-SIDE half, NOT a plugin
+// type) resolves the surface by this interface, then DesignateActiveSurface + DeliverIntent via the owner. Plain C++ (NOT a
+// UINTERFACE) — the implementing actor multiple-inherits it, the same shape as the input-seam interfaces. ---
+class ICathodeTargetableSurface
+{
+public:
+	virtual ~ICathodeTargetableSurface() = default;
+
+	/** The Cathode surface this targetable thing backs (the surface a host designates as the active input target). */
+	virtual FSurfaceId GetSurfaceId() const = 0;
+};
+
 // --- Carries-it payloads (opaque to Surfaces; never interpreted, never asserted by value) ---
 
 // An opaque batch of the surface's rendered paint ops, produced by its document (005) and consumed by its
