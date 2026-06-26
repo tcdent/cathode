@@ -564,6 +564,7 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 	auto FireAt = [&Event, &Invoker](FDomNode* Node, EDomEventPhase Ph, bool bCapturePhase) -> bool
 	{
 		Event.CurrentTarget = Node->NodeId;
+		Event.bCurrentTargetIsDocument = false; // 030 S1-P1 — a NODE currentTarget (clears any prior document pass)
 		Event.Phase = Ph;
 		for (const FDomEventListener& Listener : Node->Listeners)
 		{
@@ -583,6 +584,12 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 		return !Event.bPropagationStopped; // same-node remaining already ran; halt the REST of the walk
 	};
 
+	// 030 S1-P1 — the DOCUMENT is the OUTERMOST EventTarget (above the root node). CAPTURE is top-down, so the document's
+	// capture listeners fire FIRST. A listener-free document is a zero-iteration no-op (no change to node-only dispatch).
+	if (!Document->FireListeners(Event, EDomEventPhase::Capturing, /*bCapturePhase*/ true, Invoker))
+	{
+		return;
+	}
 	// CAPTURE: root -> ... -> parent (top-down ancestors).
 	for (int32 Index = Path.Num() - 1; Index >= 1; --Index)
 	{
@@ -608,6 +615,9 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 			return;
 		}
 	}
+	// 030 S1-P1 — BUBBLE reaches the DOCUMENT LAST (the outermost EventTarget), so `document.addEventListener('keydown')`
+	// fires after the whole node chain — exactly how a real browser delivers keydown (focused element -> ... -> document).
+	Document->FireListeners(Event, EDomEventPhase::Bubbling, /*bCapturePhase*/ false, Invoker);
 }
 
 void FDomNode::DispatchEvent(FDomEvent& Event)
@@ -653,6 +663,64 @@ void FDomNode::DispatchKeyboardEvent(FDomKeyboardEvent& Keyboard)
 	{
 		JS_SetOpaque(EventObj.GetValue(), nullptr);
 	}
+}
+
+// --- 030 S1-P1: the DOCUMENT as an EventTarget (the bubble top) — mirrors the FDomNode EventTarget machinery above ---
+
+void FDomDocument::AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture)
+{
+	for (const FDomEventListener& Existing : Listeners) // DOM dedup: the (type, fn, capture) triple registers ONCE
+	{
+		if (Existing.Type == EventType && Existing.bCapture == bCapture
+			&& SameJsObject(Existing.Listener, Listener.GetValue()))
+		{
+			return; // already registered -> no-op
+		}
+	}
+	Listeners.Add(FDomEventListener{ EventType, MoveTemp(Listener), bCapture });
+}
+
+void FDomDocument::RemoveEventListener(const FString& EventType, JSValueConst ListenerFn, bool bCapture)
+{
+	Listeners.RemoveAll([&EventType, ListenerFn, bCapture](const FDomEventListener& Listener)
+	{
+		return Listener.Type == EventType && Listener.bCapture == bCapture
+			&& SameJsObject(Listener.Listener, ListenerFn);
+	});
+}
+
+bool FDomDocument::FireListeners(FDomEvent& Event, EDomEventPhase Phase, bool bCapturePhase, const FDomListenerInvoker& Invoker)
+{
+	// The document is the OUTERMOST EventTarget: currentTarget === document for this pass (not a node id).
+	Event.bCurrentTargetIsDocument = true;
+	Event.Phase = Phase;
+	for (const FDomEventListener& Listener : Listeners)
+	{
+		if (Listener.Type != Event.Type) { continue; }
+		const bool bSelected = (Phase == EDomEventPhase::AtTarget)
+			|| (bCapturePhase ? Listener.bCapture : !Listener.bCapture);
+		if (bSelected) { Invoker(Listener.Listener, Event); }
+	}
+	Event.bCurrentTargetIsDocument = false; // reset so any subsequent NODE phase marshals a node currentTarget again
+	return !Event.bPropagationStopped;
+}
+
+FJsValue FDomDocument::GetDocumentWrapper() const
+{
+	// A NEW owning ref to the document's OWN installed wrapper (set in InstallAsGlobal), for `e.currentTarget === document`.
+	return (Context != nullptr && !JS_IsUndefined(DocumentWrapperBorrow))
+		? FJsValue(Context, JS_DupValue(Context, DocumentWrapperBorrow)) : FJsValue();
+}
+
+// Production: dispatch an event AT the document (the document is target + currentTarget; no ancestors above it). The
+// invoker passes the AUTHOR's event object (document.dispatchEvent always has one — see DispatchJsEventAtDocument); no
+// self-marshaling overload (a fresh wrapper would lose the passed object's identity + KeyboardEvent-ness).
+void FDomDocument::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker)
+{
+	Event.Target = INDEX_NONE;            // the document is the target (not a node)
+	Event.Document = this;
+	// No ancestors above the document -> at-target only (capture + bubble listeners both fire at-target, per the DOM).
+	FireListeners(Event, EDomEventPhase::AtTarget, /*bCapturePhase*/ false, Invoker);
 }
 
 // --- Observation reads (S5) — OFF the author surface; COMPOSE 005's geometry/style by NodeId ---
@@ -1104,7 +1172,14 @@ JSValue EventTargetGetter(JSContext* Ctx, JSValueConst ThisVal)
 JSValue EventCurrentTargetGetter(JSContext* Ctx, JSValueConst ThisVal)
 {
 	FDomEvent* E = EventBaseFrom(ThisVal);
-	return (E != nullptr) ? MarshalNode(Ctx, E->Document, E->CurrentTarget) : JS_NULL; // ADVANCES per node
+	if (E == nullptr) { return JS_NULL; }
+	// 030 S1-P1 — during the document EventTarget pass, currentTarget IS the document (not a node) -> `e.currentTarget === document`.
+	if (E->bCurrentTargetIsDocument && E->Document != nullptr)
+	{
+		FJsValue Wrapper = E->Document->GetDocumentWrapper();
+		return Wrapper.IsValid() ? Wrapper.Release() : JS_NULL;
+	}
+	return MarshalNode(Ctx, E->Document, E->CurrentTarget); // ADVANCES per node
 }
 JSValue EventPhaseGetter(JSContext* Ctx, JSValueConst ThisVal)
 {
@@ -1600,6 +1675,26 @@ void InstallGetComputedStyleGlobal(JSContext* Ctx)
 	JS_FreeValue(Ctx, Global);
 }
 } // namespace
+
+// 030 S1-P1 — bridge for document.dispatchEvent. The event-recovery helper (EventBaseFrom) + the event class-ids are
+// file-LOCAL (the anonymous namespace above), so DocDispatchEventThunk (in CathodeDomDocument.cpp, where GDomDocumentClassId
+// lives) routes through this NON-anon function. Recover the base FDomEvent from the JS event arg + dispatch AT the document
+// (the document is target + currentTarget; no ancestors). bOutValidEvent is false if the arg isn't a live Cathode Event.
+bool DispatchJsEventAtDocument(JSValueConst EventArg, FDomDocument& Doc, bool& bOutValidEvent)
+{
+	FDomEvent* E = EventBaseFrom(EventArg);
+	if (E == nullptr) { bOutValidEvent = false; return true; }
+	bOutValidEvent = true;
+	// Fire the document's listeners with the AUTHOR'S event object (the live wrapper the caller passed — already a wrapper
+	// over *E, so e.key/e.type/identity all resolve). Re-marshaling a fresh wrapper would lose the KeyboardEvent-ness + ===.
+	Doc.DispatchEvent(*E, [EventArg](const FJsValue& ListenerFn, FDomEvent& /*Event*/)
+	{
+		FCallableHandle Handle(ListenerFn);
+		JSValue Arg = EventArg;
+		Handle.Call(JS_UNDEFINED, MakeArrayView(&Arg, 1));
+	});
+	return !E->bDefaultPrevented; // the dispatchEvent contract: false iff a listener called preventDefault()
+}
 
 // Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
 // (=== identity), reusing the slice-2 MarshalNodeList recipe. querySelectorAll on Element + Document both call this

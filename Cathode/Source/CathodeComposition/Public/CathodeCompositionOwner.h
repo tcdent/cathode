@@ -71,6 +71,12 @@ public:
 	// Is the production seam installed (the lead's lifetime/wire check).
 	bool IsInstalled() const { return bInstalled; }
 
+	// 030 S1-P2 — the input-delivery primitive: POST a keydown (the canonical e.key/e.code token) to a surface. The next
+	// seam tick repoints globalThis.document to that surface + delivers it at the focused element / body, bubbling to
+	// document.addEventListener('keydown'). Worker-affine (the doc is worker-owned) — never an inline dispatch. The
+	// composition-root adapter (030 S2) maps an ESurfaceInputKind → the canonical token and calls this.
+	void DispatchKeyToSurface(FSurfaceId Surface, const FString& Key, const FString& Code);
+
 #if WITH_DEV_AUTOMATION_TESTS
 	// TEST-ONLY (027 realloc): release the old egress texture + POST a worker-side surface re-registration for surface Index.
 	void ForceReacquireForTest(int32 SurfaceIndex = 0);

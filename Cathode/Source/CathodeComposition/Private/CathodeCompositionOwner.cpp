@@ -36,6 +36,14 @@ namespace
 // source + dirty controller + litehtml render tree), its own FDomDocument, its worker-assigned FSurfaceId, its bundle, and
 // its pending mutation. Member ORDER is a lifetime contract: Engine precedes Document (the doc renders off it). Held by
 // TUniquePtr in the owner array (FCriticalSection is non-movable).
+// 030 S1-P2 — a worker-posted keydown (the canonical e.key/e.code token), queued by DispatchKeyToSurface, dispatched in the
+// seam at the surface's focused element / body, bubbling to its document.
+struct FPendingKey
+{
+	FString Key;
+	FString Code;
+};
+
 struct FPerSurfaceState
 {
 	FString BundlePath;
@@ -45,8 +53,9 @@ struct FPerSurfaceState
 	TUniquePtr<ILayoutEngine> Engine;   // per-surface (stateful per-document)
 	TUniquePtr<FDomDocument> Document;   // per-surface (its own root + DOM tree)
 	FSurfaceId Surface;                  // worker-assigned at Register
-	FCriticalSection MutationLock;
+	FCriticalSection MutationLock;       // guards PendingMutation + PendingKeys (set game-thread, drained worker-side)
 	FString PendingMutation;             // a worker-side JS mutation (018 API) to eval next tick (test-queued)
+	TArray<FPendingKey> PendingKeys;     // 030 S1-P2 — worker-posted keydowns to dispatch next tick (production)
 };
 
 // The worker-side composition state — built ON the worker (first seam call). 029 #27: the founding's "one runtime, one global
@@ -187,15 +196,38 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 		{
 			FPerSurfaceState& PS = *PSPtr;
 			FString Mutation;
+			TArray<FPendingKey> Keys;
 			{
 				FScopeLock Lock(&PS.MutationLock);
 				Mutation = PS.PendingMutation;
 				PS.PendingMutation.Empty();
+				Keys = MoveTemp(PS.PendingKeys);
+				PS.PendingKeys.Reset();
 			}
-			if (!Mutation.IsEmpty() && PS.Document.IsValid())
+			if ((!Mutation.IsEmpty() || Keys.Num() > 0) && PS.Document.IsValid())
 			{
-				PS.Document->InstallAsGlobal(); // M1 — point `document` at THIS surface before its mutation
-				Runtime.Evaluate(Mutation, TEXT("<s6-mutation>"), EEvalKind::Global);
+				PS.Document->InstallAsGlobal(); // M1 — point `document` at THIS surface before its mutation / key delivery
+				if (!Mutation.IsEmpty())
+				{
+					Runtime.Evaluate(Mutation, TEXT("<s6-mutation>"), EEvalKind::Global);
+				}
+				// 030 S1-P2 — deliver each worker-posted keydown at the focused element (re-resolved per key, since a handler
+				// may move focus), falling back to <body> then the root, bubbling up to document.addEventListener('keydown').
+				for (const FPendingKey& K : Keys)
+				{
+					FDomNodeId TargetId = PS.Document->GetFocusedNode();
+					if (TargetId == INDEX_NONE) { TargetId = PS.Document->FindBody(); }
+					if (TargetId == INDEX_NONE) { TargetId = PS.Document->GetRootNodeId(); }
+					if (FDomNode* Target = PS.Document->FindNode(TargetId))
+					{
+						FDomKeyboardEvent Kbd;
+						Kbd.Event.Type = TEXT("keydown");
+						Kbd.Event.bBubbles = true;
+						Kbd.Key = K.Key;
+						Kbd.Code = K.Code;
+						Target->DispatchKeyboardEvent(Kbd);
+					}
+				}
 			}
 		}
 
@@ -263,6 +295,30 @@ void FCompositionSurfaceOwner::Dispose()
 		});
 	}
 	bInstalled = false;
+}
+
+void FCompositionSurfaceOwner::DispatchKeyToSurface(FSurfaceId Surface, const FString& Key, const FString& Code)
+{
+	// 030 S1-P2 — the production input-delivery primitive. Queue a keydown on the matching surface (PS.Surface is
+	// worker-assigned at Register, stable after the build), then WAKE the worker: the next seam tick repoints
+	// globalThis.document to that surface, delivers the keydown at its focused element / body, and it bubbles to
+	// document.addEventListener('keydown'). NOT an inline dispatch — it rides the worker-affine seam (the doc is worker-owned).
+	if (!State.IsValid()) { return; }
+	bool bQueued = false;
+	for (const TUniquePtr<FPerSurfaceState>& PSPtr : State->Surfaces)
+	{
+		if (PSPtr.IsValid() && PSPtr->Surface == Surface)
+		{
+			FScopeLock Lock(&PSPtr->MutationLock);
+			PSPtr->PendingKeys.Add(FPendingKey{ Key, Code });
+			bQueued = true;
+			break;
+		}
+	}
+	if (bQueued)
+	{
+		if (FCathodeRuntimeModule* const Module = GetRuntimeModule()) { Module->PostWorkerJob([](){}); }
+	}
 }
 
 #if WITH_DEV_AUTOMATION_TESTS

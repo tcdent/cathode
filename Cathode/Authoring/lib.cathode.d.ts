@@ -85,6 +85,9 @@ interface Document extends Node {
 	readonly body: Element | null;
 	readonly documentElement: Element | null;
 	readonly activeElement: Element | null;
+	addEventListener(type: string, listener: EventListener, useCapture?: boolean): void;
+	removeEventListener(type: string, listener: EventListener, useCapture?: boolean): void;
+	dispatchEvent(event: Event): boolean;
 }
 
 interface Event {

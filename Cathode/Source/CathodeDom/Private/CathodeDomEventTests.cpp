@@ -977,4 +977,151 @@ bool FCathodeDomEventDocOverRetentionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// 030 S1-P1 — THE DOCUMENT-BUBBLE PROOF: the document is an EventTarget at the TOP of the bubble path. A keydown dispatched
+// at a CHILD bubbles UP to document.addEventListener('keydown') (the ratified handshake target). Asserts: bubble order is
+// child→document (the document fires LAST, after the tree), e.key reads off the LIVE event ('ArrowUp'), e.type==='keydown',
+// and e.currentTarget === document (the document-as-currentTarget seam). Pre-P1 the document was neither an EventTarget nor in
+// the bubble path, so a document keydown listener could NEVER fire — this is the load-bearing S1-P1 proof.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomDocumentBubbleTargetTest,
+	"Cathode.Dom.Event.DocumentBubbleTarget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomDocumentBubbleTargetTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	Doc->InstallAsGlobal(); // globalThis.document — so document.addEventListener resolves
+
+	// A child appended to the document root → the dispatch target bubbles UP through the tree to the document.
+	FJsValue ChildW = Doc->CreateElement(TEXT("div"));
+	FDomNode* Child = Doc->NodeFromWrapper(ChildW);
+	if (!Child) { AddError(TEXT("child wrapper did not resolve")); return false; }
+	FDomNode* Root = Doc->FindNode(Doc->GetRootNodeId());
+	if (!Root) { AddError(TEXT("document root did not resolve")); return false; }
+	Root->AppendChild(ChildW);
+	JSValue Global = JS_GetGlobalObject(Context);
+	JS_SetPropertyStr(Context, Global, "__child", JS_DupValue(Context, ChildW.GetValue()));
+	JS_FreeValue(Context, Global);
+
+	// A bubble listener on the child + one on the document; the document one snapshots the live event.
+	{
+		JSValue R = Eval(Context,
+			"globalThis.order = [];"
+			"globalThis.cap = {};"
+			"__child.addEventListener('keydown', function(e){ globalThis.order.push('child'); }, false);"
+			"document.addEventListener('keydown', function(e){"
+			"  globalThis.order.push('doc');"
+			"  globalThis.cap.key = e.key; globalThis.cap.type = e.type;"
+			"  globalThis.cap.ctIsDoc = (e.currentTarget === document);"
+			"}, false);");
+		const bool bThrew = JS_IsException(R);
+		JS_FreeValue(Context, R);
+		if (bThrew) { AddError(TEXT("document/child listener setup threw (document.addEventListener missing?)")); return false; }
+	}
+
+	// A host-synthetic keydown at the CHILD → the real capture/at-target/bubble walk → bubbles up to the document.
+	FDomKeyboardEvent Kbd;
+	Kbd.Event.Type = TEXT("keydown");
+	Kbd.Event.bBubbles = true;
+	Kbd.Key = TEXT("ArrowUp");
+	Kbd.Code = TEXT("ArrowUp");
+	Child->DispatchKeyboardEvent(Kbd);
+
+	auto EvalBool = [&](const char* Expr) -> bool
+	{
+		JSValue R = Eval(Context, Expr);
+		if (JS_IsException(R)) { AddError(FString::Printf(TEXT("JS threw evaluating: %s"), ANSI_TO_TCHAR(Expr))); }
+		bool bValue = false;
+		const bool bOk = UnmarshalBool(Context, R, bValue);
+		JS_FreeValue(Context, R);
+		return bOk && bValue;
+	};
+	auto EvalStr = [&](const char* Expr) -> FString
+	{
+		JSValue R = Eval(Context, Expr);
+		FString S;
+		UnmarshalString(Context, R, S);
+		JS_FreeValue(Context, R);
+		return S;
+	};
+
+	TestEqual(TEXT("bubble order: the child fires, THEN the document at the bubble top"),
+		EvalStr("globalThis.order.join(',')"), FString(TEXT("child,doc")));
+	TestTrue(TEXT("document keydown listener fired with e.key === 'ArrowUp' (read off the live event)"),
+		EvalBool("globalThis.cap.key === 'ArrowUp'"));
+	TestTrue(TEXT("e.type === 'keydown' at the document"), EvalBool("globalThis.cap.type === 'keydown'"));
+	TestTrue(TEXT("e.currentTarget === document at the document listener (the document-as-currentTarget seam)"),
+		EvalBool("globalThis.cap.ctIsDoc === true"));
+
+	return true;
+}
+
+// 030 S1 — THE SAFE DOCUMENT-LISTENER INVARIANT (replaces a false reclaim-direction proof; document.gc_mark RULED OUT 030 S1).
+// document.gc_mark STAYS nullptr — and that is SAFE precisely because the production document is ALWAYS rooted (globalThis
+// .document, the per-surface InstallAsGlobal repoint). This proves THAT production invariant: a CYCLIC listener ON the document
+// (the listener closes over the document wrapper) + a detached node N hung off it, while the document stays globalThis-rooted
+// (the real production state), SURVIVES a real JS_RunGC with NO premature collection and NO UAF. The document holds the
+// listener (C++ refcount) → the listener holds N → all reachable via the rooted wrapper → benignly retained, not garbage (the
+// listeners are the app's live keydown handlers for the surface's lifetime).
+//   WHY NOT a reclaim-direction test: reclaim would only happen under an artificial `delete globalThis.document` that
+//   production never does — and re-adding a document gc_mark to make THAT reclaimable was ATTEMPTED in S1 and CRASHED with the
+//   COVERAGE-predicted UAF (the null-finalizer document outlives its wrapper → reclaiming the cycle dangles its listener refs).
+//   The node has a non-null finalizer that coordinates listener teardown; the document does not. See CathodeDom/COVERAGE.md.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FCathodeDomDocumentListenerOverRetentionTest,
+	"Cathode.Dom.Event.DocumentListenerOverRetention",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FCathodeDomDocumentListenerOverRetentionTest::RunTest(const FString& Parameters)
+{
+	using namespace Cathode;
+
+	Cathode::FScopedTestRuntime RuntimePtr;
+	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
+	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
+	FStubLayoutEngine Layout;
+	TUniquePtr<FDomDocument> Doc = CreateDomDocument(*RuntimePtr, *Registry, Layout);
+	JSContext* Context = static_cast<JSContext*>(RuntimePtr->GetNativeContextHandle());
+	JSRuntime* Rt = JS_GetRuntime(Context);
+	Doc->InstallAsGlobal(); // globalThis.document = the wrapper — ROOTED (the production state; NEVER deleted here)
+
+	FDomNodeId NodeId = INDEX_NONE;
+	{
+		// A DETACHED node N reachable ONLY via the document listener's closure (listener.node = N). With the document
+		// rooted, the chain globalThis.document → (FDomDocument::Listeners) → listener → N keeps N alive.
+		FJsValue NodeW = Doc->CreateElement(TEXT("div"));
+		FDomNode* Node = Doc->NodeFromWrapper(NodeW);
+		if (!Node) { AddError(TEXT("node wrapper did not resolve to a native node")); return false; }
+		NodeId = Node->GetNodeId();
+
+		// A listener ON THE DOCUMENT closing over the document wrapper (the cyclic shape) + holding N. The document natively
+		// holds the listener (AddEventListener moves it in); the document stays globalThis-rooted, so nothing is collectable.
+		JSValue Global = JS_GetGlobalObject(Context);
+		JSValue DocW = JS_GetPropertyStr(Context, Global, "document"); // a dup, owned here
+		JS_FreeValue(Context, Global);
+		FJsValue Listener(Context, Eval(Context, "(function(){})"));
+		JS_SetPropertyStr(Context, Listener.GetValue(), "doc", DocW); // closes over the document wrapper (the cyclic shape)
+		JS_SetPropertyStr(Context, Listener.GetValue(), "node", JS_DupValue(Context, NodeW.GetValue()));
+		Doc->AddEventListener(TEXT("click"), MoveTemp(Listener));
+	} // external handles drop — N + the listener now live only via the (rooted) document's Listeners
+
+	// The document stays globalThis-rooted (the production state) → a real cycle-collecting GC does NOT reclaim the cycle.
+	JS_RunGC(Rt);
+
+	// SAFE: the rooted document pins its Listeners (C++ refcount) → the listener pins N → N SURVIVES, no premature collection,
+	// no UAF (document.gc_mark is nullptr; a reclaim would only matter under an artificial unroot, which production never does).
+	const bool bSurvives = Doc->FindNode(NodeId) != nullptr;
+	TestTrue(TEXT("a cyclic listener ON a ROOTED document is benignly OVER-RETAINED across GC (no premature collection, no UAF)"),
+		bSurvives);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -39,32 +39,42 @@ freed wrapper. `GetWrapperForNode` `JS_DupValue`s it to hand JS a **new owning**
 (identity `===` holds). The 1:1 wrapper↔node invariant holds: the borrow is set exactly once, at each of the two
 and only wrapper-mint sites (`CreateElement`, `CreateTextNode`); there is **no re-wrap path**.
 
-**Document lifetime + the intentionally-absent `document` gc_mark (sprint 012 S5, browse-design-ruled, review
-topology-confirmed).** The `FDomDocument` JS class (the 2nd class, exposed as `globalThis.document`) is
+**Document lifetime + the intentionally-absent `document` gc_mark (sprint 012 S5; 030 S1 re-add ATTEMPTED + REVERTED;
+carry CLOSED, empirically).** The `FDomDocument` JS class (the 2nd class, exposed as `globalThis.document`) is
 **C++/TUniquePtr-owned** with a **NULL finalizer** (`RegisterDomDocumentClass` — a deliberate special case, not
-uniform-with-nodes) and **NO `gc_mark`**. The document's reclaim is **`Dispose()`** (drops `RootWrapper`) +
+uniform-with-nodes) and **NO `gc_mark`**. The document's TREE reclaim is **`Dispose()`** (drops `RootWrapper`) +
 **the node `gc_mark`/T4** (reclaims unrooted intra-tree cycles); the `RootWrapper` C++ owning ref governs
-**survival** (it pins the tree against the cyclic collector while the document is alive). A `document` gc_mark
-would be **redundant**: it marks `RootWrapper` (a ref the C++ document already owns), and post-`Dispose`
-`RootWrapper` is empty so it marks nothing — no discriminating test can exist for it (the `DisposeReclaim` test
-proves the real mechanism instead). **Justification is TOPOLOGY-DEPENDENT:** `node→document` is non-owning
-(`CathodeDom.h`) **and no event API is bound to JS**, so nothing reachable from the document wrapper holds an
-**owning JS ref back to it** → no JS-GC cycle through the wrapper for a gc_mark to collect.
+**survival** (it pins the tree against the cyclic collector while the document is alive).
 
-> **Carry-not-rediscover — the event API binding INVERTS the S5 prediction (sprint 012 events, browse-design-ruled
-> + review's blind re-derivation converged).** The event API IS now bound to JS, and a listener CAN close over the
-> document wrapper — the cycle `document-wrapper → RootWrapper → … → node → listener → document-wrapper` is
-> formable. **But `document.gc_mark` STAYS REMOVED, and re-adding it is UNSAFE (a UAF) under the current
-> C++-owned / null-finalizer model.** Re-adding gc_mark mis-attributes the C++-EXTERNAL `RootWrapper` owning ref
-> as an IN-GRAPH edge; once a listener cycle exists, the cycle collector would free the C++-OWNED root out from
-> under the live `RootWrapper` → the owning ref dangles → use-after-free (the premature-collection hazard S5's
-> review retracted *because there was no cycle then*; the event API re-introduces the cycle, which makes re-add
-> UNSAFE, NOT needed). The SAFE/shipped behavior: the listener cycle is benignly over-retained (the document
-> wrapper's lifetime extends to `Dispose`); reclaim is `Dispose` + the node `gc_mark`/T4. `document.gc_mark`
-> becomes safe + load-bearing ONLY under a full **ownership-model change** (make `RootWrapper` an in-graph edge +
-> a non-null finalizer that owns the document) — a separate REDESIGN, not the event trigger. **Carry-not-rediscover:
-> the next author inherits `document.gc_mark` UNSAFE-to-re-add under this model.** (Demonstrated: the events slice's
-> node↔listener JS-closure reclaim test + the listener→document benign-over-retention test.)
+> **CARRY CLOSED (030 S1) — the event-API trigger is FALSIFIED; `document.gc_mark` STAYS nullptr.** S5 predicted the
+> event API would form a `document-wrapper → listener → document-wrapper` cycle (true) and that re-adding gc_mark
+> would be a UAF (TRUE — now empirically confirmed). When the event API bound in 030 S1, a re-add was ATTEMPTED —
+> including the narrower **listeners-only** mark (mark `Listeners`, leave `RootWrapper` unmarked, on the theory the
+> UAF was specifically the `RootWrapper`). It still **CRASHED** on the box: `EXCEPTION_ACCESS_VIOLATION` reading
+> `0x30` in the DOM gc path, during the cyclic document reclaim (the reclaim-direction proof). The deeper mechanism:
+> the document wrapper's **NULL finalizer** means the C++ `FDomDocument` OUTLIVES its wrapper, so reclaiming the
+> document↔listener cycle frees the listener JS objects while the still-alive `FDomDocument` keeps them in its
+> `Listeners` array → dangling `FJsValue`s → UAF. (The **node** avoids this only because its wrapper has a *non-null*
+> finalizer that deletes the `FDomNode` + tears down its `Listeners` in the same reclaim — coordination the document
+> lacks.) So marking-only-the-listeners does NOT close it; the hazard is structural to the null-finalizer ownership.
+>
+> Critically, the gc_mark is also **UNNECESSARY**: production ALWAYS keeps `globalThis.document` rooted (the
+> per-surface `InstallAsGlobal` repoint), so the document↔listener cycle is **never collected** in production —
+> gc_mark or not. The listeners are the app's live keydown handlers, alive for the surface's lifetime via the rooted
+> document (not garbage; no leak to fix). The carry-trigger "gc_mark returns when the event API binds" is therefore
+> **FALSIFIED** — binding the event API does NOT require it. **Resolution:** `Def.GcMark = nullptr` (the pre-030
+> safe/shipped behavior). The reclaim-direction test was replaced by `Cathode.Dom.Event.DocumentListenerOverRetention`
+> (a cyclic listener ON a ROOTED document survives GC with no UAF — the real production invariant). The event API
+> itself (`Cathode.Dom.Event.DocumentBubbleTarget` + `Cathode.Composition.WorkerPostedKeydown`) is gc_mark-independent
+> and green.
+>
+> ## How this went wrong in the past — twice
+> S5 originally framed the UAF as "marking the `RootWrapper`," which suggested a listeners-only mark would be safe.
+> 030 S1 tested that and it CRASHED: the UAF is structural to the document wrapper's null finalizer (the C++ document
+> outliving its wrapper while holding listener refs), not to which fields are marked. A document gc_mark becomes safe
+> + load-bearing ONLY under a full ownership redesign (the wrapper OWNS the document: a non-null finalizer + an
+> in-graph `RootWrapper`) — and that redesign is **pointless** for production (the document is always rooted, so no
+> cycle is ever collected). Closed, not deferred: `document.gc_mark` stays removed under this ownership model.
 
 ## JS-driven DOM status (sprint 018 — engine-verified)
 

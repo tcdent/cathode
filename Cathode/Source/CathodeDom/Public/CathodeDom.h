@@ -62,6 +62,10 @@ struct FDomEvent
 	bool bBubbles = true;
 	bool bDefaultPrevented = false;        // preventDefault() set this
 	bool bPropagationStopped = false;      // stopPropagation() set this (ends bubbling)
+	// 030 S1-P1 — the document EventTarget phase: the document sits ABOVE the root node in the bubble path, but it is not
+	// an FDomNode (no node id), so CurrentTarget can't name it. During the document capture/bubble pass this is set true;
+	// EventCurrentTargetGetter then marshals the DOCUMENT wrapper (not a node) so `e.currentTarget === document`.
+	bool bCurrentTargetIsDocument = false;
 	FDomDocument* Document = nullptr;      // sprint 012 events: non-owning — set by the dispatch so the JS event
 	                                       // object's target/currentTarget getters resolve node wrappers (S2 marshaler)
 };
@@ -166,7 +170,7 @@ public:
 	// bottom-up); the (type,capture) tuple selects which listeners fire per phase. The Invoker is handed the live
 	// shared Event each step (currentTarget/phase advance; preventDefault/stopPropagation mutate it).
 	void DispatchEvent(FDomEvent& Event);             // production: build the JS Event object + invoke via 007 FCallableHandle
-	void DispatchKeyboardEvent(FDomKeyboardEvent& Event); // production: a KeyboardEvent object (key/code) over the base
+	CATHODEDOM_API void DispatchKeyboardEvent(FDomKeyboardEvent& Event); // 030 S1-P2 exported — the seam delivers the worker-posted keydown via this; a KeyboardEvent object (key/code) over the base
 	void DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker); // the testable dispatch algorithm
 
 	// Observation reads (Slice 5) — OFF the author surface (not in the .d.ts, no flag); backed by 005.
@@ -278,8 +282,8 @@ public:
 	FJsValue CreateElementNS(const FString& Namespace, const FString& QualifiedName);
 	FJsValue CreateTextNode(const FString& Data);
 
-	FDomNodeId GetRootNodeId() const;
-	FDomNode* FindNode(FDomNodeId NodeId) const; // wrapper-governed index lookup (non-owning); nullptr if unknown
+	CATHODEDOM_API FDomNodeId GetRootNodeId() const;             // 030 S1-P2 exported — the DispatchKeyToSurface seam (CathodeComposition) resolves the dispatch target
+	CATHODEDOM_API FDomNode* FindNode(FDomNodeId NodeId) const;  // wrapper-governed index lookup (non-owning); nullptr if unknown
 	FDomNode* NodeFromWrapper(const FJsValue& Wrapper) const; // wrapper -> its C++ node via the opaque (derived)
 
 	// Resolve a node id to its EXISTING wrapper (the node marshaler, S2) via the node's NON-OWNING wrapper borrow
@@ -297,13 +301,28 @@ public:
 
 	// Sprint 012 DOM-completion: document.body — the first <body> element in document order (a pre-order tree walk
 	// by tag, like FindElementById; no stored ref). INDEX_NONE if none (-> JS null). On the document, like getElementById.
-	FDomNodeId FindBody() const;
+	CATHODEDOM_API FDomNodeId FindBody() const; // 030 S1-P2 exported — the seam's keydown-target fallback (focused element -> body -> root)
 
 	// Focus STATE (sprint 012, runtime — NOT serialized): the focused node (document.activeElement). focus() sets it,
 	// blur() clears it (only if the given node currently holds focus). The C++ input router is the future consumer.
 	void SetFocusedNode(FDomNodeId NodeId);
 	void BlurNode(FDomNodeId NodeId);
-	FDomNodeId GetFocusedNode() const;
+	CATHODEDOM_API FDomNodeId GetFocusedNode() const; // 030 S1-P2 exported — the seam's primary keydown target (document.activeElement)
+
+	// 030 S1-P1 — the document is an EventTarget at the TOP of the bubble path. A keydown dispatched at a node bubbles up
+	// the node chain to the ROOT and then to the DOCUMENT (focused element -> ... -> root -> document), so the ratified
+	// `document.addEventListener('keydown', ...)` fires. Mirrors the FDomNode EventTarget machinery; the document fires only
+	// when it HAS listeners (a no-listener document is a zero-iteration no-op append -> no change to node-only dispatch).
+	void AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture = false);
+	void RemoveEventListener(const FString& EventType, JSValueConst ListenerFn, bool bCapture = false);
+	// document.dispatchEvent: dispatch AT the document (no ancestors). The invoker passes the author's event object
+	// (DispatchJsEventAtDocument supplies it) — no self-marshaling overload (a fresh wrapper would lose identity + type).
+	void DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker);
+	// Fire THIS document's matching listeners for one phase (capture/at-target/bubble); returns false to HALT (stopPropagation).
+	// Called by FDomNode::DispatchEvent (the bubble splice — document is the outermost EventTarget) + the document-as-target path.
+	bool FireListeners(FDomEvent& Event, EDomEventPhase Phase, bool bCapturePhase, const FDomListenerInvoker& Invoker);
+	// The document's OWN wrapper (the one installed as globalThis.document) for `e.currentTarget === document` identity.
+	FJsValue GetDocumentWrapper() const;
 
 	// Expose THIS document as the JS `document` global on its own context: wrap it via the document JS class (007
 	// CreateWrappedObject — NON-OWNING: the document is C++/TUniquePtr-owned, the wrapper never deletes it) and set
@@ -359,10 +378,17 @@ private:
 	FJsValue RootWrapper;                  // the document's OWNING ref to the root node's wrapper (the GC root)
 	FDomNodeId RootNodeId = INDEX_NONE;
 	FDomNodeId FocusedNodeId = INDEX_NONE; // 012 focus state (document.activeElement); runtime, not serialized
+	TArray<FDomEventListener> Listeners;   // 030 S1-P1 — the document's EventTarget listeners (gc_mark-marked, like FDomNode's)
+	JSValue DocumentWrapperBorrow = JS_UNDEFINED; // 030 S1-P1 — non-owning borrow of the installed `document` wrapper (=== identity)
 	FLayoutResult LastLayout;              // the last Relayout result; the observation reads compose its geometry/style
 	bool bLayoutDirty = false;             // 013 slice 5: a layout-affecting write is pending since the last Relayout
 	int32 LastLayoutWidth = 0;             // 013 slice 5: the width the flush re-relayouts with (the last Relayout's); 0 = never laid out
 };
+
+// 030 S1-P1 — bridge for document.dispatchEvent: recover the base FDomEvent from a JS event arg + dispatch AT the document.
+// Defined in CathodeDomNode.cpp (where the file-local event-recovery helper lives); the document thunk (CathodeDomDocument.cpp)
+// routes through it. Internal helper (no CATHODEDOM_API — within CathodeDom). bOutValidEvent=false if the arg isn't a Cathode Event.
+bool DispatchJsEventAtDocument(JSValueConst EventArg, FDomDocument& Doc, bool& bOutValidEvent);
 
 // --- Registration + construction (composing the siblings) ---
 

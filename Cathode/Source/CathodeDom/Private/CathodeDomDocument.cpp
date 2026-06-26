@@ -502,6 +502,50 @@ JSValue DocBodyGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNod
 JSValue DocDocumentElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetRootNodeId); }
 JSValue DocActiveElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetFocusedNode); }
 
+// 030 S1-P1 — the document EventTarget thunks (addEventListener / removeEventListener), recovering FDomDocument* via
+// GDomDocumentClassId (mirrors the node EventTarget thunks). The document is the bubble top: a keydown dispatched at a node
+// bubbles up to these listeners -> the ratified `document.addEventListener('keydown', ...)` fires.
+JSValue DocAddEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Type;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Type) || !JS_IsFunction(Ctx, Argv[1]))
+	{
+		return JS_ThrowTypeError(Ctx, "addEventListener(type: string, listener: function, useCapture?: boolean)");
+	}
+	const bool bCapture = (Argc >= 3) && (JS_ToBool(Ctx, Argv[2]) != 0);
+	Self->AddEventListener(Type, FJsValue(Ctx, JS_DupValue(Ctx, Argv[1])), bCapture);
+	return JS_UNDEFINED;
+}
+
+JSValue DocRemoveEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	FString Type;
+	if (Argc < 2 || !UnmarshalString(Ctx, Argv[0], Type) || !JS_IsFunction(Ctx, Argv[1]))
+	{
+		return JS_ThrowTypeError(Ctx, "removeEventListener(type: string, listener: function, useCapture?: boolean)");
+	}
+	const bool bCapture = (Argc >= 3) && (JS_ToBool(Ctx, Argv[2]) != 0);
+	Self->RemoveEventListener(Type, Argv[1], bCapture);
+	return JS_UNDEFINED;
+}
+
+// document.dispatchEvent — dispatch a live Cathode Event AT the document (via the cross-file bridge, since the event-recovery
+// helper is file-local to CathodeDomNode.cpp). Returns !defaultPrevented.
+JSValue DocDispatchEventThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
+{
+	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
+	if (Self == nullptr) { return JS_EXCEPTION; }
+	if (Argc < 1) { return JS_ThrowTypeError(Ctx, "dispatchEvent(event)"); }
+	bool bValidEvent = false;
+	const bool bNotPrevented = DispatchJsEventAtDocument(Argv[0], *Self, bValidEvent);
+	if (!bValidEvent) { return JS_ThrowTypeError(Ctx, "dispatchEvent expects a live Cathode Event"); }
+	return JS_NewBool(Ctx, bNotPrevented);
+}
+
 // THE 2nd binding-definition table — install (InstallBoundMembers) + enumerate (EnumerateBoundMembersJson) BOTH
 // consume it (crit-1, now PER CLASS). Document-iface members; names distinct from the node set (no conflation).
 #define CATHODE_BIND_DOC_METHOD(JsName, Iface, Tag, Sig, ThunkFn) \
@@ -520,6 +564,13 @@ static const FBoundMember GDomDocumentMembers[] =
 	CATHODE_BIND_DOC_GETTER("body",            "Document", "margin", "Element | null", DocBodyGetterThunk),
 	CATHODE_BIND_DOC_GETTER("documentElement", "Document", "margin", "Element | null", DocDocumentElementGetterThunk),
 	CATHODE_BIND_DOC_GETTER("activeElement",   "Document", "margin", "Element | null", DocActiveElementGetterThunk),
+	// 030 S1-P1 — the document EventTarget surface (runtime install of addEventListener/removeEventListener on the document
+	// object). Tagged "Document" (NOT "EventTarget") so the d.ts emits them under Document — a valid compatible re-declaration
+	// of the members Document already inherits via Node extends EventTarget; tagging "EventTarget" would DUPLICATE the node's
+	// EventTarget entries (the codegen does not dedup) -> a tsc duplicate-identifier error.
+	CATHODE_BIND_DOC_METHOD("addEventListener",    "Document", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", DocAddEventListenerThunk),
+	CATHODE_BIND_DOC_METHOD("removeEventListener", "Document", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", DocRemoveEventListenerThunk),
+	CATHODE_BIND_DOC_METHOD("dispatchEvent",       "Document", "margin",   "(event: Event) -> boolean", DocDispatchEventThunk),
 };
 #undef CATHODE_BIND_DOC_METHOD
 #undef CATHODE_BIND_DOC_GETTER
@@ -623,6 +674,9 @@ void FDomDocument::InstallAsGlobal()
 		return;
 	}
 	FJsValue DocumentWrapper = Registry.CreateWrappedObject(GDomDocumentClassId, this);
+	// 030 S1-P1 — store a NON-OWNING borrow of THIS wrapper (the global property owns the ref) so e.currentTarget === document
+	// holds. Updated on each (re)install (the M1 per-surface repoint), so the borrow always names the CURRENT globalThis.document.
+	DocumentWrapperBorrow = DocumentWrapper.GetValue();
 	JSValue Global = JS_GetGlobalObject(Context);
 	JS_SetPropertyStr(Context, Global, "document", DocumentWrapper.Release());
 	JS_FreeValue(Context, Global);
@@ -632,14 +686,17 @@ JSClassID RegisterDomDocumentClass(INativeClassRegistry& Registry, JSContext* Co
 {
 	// The 2nd class via the SAME mechanism. Finalizer is NON-OWNING (nullptr): the FDomDocument is
 	// C++/TUniquePtr-owned; deleting it on GC would double-free. ~FDomDocument (passive, order-safe) handles the
-	// C++ teardown. NO gc_mark (nullptr) — intentionally absent: no JS-ref cycle runs through the document wrapper
-	// (node->document non-owning + no event API bound to JS), so there is nothing for a document gc_mark to
-	// collect; reclaim is Dispose() + the node gc_mark/T4, and RootWrapper's C++ refcount governs survival. See
-	// the lifetime note in CathodeDom/COVERAGE.md (carry-not-rediscover: gc_mark returns when the event API binds).
+	// C++ teardown. NO gc_mark (nullptr) — reclaim is Dispose() + the node gc_mark/T4; RootWrapper's C++ refcount
+	// governs survival.
 	FNativeClassDef Def;
 	Def.Name = "CathodeDomDocument";
 	Def.Finalizer = nullptr; // non-owning wrapper — do NOT delete the C++-owned document on GC
-	Def.GcMark = nullptr;    // intentionally absent (no wrapper-cycle to collect) — see COVERAGE.md lifetime note
+	// 030 S1 — document.gc_mark STAYS nullptr (carry-not-rediscover CLOSED). The event-API binding looked like the carry
+	// trigger, but a listeners-only re-add was ATTEMPTED + CRASHED with the COVERAGE-predicted UAF: the null-finalizer document
+	// OUTLIVES its wrapper, so reclaiming the document<->listener cycle dangles the FDomDocument's listener refs (the node
+	// avoids this via its non-null finalizer). It's also UNNECESSARY — production always keeps globalThis.document rooted
+	// (per-surface InstallAsGlobal), so the cycle is never collected. The trigger is FALSIFIED. See CathodeDom/COVERAGE.md.
+	Def.GcMark = nullptr;
 	const JSClassID ClassId = Registry.RegisterClass(Def);
 	GDomDocumentClassId = ClassId; // the member thunks recover the native via this id
 
