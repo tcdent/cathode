@@ -66,6 +66,11 @@
 			"Name": "CathodeEgress",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CathodeExample",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }
