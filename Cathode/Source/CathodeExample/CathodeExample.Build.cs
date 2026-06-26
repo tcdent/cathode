@@ -15,7 +15,8 @@ public class CathodeExample : ModuleRules
 		{
 			"Core",
 			"CathodeDom",         // ICathodeGameBridge — the host-registered bridge interface
-			"CathodeComposition", // FCompositionSurfaceOwner::Install (the injecting overload) — the registration point
+			"CathodeComposition", // FCompositionSurfaceOwner::Install (the injecting overload) + DeliverIntent — the registration point
+			"CathodeSurfaces",    // 031 S2 — ECathodeInputIntent / CathodeIntentToKey (the Cathode-owned input vocabulary)
 		});
 
 		// TEST-ONLY (non-Shipping): the mutate-and-observe proof drives the real worker + GPU-reads the composed surface.

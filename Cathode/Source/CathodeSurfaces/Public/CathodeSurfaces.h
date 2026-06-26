@@ -49,6 +49,36 @@ enum class ESurfacePixelFormat : uint8
 	Alpha8,             // 8bpp coverage
 };
 
+// --- 031 S2: the Cathode-OWNED input-intent vocabulary (the inversion — the host delivers SEMANTIC intents; Cathode owns the
+// contract + the intent->key map). The ratified six (components-controller.md) that Input Routing delivers as synthetic
+// keydown (components-input-routing.md). The HOST resolves its physical input to one of these + delivers it INTO Cathode. ---
+enum class ECathodeInputIntent : uint8
+{
+	Up,
+	Down,
+	Left,
+	Right,
+	Accept,
+	Back,
+};
+
+// The ratified intent -> canonical DOM key map (components-input-routing.md; `code` == `key` for these six). Cathode OWNS this
+// — it MOVED off the host adapter in 031 S2 (resolving the 030 doc-vs-code gap where FUptimeSurfaceHandshakeAdapter held it):
+// the host delivers the INTENT, Cathode maps it to the keydown. Empty for an out-of-range value (no synthetic keydown).
+inline FString CathodeIntentToKey(ECathodeInputIntent Intent)
+{
+	switch (Intent)
+	{
+		case ECathodeInputIntent::Up:     return TEXT("ArrowUp");
+		case ECathodeInputIntent::Down:   return TEXT("ArrowDown");
+		case ECathodeInputIntent::Left:   return TEXT("ArrowLeft");
+		case ECathodeInputIntent::Right:  return TEXT("ArrowRight");
+		case ECathodeInputIntent::Accept: return TEXT("Enter");
+		case ECathodeInputIntent::Back:   return TEXT("Escape");
+	}
+	return FString();
+}
+
 // --- Carries-it payloads (opaque to Surfaces; never interpreted, never asserted by value) ---
 
 // An opaque batch of the surface's rendered paint ops, produced by its document (005) and consumed by its

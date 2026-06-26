@@ -321,6 +321,29 @@ void FCompositionSurfaceOwner::DispatchKeyToSurface(FSurfaceId Surface, const FS
 	}
 }
 
+void FCompositionSurfaceOwner::DesignateActiveSurface(FSurfaceId Surface)
+{
+	// 031 S2 — the host designates which surface receives delivered intents (the active input target). The owner is
+	// N-surface; one is active at a time (components-input-routing.md: route to the ACTIVE surface).
+	ActiveSurface = Surface;
+}
+
+void FCompositionSurfaceOwner::ReleaseActiveSurface()
+{
+	ActiveSurface = FSurfaceId(); // invalid -> DeliverIntent becomes a no-op (no active input target)
+}
+
+void FCompositionSurfaceOwner::DeliverIntent(ECathodeInputIntent Intent)
+{
+	// 031 S2 — THE CATHODE-OWNED INTENT LAYER (the inversion): map the SEMANTIC intent -> the canonical DOM key (Cathode owns
+	// the map) -> the ACTIVE surface's worker-posted keydown. The host delivers an intent; Cathode maps + routes it. No-op if
+	// no active surface (or an out-of-range intent). The raw DispatchKeyToSurface stays public beneath this (B-i both).
+	if (!ActiveSurface.IsValid()) { return; }
+	const FString Key = CathodeIntentToKey(Intent);
+	if (Key.IsEmpty()) { return; }
+	DispatchKeyToSurface(ActiveSurface, Key, Key); // code == key for the six canonical tokens
+}
+
 #if WITH_DEV_AUTOMATION_TESTS
 void FCompositionSurfaceOwner::ForceReacquireForTest(int32 SurfaceIndex)
 {

@@ -77,6 +77,15 @@ public:
 	// composition-root adapter (030 S2) maps an ESurfaceInputKind → the canonical token and calls this.
 	void DispatchKeyToSurface(FSurfaceId Surface, const FString& Key, const FString& Code);
 
+	// 031 S2 — THE CATHODE-OWNED INPUT-INTENT LAYER (the inversion: the host delivers a SEMANTIC intent; Cathode owns the
+	// intent->key map [CathodeIntentToKey] + routes to the ACTIVE surface). The intent contract atop DispatchKeyToSurface
+	// (which STAYS public — the raw-key layer, B-i both). A host designates which surface is the active input target, then
+	// delivers intents; Cathode maps the intent -> the canonical keydown -> the worker-posted DispatchKeyToSurface. This is
+	// "Input Routing routes to the active surface" (components-input-routing.md), now Cathode-owned. NO host port needed.
+	void DesignateActiveSurface(FSurfaceId Surface); // the host designates the active input target (the owner is N-surface; one active)
+	void ReleaseActiveSurface();                      // the host clears the active surface (delivery becomes a no-op)
+	void DeliverIntent(ECathodeInputIntent Intent);   // map the intent -> the canonical key -> the active surface's keydown
+
 #if WITH_DEV_AUTOMATION_TESTS
 	// TEST-ONLY (027 realloc): release the old egress texture + POST a worker-side surface re-registration for surface Index.
 	void ForceReacquireForTest(int32 SurfaceIndex = 0);
@@ -92,6 +101,7 @@ private:
 	TUniquePtr<ITextureEgress> Egress;     // game-thread: Pump + GetTexture
 	TSharedPtr<FOwnerWorkerState> State;    // the worker-side per-surface docs/registry/bundles (built on the worker in the seam)
 	bool bInstalled = false;
+	FSurfaceId ActiveSurface;               // 031 S2 — the designated input target; DeliverIntent routes here (invalid = none)
 };
 
 } // namespace Cathode
