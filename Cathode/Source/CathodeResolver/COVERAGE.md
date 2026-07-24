@@ -1,7 +1,7 @@
 # Cathode Resource Resolver — component coverage & accountable deferrals
 
 Durable accountability record for the Resource Resolver (sprint 009, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-resource-resolver.md`](../../../../../docs/browse/components-resource-resolver.md)
+responsibility in [`docs/browse/components-resource-resolver.md`](../../../docs/browse/components-resource-resolver.md)
 to its status: **COVERED** (slice + mechanism + proof test) or **DEFERRED / RESOLVED-OPEN-ITEM** (with
 reason · dependency · unblocker · first-execution risk). Nothing in the component doc is silently missing.
 

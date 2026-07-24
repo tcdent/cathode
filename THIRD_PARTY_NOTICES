@@ -1,0 +1,452 @@
+THIRD-PARTY NOTICES FOR CATHODE
+===============================
+
+Cathode is assembled from four upstream libraries (plus one build dependency) and ships two
+third-party test assets. This file reproduces the required notice for each. Every notice below was
+read directly from the local source of the exact pinned/versioned artifact it covers — the file it
+was read from is cited under "Notice read from" in each section. None was reproduced from memory.
+
+Cathode's own license is MIT — see LICENSE at the repository root.
+
+CONTENTS
+  1. quickjs-ng ......... MIT ............................ vendored library (shared)
+  2. litehtml ........... BSD-3-Clause .................... vendored library (static)
+  3. HarfBuzz ........... "Old MIT" (+ MIT subcomponent) .. vendored library (static)
+  4. Blend2D ............ Zlib -- ALTERED SOURCE .......... vendored library (static)
+  5. AsmJit ............. Zlib ............................ vendored build dependency
+  6. Preact ............. MIT ............................. test fixture
+  7. Liberation Sans .... SIL OFL 1.1 ..................... test fixture
+
+PROVENANCE MODEL FOR THE VENDORED LIBRARIES (1-5)
+  Their source is NOT committed to this repository. Cathode/install.sh clones each at a pinned
+  commit into the repository-root vendor/lib/cathode/<lib>/ (gitignored) and verifies
+  `git rev-parse HEAD == pin` on every run. The pinned commit IS the provenance: it identifies
+  exactly which upstream tree a given notice covers. Each pin below was read from Cathode/install.sh
+  and confirmed against the live clone's HEAD on 2026-07-23.
+
+
+================================================================================
+1. quickjs-ng  --  JavaScript engine
+================================================================================
+Upstream        : https://github.com/quickjs-ng/quickjs
+Version / pin   : v0.15.1 @ fd0a0210b7be00957751871e7e01b8291268fc29
+License         : MIT
+Notice read from: vendor/lib/cathode/quickjs-ng/LICENSE
+Linkage         : built as a SHARED library; quickjs.dll (staged as qjs.dll) is redistributed.
+
+The MIT License (MIT)
+
+Copyright (c) 2017-2026 Fabrice Bellard
+Copyright (c) 2017-2024 Charlie Gordon
+Copyright (c) 2023-2026 Ben Noordhuis
+Copyright (c) 2023-2026 Saúl Ibarra Corretgé
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+================================================================================
+2. litehtml  --  HTML parsing, CSS cascade, layout, hit-testing
+================================================================================
+Upstream        : https://github.com/litehtml/litehtml
+Version / pin   : v0.9 @ 6ca1ab0419e770e6d35a1ef690238773a1dafcee
+License         : BSD-3-Clause
+Notice read from: vendor/lib/cathode/litehtml/LICENSE
+Linkage         : built STATIC. litehtml embeds its HTML parser (gumbo) as a separate CMake target;
+                  both litehtml.lib and gumbo.lib are linked, and both are covered by this notice
+                  as distributed by the litehtml project at the pin above.
+
+Copyright (c) 2013, Yuri Kobets (tordex)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * Neither the name of the <organization> nor the
+      names of its contributors may be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+3. HarfBuzz  --  text shaping and measurement
+================================================================================
+Upstream        : https://github.com/harfbuzz/harfbuzz
+Version / pin   : 14.2.1 @ 56feae4035bdd48f62ba2b8d8c16232d4d89b3a4
+License         : "Old MIT" (see 3a), plus an MIT-licensed subcomponent (see 3b)
+Notice read from: vendor/lib/cathode/harfbuzz/COPYING
+Linkage         : built STATIC, standalone (no FreeType / ICU / GLib; its own UCD tables).
+
+SUBDIRECTORY SWEEP. HarfBuzz's root COPYING states: "For parts of HarfBuzz that are licensed under
+different licenses see individual files names COPYING in subdirectories where applicable." That
+sweep was performed. Four subdirectory COPYING files exist at this pin:
+
+    src/ms-use/COPYING ............................. SHIPPED -- reproduced below as 3b
+    test/COPYING ................................... not shipped (test fonts)
+    test/shape/data/aots/COPYING ................... not shipped (Adobe test data)
+    test/shape/data/text-rendering-tests/COPYING ... not shipped (Unicode Inc. test data)
+
+  Only src/ms-use/ is inside the built/shipped code path. The three test/ notices cover test
+  corpora that are not compiled into harfbuzz.lib and are not redistributed by Cathode (the vendor
+  build builds only the `harfbuzz` target, with HB_BUILD_UTILS=OFF and no test targets); they are
+  recorded here for completeness of the sweep, not folded in as shipped obligations.
+
+  Why src/ms-use/ IS shipped: its data files (IndicSyllabicCategory-Additional.txt,
+  IndicPositionalCategory-Additional.txt) are inputs to gen-use-table.py, which generates
+  src/hb-ot-shaper-use-table.hh — a header compiled into harfbuzz.lib via src/hb-ot-shaper-use.cc.
+  The generated table's own header names those two input files. The Microsoft notice therefore
+  covers material present in the shipped binary and is reproduced in full below.
+
+-------- 3a. HarfBuzz, root notice ("Old MIT") --------
+Notice read from: vendor/lib/cathode/harfbuzz/COPYING
+
+HarfBuzz is licensed under the so-called "Old MIT" license.  Details follow.
+For parts of HarfBuzz that are licensed under different licenses see individual
+files names COPYING in subdirectories where applicable.
+
+Copyright © 2010-2022  Google, Inc.
+Copyright © 2015-2020  Ebrahim Byagowi
+Copyright © 2019,2020  Facebook, Inc.
+Copyright © 2012,2015  Mozilla Foundation
+Copyright © 2011  Codethink Limited
+Copyright © 2008,2010  Nokia Corporation and/or its subsidiary(-ies)
+Copyright © 2009  Keith Stribley
+Copyright © 2011  Martin Hosken and SIL International
+Copyright © 2007  Chris Wilson
+Copyright © 2005,2006,2020,2021,2022,2023  Behdad Esfahbod
+Copyright © 2004,2007,2008,2009,2010,2013,2021,2022,2023  Red Hat, Inc.
+Copyright © 1998-2005  David Turner and Werner Lemberg
+Copyright © 2016  Igalia S.L.
+Copyright © 2022  Matthias Clasen
+Copyright © 2018,2021  Khaled Hosny
+Copyright © 2018,2019,2020  Adobe, Inc
+Copyright © 2013-2015  Alexei Podtelezhnikov
+
+For full copyright notices consult the individual files in the package.
+
+
+Permission is hereby granted, without written agreement and without
+license or royalty fees, to use, copy, modify, and distribute this
+software and its documentation for any purpose, provided that the
+above copyright notice and the following two paragraphs appear in
+all copies of this software.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE TO ANY PARTY FOR
+DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN
+IF THE COPYRIGHT HOLDER HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGE.
+
+THE COPYRIGHT HOLDER SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING,
+BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ON AN "AS IS" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO
+PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+
+-------- 3b. HarfBuzz subcomponent: Universal Shaping Engine data (MIT) --------
+Notice read from: vendor/lib/cathode/harfbuzz/src/ms-use/COPYING
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE
+
+
+================================================================================
+4. Blend2D  --  CPU rasterization                      *** ALTERED SOURCE ***
+================================================================================
+Upstream        : https://github.com/blend2d/blend2d
+Version / pin   : (no upstream release tag) master @ 6dbc2cefbc996379e07104e34519a440b49b15d7
+License         : Zlib
+Notice read from: vendor/lib/cathode/blend2d/LICENSE.md
+Linkage         : built STATIC, with AsmJit compiled in (see section 5).
+
+ALTERED-SOURCE DISCLOSURE (required by Zlib clause 2)
+  The Zlib license requires that "Altered source versions must be plainly marked as such, and must
+  not be misrepresented as being the original software." Cathode carries a local modification to
+  Blend2D and marks it here.
+
+  Patch      : Cathode/patches/blend2d-assign-data-underalloc.patch
+  Applies to : blend2d/core/array.cpp, function bl_array_assign_data
+  Change     : one line — the new impl is sized from `n` (the new element count) instead of `u.size`
+               (the array's previous size). Upstream sizes the buffer from u.size but then writes
+               n * item_size bytes, which overflows the allocation whenever n exceeds the current
+               capacity (for example, any assign into a freshly constructed array).
+  Status of the change upstream: present on upstream master at the pinned commit above; not fixed
+               upstream as of 2026-06. This is a Cathode-local alteration, not an upstream revision.
+
+  IMPORTANT — CURRENT APPLICATION STATE. As of this writing the patch is NOT applied by any build
+  step in this repository. It is carried as source only. Wiring its application into the vendor
+  build is deferred work (tracked as the vendor/build item in sprint 033's deferral roadmap).
+  Consequently a Blend2D built from this repository today is UNALTERED upstream code at the pin
+  above, and carries the upstream defect described. This disclosure is stated in the forward-looking
+  sense required by clause 2 — it plainly marks the alteration Cathode distributes in source form —
+  and deliberately does not imply the patched build is live.
+
+Copyright (c) 2017-2025 Petr Kobalicek, Fabian Yzerman
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+
+================================================================================
+5. AsmJit  --  JIT pipeline compiler (Blend2D build dependency)
+================================================================================
+Upstream        : https://github.com/asmjit/asmjit
+Version / pin   : (no upstream release tag) master @ 0bd5787b54b575ed94bf32ac452153b34385c514
+License         : Zlib
+Notice read from: vendor/lib/cathode/asmjit/LICENSE.md
+Linkage         : compiled INTO blend2d.lib (Blend2D's JIT pipeline is built with AsmJit via
+                  ASMJIT_DIR); there is no separate asmjit.lib and no AsmJit runtime DLL. AsmJit's
+                  public headers are published alongside Blend2D's because Blend2D's headers may
+                  reference them. Unaltered.
+
+Copyright (c) 2008-2025 Petr Kobalicek
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+
+================================================================================
+6. Preact  --  test fixture (committed, test-only)
+================================================================================
+Upstream        : https://github.com/preactjs/preact
+Version         : 10.29.2 (UMD distribution, byte-unmodified)
+License         : MIT
+Notice read from: Cathode/Source/CathodeDom/Private/Tests/JS/LICENSE-Preact.txt
+                  (fetched from the same upstream channel as the artifact itself,
+                  https://unpkg.com/preact@10.29.2/LICENSE)
+Artifact        : Cathode/Source/CathodeDom/Private/Tests/JS/preact.umd.js
+                  sha256 08b3e370787c8206405e960a0aad5d605e46f5255346f8e715fbe65b4b8639e3
+                  (verified against the recorded provenance on 2026-07-23)
+Use             : TEST-ONLY. Referenced solely by the Cathode.Dom.Mount.FirstMountProof automation
+                  test; not part of the production author-JS path. See that directory's
+                  PROVENANCE.md.
+
+The MIT License (MIT)
+
+Copyright (c) 2015-present Jason Miller
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+7. Liberation Sans  --  test fixture font (committed, test-only)
+================================================================================
+Upstream        : https://github.com/liberationfonts/liberation-fonts
+Version         : Liberation Sans Regular, version 2.1.5 (committed unmodified)
+License         : SIL Open Font License, Version 1.1
+Notice read from: Cathode/Source/CathodeText/Private/Tests/Fixtures/LICENSE-LiberationSans.txt
+Artifact        : Cathode/Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf
+Use             : TEST-ONLY. Read by the HarfBuzz shaping and kerning-relation automation tests;
+                  not shipped as product content. See that directory's PROVENANCE.md.
+
+The full text of the SIL Open Font License 1.1 governing this font follows. It is reproduced
+BYTE-EXACT from the file cited above: everything between the two markers below is that file's
+content unaltered — no rewrapping, no character substitution — so the block can be byte-diffed
+against it. That same file also ships beside the font itself, as the OFL requires the license to
+travel with the Font Software; this inline copy is additive, not a substitute for it.
+
+----- BEGIN VERBATIM REPRODUCTION OF LICENSE-LiberationSans.txt -----
+----- 4414 bytes, sha256 93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b -----
+Digitized data copyright (c) 2010 Google Corporation
+	with Reserved Font Arimo, Tinos and Cousine.
+Copyright (c) 2012 Red Hat, Inc.
+	with Reserved Font Name Liberation.
+
+This Font Software is licensed under the SIL Open Font License,
+Version 1.1.
+
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+
+PREAMBLE The goals of the Open Font License (OFL) are to stimulate
+worldwide development of collaborative font projects, to support the font
+creation efforts of academic and linguistic communities, and to provide
+a free and open framework in which fonts may be shared and improved in
+partnership with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves.
+The fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works.  The fonts and derivatives,
+however, cannot be released under any other type of license.  The
+requirement for fonts to remain under this license does not apply to
+any document created using the fonts or their derivatives.
+
+ 
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such.
+This may include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components
+as distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting ? in part or in whole ?
+any of the components of the Original Version, by changing formats or
+by porting the Font Software to a new environment.
+
+"Author" refers to any designer, engineer, programmer, technical writer
+or other person who contributed to the Font Software.
+
+
+PERMISSION & CONDITIONS
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,in
+   Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the
+   corresponding Copyright Holder. This restriction only applies to the
+   primary font name as presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+5) The Font Software, modified or unmodified, in part or in whole, must
+   be distributed entirely under this license, and must not be distributed
+   under any other license. The requirement for fonts to remain under
+   this license does not apply to any document created using the Font
+   Software.
+
+
+ 
+TERMINATION
+This license becomes null and void if any of the above conditions are not met.
+
+ 
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT.  IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
+DEALINGS IN THE FONT SOFTWARE.
+
+----- END VERBATIM REPRODUCTION -----
+
+FOOTNOTE, outside the reproduction above and not part of it: in the "Modified Version" definition
+the upstream file contains a literal ASCII question mark where canonical SIL OFL 1.1 carries an em
+dash — it reads "or substituting ? in part or in whole ?". That is an encoding artifact in the
+distributed file, not a variant licence term. It is preserved above because that block is a
+byte-exact reproduction of the file as shipped.
+
+================================================================================
+END OF THIRD-PARTY NOTICES
+================================================================================

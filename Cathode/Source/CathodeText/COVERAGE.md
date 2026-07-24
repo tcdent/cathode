@@ -1,7 +1,7 @@
 # Cathode Text & Fonts — component coverage & accountable deferrals
 
 Durable accountability record for Text & Fonts (sprint 004, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-text-fonts.md`](../../../../../docs/browse/components-text-fonts.md)
+responsibility in [`docs/browse/components-text-fonts.md`](../../../docs/browse/components-text-fonts.md)
 to its status: **COVERED** (slice + mechanism) or **DEFERRED** (reason · dependency · what unblocks it ·
 first-execution risk). Nothing in the component doc is silently missing.
 

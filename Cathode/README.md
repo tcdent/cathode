@@ -8,7 +8,7 @@ rendering surface for bundled, trusted screens — **not a web browser** (no net
 cookies, storage, history, or multi-tab).
 
 Cathode is MIT and has no dependency on `Source/Uptime`, so it remains a reusable Unreal plugin.
-The full design is in [`docs/browse/architecture.md`](../../../docs/browse/architecture.md).
+The full design is in [`docs/browse/architecture.md`](../docs/browse/architecture.md).
 
 > **Status: active.** The runtime, the vendored HTML/CSS/JS engines, and the author-build gate are
 > built. `lib.cathode.d.ts` (the DOM/JS type surface) and `css-allow-list.toml` (the supported CSS
@@ -19,7 +19,7 @@ The full design is in [`docs/browse/architecture.md`](../../../docs/browse/archi
 ## Layout
 
 ```
-game/Plugins/Cathode/
+Cathode/
   Cathode.uplugin                       # descriptor — EnabledByDefault:false, declares CathodeRuntime
   install.sh                            # reproduces the vendored library clones (see below)
   README.md                             # this scaffold map
@@ -56,7 +56,7 @@ re-run). Identity of each lib is its commit, verified by `git rev-parse HEAD == 
 Reproduce the staged source on any checkout:
 
 ```sh
-bash game/Plugins/Cathode/install.sh
+bash Cathode/install.sh
 ```
 
 It is idempotent: an existing clone is fetched and re-checked-out to its pin; a missing one is

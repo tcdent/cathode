@@ -1,7 +1,7 @@
 # Cathode JS Binding — component coverage & accountable deferrals
 
 Durable accountability record for the JS↔Native Binding (sprint 007, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-js-native-bridge.md`](../../../../../docs/browse/components-js-native-bridge.md)
+responsibility in [`docs/browse/components-js-native-bridge.md`](../../../docs/browse/components-js-native-bridge.md)
 to its status: **COVERED** (slice + mechanism + proof test) or **DEFERRED** (reason · dependency · what
 unblocks it · first-execution risk). The teardown model is a recorded **human decision** (Model A), not a
 gap. Every in-tree reference (file / type / test) resolves.

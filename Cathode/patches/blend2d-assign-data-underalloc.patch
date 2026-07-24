@@ -1,0 +1,20 @@
+diff --git a/blend2d/core/array.cpp b/blend2d/core/array.cpp
+index 5ecfb55..adceb3a 100644
+--- a/blend2d/core/array.cpp
++++ b/blend2d/core/array.cpp
+@@ -883,7 +883,14 @@ BL_API_IMPL BLResult bl_array_assign_data(BLArrayCore* self, const void* items,
+     if (BL_UNLIKELY(n > maximum_capacity_table[array_type]))
+       return bl_make_error(BL_ERROR_OUT_OF_MEMORY);
+ 
+-    BLObjectImplSize impl_size = impl_size_from_capacity(u.size, item_size);
++    // CATHODE LOCAL PATCH (browse 022): size the new impl from `n` (the new element count), NOT `u.size` (the
++    // array's OLD size — 0 for a fresh array). Upstream bl_array_assign_data under-allocates here: it sized the
++    // buffer from u.size, but init_dynamic sets size=n and the copy below writes n*item_size bytes -> a
++    // heap-buffer-overflow whenever n exceeds the current capacity (e.g. any assign into a fresh array). asan-
++    // grounded (browse 022 glyph raster: a 410712-byte copy past a 64-byte buffer); the sibling bl_array_reserve
++    // sizes from `n` correctly. Live on upstream master (6dbc2ce == the install.sh pin; introduced by v0.20.0's
++    // snake_case conversion 320a63aa, 2025-09-07; unfixed upstream as of 2026-06).
++    BLObjectImplSize impl_size = impl_size_from_capacity(n, item_size);
+     BLArrayCore newO;
+     BL_PROPAGATE(init_dynamic(&newO, array_type, n, impl_size));
+ 

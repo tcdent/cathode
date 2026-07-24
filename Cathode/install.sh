@@ -37,9 +37,12 @@
 #
 set -euo pipefail
 
-# Resolve repo root from this script's location: game/Plugins/Cathode/ -> ../../.. = repo root.
+# Resolve repo root from this script's location: Cathode/ -> .. = repo root. Staging is REPO-ROOT
+# relative, deliberately NOT plugin-local: each lib is a FULL clone retaining its own .git, and
+# Cathode/ is the directory a consumer drops into their project's Plugins/ — vendored upstream
+# trees do not belong there. The repo-root-anchored /vendor/ ignore rule already covers this path.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEST_ROOT="$REPO_ROOT/vendor/lib/cathode"
 
 # PINS — "lib | upstream url | tag (informational) | pinned commit"

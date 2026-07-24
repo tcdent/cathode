@@ -8,6 +8,10 @@
   box, and the don't-touch-panels non-goal holds); Cathode is self-contained + build-box-reachable here.
 - **sha256:** `08b3e370787c8206405e960a0aad5d605e46f5255346f8e715fbe65b4b8639e3` (byte-unmodified; identical to the
   upstream 10.29.2 distribution).
+- **License:** **MIT** — Copyright (c) 2015-present Jason Miller. Full text:
+  [`LICENSE-Preact.txt`](LICENSE-Preact.txt), fetched from the same upstream channel as the artifact
+  (`https://unpkg.com/preact@10.29.2/LICENSE`). The MIT license permits bundling this test fixture.
+  Aggregated in the repo-root [`THIRD_PARTY_NOTICES`](../../../../../../THIRD_PARTY_NOTICES).
 
 ## Use (test-only boundary)
 

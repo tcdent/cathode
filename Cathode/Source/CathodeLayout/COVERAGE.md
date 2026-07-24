@@ -1,7 +1,7 @@
 # Cathode Layout & Style — component coverage & accountable deferrals
 
 Durable accountability record for Layout & Style (sprint 005, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-layout-style.md`](../../../../../docs/browse/components-layout-style.md)
+responsibility in [`docs/browse/components-layout-style.md`](../../../docs/browse/components-layout-style.md)
 to its status: **COVERED** (slice + mechanism) or **DEFERRED** (reason · dependency · what unblocks it ·
 first-execution risk). Nothing in the component doc is silently missing.
 

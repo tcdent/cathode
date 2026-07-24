@@ -1,7 +1,7 @@
 # Cathode Surfaces — component coverage & accountable deferrals
 
 Durable accountability record for Surfaces (sprint 006, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-surfaces.md`](../../../../../docs/browse/components-surfaces.md)
+responsibility in [`docs/browse/components-surfaces.md`](../../../docs/browse/components-surfaces.md)
 to its status: **COVERED** (slice + mechanism) or **DEFERRED** (reason · dependency · what unblocks it ·
 first-execution risk). One responsibility is **N/A-by-design** (resize), called out as such — not a silent
 omission, not a deferral.

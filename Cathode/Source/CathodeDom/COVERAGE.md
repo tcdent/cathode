@@ -1,7 +1,7 @@
 # Cathode DOM — component coverage & accountable deferrals
 
 Durable accountability record for the DOM (sprint 008, no-build/no-run scaffold). It maps every
-responsibility in [`docs/browse/components-dom.md`](../../../../../docs/browse/components-dom.md) to its
+responsibility in [`docs/browse/components-dom.md`](../../../docs/browse/components-dom.md) to its
 status: **COVERED** (slice + mechanism + proof test) or **DEFERRED / N-A-by-design / DESIGN-FORK** (with
 reason · dependency · unblocker · first-execution risk). Nothing in the component doc is silently missing.
 

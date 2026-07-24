@@ -1,7 +1,7 @@
 # Cathode Rasterizer — component coverage & accountable deferrals
 
 Durable accountability record for the Rasterizer (sprint 003, no-build/no-run/no-pixels scaffold). It
-maps every responsibility in [`docs/browse/components-rasterizer.md`](../../../../../docs/browse/components-rasterizer.md)
+maps every responsibility in [`docs/browse/components-rasterizer.md`](../../../docs/browse/components-rasterizer.md)
 to its status: **COVERED** (slice + mechanism) or **DEFERRED** (reason · dependency · what unblocks it ·
 first-execution risk). Nothing in the component doc is silently missing.
 
