@@ -349,7 +349,12 @@ Order confirmed by the PM/human, 2026-07-23 (recorded here so the backlog ties a
 4. **Self-provided content + demo game** (Arena 3).
 5. **Pre-public hygiene scrub** (cross-cutting; before any publication).
 
-Each is **to be filed** as a backlog ticket linking back to its section here. Filing is currently
-blocked: the `CATHODE` project does not exist in the tracker workspace and the CLI has no
-project-creation verb, so provisioning is required first. The five ticket bodies are written and
-ready to file in the order above.
+Filed as `CATHODE-1` … `CATHODE-5` respectively (backlog; unassigned; the PM promotes to a sprint).
+
+**Cross-cutting, flagged by the human for the next couple of sprints:**
+
+- **API-surface & developer-ergonomics review** — `CATHODE-6`. Review the public interfaces a
+  consuming game developer touches and the "first 15 minutes" path (enable → render → input), and
+  propose prioritized ergonomic improvements. Distinct from the *distribution* decision
+  (`docs/research/linux-first-and-distribution.md` Q2 recommends shipping precompiled binaries): this
+  is about how pleasant the *enabled* plugin is to use, not how it is delivered.
