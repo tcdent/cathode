@@ -19,10 +19,45 @@ between screens and the host game.
 
 **Cathode is a rendering surface for bundled, trusted screens, not a web browser.** There is no
 networking, TLS, cookies, storage, history, or multi-tab. Leaving that apparatus out is what keeps
-the runtime in the single-digit megabytes, in-process, with no Chromium and no second process.
+it small, in-process, with no Chromium and no second process.
 
 Cathode was built for the game UPTIME and has no dependency on it. The design is described in
 [`docs/browse/architecture.md`](docs/browse/architecture.md).
+
+## Footprint
+
+Embedding a browser engine means shipping one: an embedded Chromium (CEF) is roughly 150 MB at
+minimum, because the expensive parts (Blink, V8, Skia, the compositor) are the parts that cannot be
+removed. Cathode's entire third-party surface is four libraries, built from source:
+
+| Library | Win64 Release artifact | Size |
+|---|---|---|
+| quickjs-ng | `quickjs.dll` (linked) | 0.95 MB |
+| Blend2D + AsmJit | `blend2d.lib` (static archive) | 5.7 MB |
+| litehtml + gumbo | `litehtml.lib`, `gumbo.lib` (static archives) | 14.7 MB |
+| HarfBuzz | `harfbuzz.lib` (static archive) | 15.7 MB |
+
+The static-archive sizes are before linking: they are what sits on disk at build time, and an
+upper bound on what reaches a binary once the linker drops unreferenced code. The design target is
+a linked runtime in the single-digit megabytes.
+
+## Modern web development, lightweight
+
+Screens are written the way web front ends are written now: TypeScript, components, a bundler.
+
+- **The language is complete.** quickjs-ng implements ES2023, including native `Promise`,
+  `async`/`await`, classes, and the rest of the modern language. Screens are pre-bundled to a single
+  file, so there is no module loading at runtime.
+- **The platform is a deliberate subset.** What Cathode narrows is the DOM and web API surface,
+  not JavaScript. The supported DOM was scoped by measuring what [Preact](https://preactjs.com)'s
+  renderer actually calls, then implementing each of those members to its specification
+  ([`docs/browse/components-dom-surface.md`](docs/browse/components-dom-surface.md)).
+- **Preact runs on it.** Preact is the React-compatible library with the same component and hooks
+  model in about 11 kB (the unmodified 10.29.2 UMD build is 11.4 kB). Cathode's test suite mounts
+  a component through that genuine upstream build and checks the resulting DOM. That proof covers
+  the mount path with a static component; it does not yet exercise hooks or event handlers.
+- **The subset is enforced at author time.** A screen that reaches for an API outside the surface
+  fails to compile; see [Authoring screens](#authoring-screens).
 
 ## Status
 
