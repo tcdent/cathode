@@ -23,7 +23,7 @@ namespace Cathode
 {
 
 // Engine-neutral font handle. Identifies a registered font without naming any engine's font type. The
-// shaper maps it -> hb_font; the Rasterizer (its side, future) maps it -> BLFont; both over the SAME
+// shaper maps it -> hb_font; the Rasterizer (its side) maps it -> BLFont; both over the SAME
 // bytes from the registry, so HarfBuzz glyph ids match Blend2D outlines.
 struct FFontHandle
 {
@@ -34,7 +34,7 @@ struct FFontHandle
 	bool operator!=(const FFontHandle& Other) const { return Id != Other.Id; }
 };
 
-// Per-run OpenType feature control. Defaults are the human's decided set (kern/liga/calt on); kern=0
+// Per-run OpenType feature control. Defaults are kern/liga/calt on; kern=0
 // (bKerning=false) is the deliberate retro-CRT unkerned look. Mapped to the HarfBuzz feature array in
 // the impl (bespoke mapping, tested).
 struct FTextFeatures
@@ -55,18 +55,18 @@ struct FShapeRequest
 
 // One shaped glyph, in our types: the glyph id + cluster (HarfBuzz output) and fractional pixel
 // positions (HarfBuzz fixed-point advances/offsets scaled to pixels in the impl). Positions are kept
-// FRACTIONAL — never snapped (carried from the 003 decision).
+// FRACTIONAL — never snapped (CathodeRasterizer places glyphs at fractional positions).
 struct FShapedGlyph
 {
 	uint32 GlyphId = 0;
 	int32 Cluster = 0;
 
 	// Cumulative draw position within the run (running pen advance + this glyph's offset), in fractional
-	// px — never snapped (carried from the 003 decision). The Rasterizer places the glyph here.
+	// px — never snapped. The Rasterizer places the glyph here.
 	float X = 0.0f;
 	float Y = 0.0f;
 
-	// This glyph's advance, px — for measurement (Slice 4) and the running pen.
+	// This glyph's advance, px — for measurement and the running pen.
 	float XAdvance = 0.0f;
 	float YAdvance = 0.0f;
 };
@@ -90,13 +90,13 @@ struct FShapedRun
 {
 	TArray<FShapedGlyph> Glyphs; // the glyph-run for the Rasterizer (ids + fractional positions)
 	FTextMetrics Metrics;        // the measurement for Layout
-	FBox2f Extents = FBox2f(ForceInit); // run bounding box (closes 003 #2 — glyph dirty bounds)
+	FBox2f Extents = FBox2f(ForceInit); // run bounding box (CathodeRasterizer COVERAGE.md #2 — glyph dirty bounds)
 	FFontHandle Font;            // engine-neutral handle (Rasterizer maps -> BLFont via the byte store)
 };
 
 // --- The two seams off the ONE shaped result (no double-shape; no BL*) ---
 
-// The GLYPH-RUN SEAM to the Rasterizer: the engine-neutral output the integration sprint maps to the 003
+// The GLYPH-RUN SEAM to the Rasterizer: the engine-neutral output the integration layer maps to CathodeRasterizer's
 // FPositionedGlyphRun — glyph ids + fractional positions (in Glyphs) + the run Extents + the FFontHandle
 // (the Rasterizer maps it -> BLFont). A view over the shaped run (no copy); valid while the FShapedRun
 // lives. NO Blend2D / BL*.
@@ -137,7 +137,7 @@ public:
 
 // The font registry: loads + registers font files (once each), owns the byte lifetime, hands out
 // handles. Byte source is the local file system / UE file or asset APIs (single-load-share; UE coupling
-// allowed, no UPTIME coupling). Implemented in Slice 2.
+// allowed, no UPTIME coupling).
 class IFontRegistry : public IFontByteStore
 {
 public:
@@ -157,10 +157,10 @@ public:
 };
 
 // Construct the HarfBuzz-backed shaper over a font byte store. The single place HarfBuzz is bound; the
-// shaper builds hb_font from the store's bytes for a handle. (Export macro/module formalized in Slice 2.)
+// shaper builds hb_font from the store's bytes for a handle.
 CATHODETEXT_API TUniquePtr<ITextShaper> CreateHarfBuzzShaper(const IFontByteStore& Fonts);
 
-// Construct the font registry (single-load byte store). Implemented in Slice 2.
+// Construct the font registry (single-load byte store).
 CATHODETEXT_API TUniquePtr<IFontRegistry> CreateFontRegistry();
 
 } // namespace Cathode

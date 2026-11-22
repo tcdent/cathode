@@ -13,7 +13,7 @@
 // production FCathodeTick::Tick() (the same unit the worker's Run() loop calls) with only the INPUTS
 // isolated — a fake clock, a recording runtime, drivable queues, recording timer/rAF callbacks, and a
 // recording relayout seam. There is no forked tick. Phase order is proven by a SINGLE shared ordered
-// effect-log fed through those seams, never by a bool or code inspection. Authored, not run this sprint.
+// effect-log fed through those seams, never by a bool or code inspection.
 
 namespace
 {
@@ -99,7 +99,7 @@ bool FCathodeRuntimeTickPhaseOrderTest::RunTest(const FString& Parameters)
 	// Phase 3 input: a requestAnimationFrame callback.
 	Scheduler.RequestAnimationFrame([&Order](double) { Order.Add(TEXT("raf")); });
 
-	// Phase 5 input: the relayout seam records + emits one frame-ready. (028 S3: the seam grew to receive the worker's
+	// Phase 5 input: the relayout seam records + emits one frame-ready. (The seam receives the worker's
 	// ICathodeJsRuntime& — this phase-order test ignores it, exercising only the sequence/emit contract.)
 	FSurfaceRelayoutSeam Relayout = [&Order](Cathode::ICathodeJsRuntime& /*Runtime*/, TArray<FHostOutboundMessage>& OutFrameReady)
 	{

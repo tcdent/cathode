@@ -25,15 +25,15 @@
 #   Pin to released tags where upstream publishes them; Blend2D and AsmJit have no release
 #   tags (rolling release), so they pin to a recorded master commit.
 #
-# CONSTRAINTS (sprint 001, scaffold-only)
+# CONSTRAINTS
 #   This script clones + checks out + verifies ONLY. It performs NO build, NO configure, and
 #   NO source modification. Building the libraries from source and producing platform binaries
-#   is the integration sprint's (002) concern.
+#   is a separate step (see the repository README).
 #
-# ASMJIT NOTE (deferred to 002)
+# ASMJIT NOTE
 #   Blend2D's JIT pipeline build expects AsmJit at [blend2d]/3rdparty/asmjit. We stage AsmJit
-#   as a sibling under vendor/lib/cathode/asmjit/; the relocation/symlink into Blend2D's
-#   3rdparty/ tree is a 002 build-time step, not done here.
+#   as a sibling under vendor/lib/cathode/asmjit/; the Blend2D build is pointed at it with
+#   -DASMJIT_DIR at configure time, not relocated here.
 #
 set -euo pipefail
 

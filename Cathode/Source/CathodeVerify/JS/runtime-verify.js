@@ -1,4 +1,4 @@
-// Cathode runtime-verification faculty (sprint 011 [b]) — runs IN a Cathode runtime and emits a structured,
+// Cathode runtime-verification faculty — runs IN a Cathode runtime and emits a structured,
 // machine-readable self-report.
 //
 // EMIT: the faculty calls globalThis.__cathodeEmitReport(jsonString), a NATIVE sink CathodeVerify installs on
@@ -11,19 +11,19 @@
 // (globalThis.__CATHODE_CSS_SUBSET__), then Evaluates this faculty.
 //
 // Faculty-A enumerates the ACTUALLY-exposed surface (reflection over the real runtime — NO hardcoded list).
-// All three declared axes read DORMANT-until-baseline: DOM/globals' declared source is the not-yet-emitted
-// 012 descriptor; CSS's is Cathode's OWN litehtml-grounded CSS declaration (a roadmap item in the plugin's
-// Authoring/, never read from panels/). Each reports the dormant slot until its source lands. The DOM/globals
-// reconcile MACHINERY is
-// BUILT and consumes the declared-interface DESCRIPTOR (globalThis.__CATHODE_DECLARED__) the 012 Host Bridge
-// projection emits — the descriptor shape is the durable 011<->012 lockstep contract pinned in
-// CathodeVerify/SCHEMA.md (§2). It is DORMANT in 011 (no descriptor source yet) — it reports the dormant
-// slot, never a re-walk-as-declared, and activates with no reshape when 012 injects the descriptor.
-// Faculty-B is the capability framework (scaffold + a self-test; the 4 come-due proofs are [c]'s).
+// All three declared axes read DORMANT-until-baseline: DOM/globals' declared source is the injected
+// descriptor; CSS's is Cathode's OWN litehtml-grounded CSS declaration (in the plugin's
+// Authoring/, never a host project's stylesheets). Each reports the dormant slot when its source is not injected.
+// The DOM/globals reconcile MACHINERY
+// consumes the declared-interface DESCRIPTOR (globalThis.__CATHODE_DECLARED__) the Host Bridge
+// projection emits — the descriptor shape is the durable faculty<->descriptor lockstep contract pinned in
+// CathodeVerify/SCHEMA.md (§2). With no descriptor injected it is DORMANT — it reports the dormant
+// slot, never a re-walk-as-declared, and activates with no reshape when the descriptor is injected.
+// Faculty-B is the capability framework (scaffold + a self-test).
 (function () {
   "use strict";
 
-  // --- Harness-injection exclusion (review's core [b] gate) ---
+  // --- Harness-injection exclusion ---
   // The CathodeVerify driver injects scaffolding onto the test runtime to DRIVE + CAPTURE the faculty. These
   // names are NOT part of the production surface (production exposes none of them), so faculty-A MUST exclude
   // them from the enumerated surface — else it reports a false OVER-exposure that diverges from production by
@@ -62,12 +62,12 @@
     return { globalNames: enumerateGlobals(), hostGlobals: hostGlobals, domSnapshot: walk };
   }
 
-  // --- Faculty-A: CSS-axis reconcile — DORMANT in [b] (browse-pm/lead ruled 2026-06-14), parallel to
-  //     DOM/globals. Its declared source is CATHODE'S OWN litehtml-grounded CSS declaration — a roadmap item
-  //     authored later in the plugin's Authoring/ (the convention track), NEVER read/copied from panels/
-  //     (another dev's area, untouched). With no Cathode CSS declaration injected, the reconcile reports the
-  //     dormant slot. The CSS reconcile machinery proper is authored WITH that declaration (its shape lands
-  //     with it), so [b] carries no panels-derived CSS shape. ---
+  // --- Faculty-A: CSS-axis reconcile — DORMANT, parallel to
+  //     DOM/globals. Its declared source is CATHODE'S OWN litehtml-grounded CSS declaration
+  //     (the plugin's Authoring/), NEVER read/copied from a host project's
+  //     stylesheets. With no Cathode CSS declaration injected, the reconcile reports the
+  //     dormant slot. The CSS set-diff itself is not implemented here: this function always
+  //     reports the dormant slot. ---
   function cssReconcile(exposed) {
     return {
       declared: null,
@@ -77,12 +77,12 @@
     };
   }
 
-  // --- DOM + globals reconcile MACHINERY (the 011<->012 lockstep). Consumes the declared-interface
-  //     DESCRIPTOR (globalThis.__CATHODE_DECLARED__) emitted by the 012 Host Bridge single-source
+  // --- DOM + globals reconcile MACHINERY (the faculty<->descriptor lockstep). Consumes the declared-interface
+  //     DESCRIPTOR (globalThis.__CATHODE_DECLARED__) emitted by the Host Bridge single-source
   //     projection. The descriptor SHAPE is the durable contract pinned in CathodeVerify/SCHEMA.md (§2).
-  //     The set-diff is baseline-AGNOSTIC (works over whatever declared-set is supplied). DORMANT in 011
-  //     (no descriptor injected) -> reports the dormant slot, NEVER a re-walk-as-declared; 012 activates
-  //     it with no reshape. ---
+  //     The set-diff is baseline-AGNOSTIC (works over whatever declared-set is supplied). DORMANT when
+  //     no descriptor is injected -> reports the dormant slot, NEVER a re-walk-as-declared; an injected
+  //     descriptor activates it with no reshape. ---
 
   // missing = declared keys NOT exposed (under-exposure); extra = exposed names NOT declared (over-exposure).
   // Only the key participates; tag/signature on declared entries are carried metadata, not diffed.
@@ -103,14 +103,14 @@
     var descriptor = (typeof globalThis.__CATHODE_DECLARED__ !== "undefined") ? globalThis.__CATHODE_DECLARED__ : null;
     var declared = (descriptor && descriptor[axis]) ? descriptor[axis] : null;
     if (!declared) {
-      return { // DORMANT: no declared source in 011; machinery built + ready, activates on the 012 descriptor
+      return { // DORMANT: no declared source injected; activates on the injected descriptor
         declared: null,
         declaredSource: DESCRIPTOR_REF + " -- not injected (dormant)",
         drift: null,
         note: axis + " declared set is DEFINITION-derived from the 012 projection (interface-IS-source), never a re-walk; reconcile machinery built + dormant pending the descriptor",
       };
     }
-    // A2 (012 lockstep): the DOM reconcile is keyed by NAME-PRESENCE. The contract's iface (Element/Node/...)
+    // A2 (lockstep): the DOM reconcile is keyed by NAME-PRESENCE. The contract's iface (Element/Node/...)
     // collapses onto ONE runtime FDomNode class, so iface is NOT runtime-verifiable — it is carried DECLARED
     // metadata (tautological), and name-presence is the verified axis (see SCHEMA.md §2). Globals key by name too.
     var keyFn = function (e) { return e.name; };
@@ -143,7 +143,7 @@
     } catch (e) { return []; }
   }
 
-  // --- Faculty-B: exercise-and-report FRAMEWORK (scaffold). [c] registers the 4 come-due proofs. ---
+  // --- Faculty-B: exercise-and-report FRAMEWORK (scaffold). ---
   function makeCapabilityFramework() {
     var probes = [];
     return {
@@ -177,8 +177,8 @@
         domExposed: exposed.domSnapshot !== null, // false on a bare runtime (no document) — a faculty-A finding
         harnessExcluded: Object.keys(HARNESS_INJECTIONS), // auditable: the harness names filtered from globalNames
       },
-      dom: reconcile("dom", exposedDomMembers(exposed)),       // dormant in 011 (no descriptor); bare DOM == []
-      globals: reconcile("globals", presentHostGlobals(exposed)), // dormant in 011; exposed host-globals only
+      dom: reconcile("dom", exposedDomMembers(exposed)),       // dormant with no descriptor; bare DOM == []
+      globals: reconcile("globals", presentHostGlobals(exposed)), // dormant with no descriptor; exposed host-globals only
       css: cssReconcile(exposed),
     },
     capabilities: capabilities,

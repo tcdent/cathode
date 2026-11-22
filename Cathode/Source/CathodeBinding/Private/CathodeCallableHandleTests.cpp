@@ -14,7 +14,6 @@ THIRD_PARTY_INCLUDES_END
 // Spec for the held-callable: it owns a JS function (FJsValue RAII), invokes it, and frees its ref on
 // destruction. Drives the REAL engine and asserts OUR bookkeeping — the invoke returns the expected
 // MARSHALED value, and the held function ref balances by our free-count — never quickjs-ng internals.
-// Authored, not run this sprint.
 
 namespace
 {

@@ -8,7 +8,7 @@ namespace Cathode
 
 // Timer + requestAnimationFrame scheduling — OUR selection logic over the worker's injected clock.
 // This is the INTERNAL C++ seam; the JS setTimeout / requestAnimationFrame globals are wired onto it in
-// Slice 6, not here. Bespoke + testable: due-timer selection (deadline <= now, earliest first) and rAF
+// CathodeContractGlobals, not here. Bespoke + testable: due-timer selection (deadline <= now, earliest first) and rAF
 // one-shot semantics (a callback re-registered during the run fires on the NEXT frame, not this one).
 class FCathodeScheduler
 {
@@ -41,8 +41,8 @@ public:
 	/** Earliest pending timer deadline; false if none pending. */
 	bool TryGetNextTimerDue(double& OutDueSeconds) const;
 
-	/** Drop all pending timers + rAF callbacks. Teardown release: a callback may hold a resource (sprint 012
-	 *  S4 — the JS-callback ref); call this BEFORE the JS context is freed so the callbacks release while it is
+	/** Drop all pending timers + rAF callbacks. Teardown release: a callback may hold a resource
+	 *  (the JS-callback ref); call this BEFORE the JS context is freed so the callbacks release while it is
 	 *  still alive (the worker calls it just before tearing down the runtime). Empties the selection state only;
 	 *  the selection LOGIC is unchanged. */
 	void Reset()

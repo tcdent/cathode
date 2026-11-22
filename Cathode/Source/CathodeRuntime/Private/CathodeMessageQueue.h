@@ -4,7 +4,7 @@
 #include "Containers/Queue.h"
 #include "Templates/Function.h"
 
-#include "CathodeRuntimeSeam.h" // FHostOutboundMessage (moved to Public, 028 S2)
+#include "CathodeRuntimeSeam.h" // FHostOutboundMessage
 
 namespace Cathode
 {
@@ -17,11 +17,11 @@ struct FHostInboundMessage
 	TFunction<void()> Apply;
 };
 
-// FHostOutboundMessage (the worker -> host "frame ready" notification) moved to Public/CathodeRuntimeSeam.h (028 S2)
+// FHostOutboundMessage (the worker -> host "frame ready" notification) lives in Public/CathodeRuntimeSeam.h
 // so the surface-load owner + CathodeEgress can produce/consume it cross-module.
 
 // A thread-safe FIFO message queue: many producer threads enqueue, the single worker thread drains in
-// order. Backed by an MPSC queue; OUR contract is the FIFO drain-to-empty that Slice 4's tick relies
+// order. Backed by an MPSC queue; OUR contract is the FIFO drain-to-empty that the tick relies
 // on — that is what the specs assert, not the underlying queue primitive (which is vendor/engine).
 template <typename T>
 class TCathodeMessageQueue

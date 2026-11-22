@@ -10,7 +10,7 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 selectors — querySelector (Element + Document) DISPATCH-CORRECTNESS through the REAL bindings, against
+// Selectors — querySelector (Element + Document) DISPATCH-CORRECTNESS through the REAL bindings, against
 // the REAL CathodeLayout matcher (CreateSelectorService — litehtml-grounded parse + a live-tree structural match).
 // The matcher walks the LIVE FDomNode tree via IMatchableNode; the load-bearing discriminator is a POST-MUTATION
 // match (no relayout) — a matcher reading litehtml's per-layout snapshot would MISS it. Proves the supported set
@@ -129,7 +129,7 @@ bool FCathodeDomQuerySelectorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("unsupported pseudo-element '::before' -> SyntaxError"), ThrowsSyntax("'::before'"));
 	TestTrue(TEXT("malformed selector -> SyntaxError"), ThrowsSyntax("'>>>'"));
 
-	// --- THE LIVE-TREE DISCRIMINATOR (#2): a POST-MUTATION match with NO relayout. A matcher reading litehtml's
+	// --- THE LIVE-TREE DISCRIMINATOR: a POST-MUTATION match with NO relayout. A matcher reading litehtml's
 	//     per-layout snapshot would MISS these (the mutation hasn't been serialized/relaid-out). ---
 	TestTrue(TEXT("live-tree setAttribute: __c.setAttribute('data-y','2') then querySelector('[data-y]') === c (no relayout)"),
 		EvalBool("(function(){ __c.setAttribute('data-y','2'); return document.querySelector('[data-y]') === __c; })()"));
@@ -141,11 +141,11 @@ bool FCathodeDomQuerySelectorTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 selectors TRIO — querySelectorAll / matches / closest over the SAME shipped matcher (the floor's
+// Selectors TRIO — querySelectorAll / matches / closest over the SAME matcher (the querySelector test's
 // ParseAndValidate + MatchChain; compose-not-duplicate — one service drives all four shapes). Proves: all-matches
 // pre-order + the STATIC-snapshot discriminator (capture a list, mutate the tree, the captured list is UNCHANGED);
 // matches(self) bool; closest INCLUDES-self (distinct from querySelector's exclude-self) + ancestor-walk + null;
-// invalid -> SyntaxError carries. Same tree as the floor: .item at b, d, f (pre-order); f outside a's subtree.
+// invalid -> SyntaxError carries. Same tree as the querySelector test: .item at b, d, f (pre-order); f outside a's subtree.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomSelectorTrioTest,
 	"Cathode.Dom.Selector.Trio",

@@ -10,23 +10,22 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 014 slice 1 — letter-spacing VALUE SIDE (CathodeComputed). litehtml does NOT parse letter-spacing, so getComputedStyle
+// letter-spacing VALUE SIDE (CathodeComputed). litehtml does NOT parse letter-spacing, so getComputedStyle
 // sources it Cathode-side by parsing the element's OWN inline value ON-DEMAND in QueryComputedValue (own-element-only;
-// inheritance + rendering DEFERRED to the litehtml build-how, per the scope-A ruling). NO CathodeText/shaping, NO layout
-// effect this slice. Proven on the 013 harness (REAL litehtml engine + stub measurer + getComputedStyle, as 013-S4/S5).
+// inheritance + rendering are NOT implemented). NO CathodeText/shaping, NO layout
+// effect. Proven on the REAL litehtml engine + stub measurer + getComputedStyle (as CathodeDomComputedStyleTests).
 // DISCRIMINATING, RELATIONAL:
 //  - px own value: 'letter-spacing:2px' -> '2px'.
 //  - em (LOAD-BEARING, not an echo): own font-size 16px + '0.1em' -> '1.6px'. specified '0.1em' != computed '1.6px', so
 //    the value MUST trace to the Cathode-side parse (em x font-size), not the inline string. font-size is set ON THE
 //    ELEMENT (deterministic — NOT relying on font-size inheritance, a separate concern).
-//  - NON-VACUOUS deferred-inheritance (SAME parent+child setup): (a) the parent's OWN letter-spacing resolves non-empty
+//  - NON-VACUOUS unimplemented-inheritance (SAME parent+child setup): (a) the parent's OWN letter-spacing resolves non-empty
 //    (the parse WORKS on this machinery) AND (b) the child with NO own letter-spacing is '' (own-element-only, NOT
 //    inherited). (a) is what makes (b) bite — without it, child-'' can't distinguish own-element-only from a broken parse.
 //  - unset -> '' (NOT 'normal' — the documented own-inline partial).
 //  - NAME-keyed read (status is informational): the same element reads TWO CathodeComputed props at DISTINCT values —
 //    letter-spacing '1.6px' AND opacity '1' (the initial). A status-keyed read couldn't return two different values for
-//    ONE status; the per-NAME branch does. The bite is the DISTINCT values, NOT 'both non-empty' (opacity flipped ''->'1'
-//    at 014 slice 2, so the old empty-foil is retired).
+//    ONE status; the per-NAME branch does. The bite is the DISTINCT values, NOT 'both non-empty'.
 
 namespace
 {
@@ -109,7 +108,7 @@ bool FCathodeDomLetterSpacingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("em (load-bearing): getComputedStyle(__em).letter-spacing === '1.6px' (0.1em of 16px; not an echo of '0.1em')"),
 		Js("getComputedStyle(__em)['letter-spacing'] === '1.6px'"));
 
-	// NON-VACUOUS deferred-inheritance, SAME setup: (a) parent own non-empty (parse works) THEN (b) child no-own '' (own-element-only).
+	// NON-VACUOUS unimplemented-inheritance, SAME setup: (a) parent own non-empty (parse works) THEN (b) child no-own '' (own-element-only).
 	TestTrue(TEXT("inheritance (a): getComputedStyle(__parent).letter-spacing === '3px' (own value resolves — the parse WORKS)"),
 		Js("getComputedStyle(__parent)['letter-spacing'] === '3px'"));
 	TestTrue(TEXT("inheritance (b): getComputedStyle(__child).letter-spacing === '' (no own -> own-element-only, NOT inherited; bites GIVEN (a))"),
@@ -122,7 +121,7 @@ bool FCathodeDomLetterSpacingTest::RunTest(const FString& Parameters)
 	// NAME-KEYED read (status informational): __em reads TWO CathodeComputed props at DISTINCT values — letter-spacing
 	// '1.6px' AND opacity '1' (initial; __em sets no own opacity). A STATUS-keyed read could NOT yield two different values
 	// for ONE status; the per-NAME QueryComputedValue branch does. The BITE is the distinct values ('1.6px' != '1'), NOT
-	// 'both non-empty' (vacuous since opacity flipped ''->'1' at 014 slice 2).
+	// 'both non-empty' (vacuous: opacity's initial is '1').
 	TestTrue(TEXT("NAME-keyed: __em letter-spacing === '1.6px' AND opacity === '1' (two CathodeComputed props, distinct per-name values)"),
 		Js("getComputedStyle(__em)['letter-spacing'] === '1.6px' && getComputedStyle(__em)['opacity'] === '1'"));
 

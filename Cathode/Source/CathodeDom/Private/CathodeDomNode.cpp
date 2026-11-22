@@ -1,10 +1,10 @@
 #include "CathodeDom.h"
 
-#include "CathodeBoundMember.h" // sprint 012 slice 1: the single binding-definition mechanism (install + enumerate)
-#include "CathodeCssCapability.h" // 013 slice 1: the CSS capability mirror — element.style accept-and-ignore validation
+#include "CathodeBoundMember.h" // the single binding-definition mechanism (install + enumerate)
+#include "CathodeCssCapability.h" // the CSS capability predicate — element.style accept-and-ignore validation
 
-// The DOM is quickjs-type-coupled by design (via 007). quickjs.h reaches here through CathodeBinding.h; the
-// DOM calls a few quickjs primitives directly to map wrappers<->opaques. Include path wired at execution.
+// The DOM is quickjs-type-coupled by design (via CathodeBinding). quickjs.h reaches here through CathodeBinding.h; the
+// DOM calls a few quickjs primitives directly to map wrappers<->opaques.
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -16,7 +16,6 @@ namespace
 {
 // JSValue identity for objects (incl. functions) = the same boxed pointer + tag. Used wherever we match a
 // held wrapper against another JS value by identity (reparent reference, child removal, listener removal).
-// JS_VALUE_GET_PTR/TAG verified against the real quickjs.h at first compile (was TODO-PREBUILD(signature)).
 bool SameJsObject(const FJsValue& Held, JSValueConst Other)
 {
 	return JS_VALUE_GET_PTR(Held.GetValue()) == JS_VALUE_GET_PTR(Other)
@@ -34,7 +33,7 @@ FDomNode::FDomNode(FDomDocument& InDocument, FDomNodeId InNodeId, EDomNodeType I
 
 namespace
 {
-// Sprint 012 events: the Event / KeyboardEvent JS class ids, set at RegisterDomEventClasses (below). The dispatch
+// The Event / KeyboardEvent JS class ids, set at RegisterDomEventClasses (below). The dispatch
 // wraps the live FDomEvent in an event object via these; the event member thunks recover the native via them.
 JSClassID GEventClassId = 0;
 JSClassID GKeyboardEventClassId = 0;
@@ -96,7 +95,7 @@ void FDomNode::AppendChild(const FJsValue& ChildWrapper)
 {
 	// The JS-ref LINK — the parent takes an OWNING ref to the child's wrapper (Model A). Reparent first: if
 	// the child has a parent, that parent drops its held ref (a reference-drop). Dirty-mark the parent (the
-	// changed subtree) so 005 relayouts only it (S3).
+	// changed subtree) so CathodeLayout relayouts only it.
 	if (Document == nullptr)
 	{
 		return;
@@ -121,7 +120,7 @@ void FDomNode::AppendChild(const FJsValue& ChildWrapper)
 void FDomNode::InsertBefore(const FJsValue& ChildWrapper, const FJsValue& ReferenceWrapper)
 {
 	// Like AppendChild but positions the child BEFORE the reference among the parent's children. An empty (or
-	// unknown) reference appends (lenient). Reference-drop reparent + dirty-mark the parent (S3).
+	// unknown) reference appends (lenient). Reference-drop reparent + dirty-mark the parent.
 	if (Document == nullptr)
 	{
 		return;
@@ -156,8 +155,8 @@ void FDomNode::InsertBefore(const FJsValue& ChildWrapper, const FJsValue& Refere
 void FDomNode::RemoveChild(const FJsValue& ChildWrapper)
 {
 	// The reference-DROP — drop the parent's held ref to the matched child wrapper (by JS identity). If
-	// nothing else references the child, 007's gc_mark/finalizer reclaim it (no explicit free). Dirty-mark
-	// the parent on a real removal (S3).
+	// nothing else references the child, CathodeBinding's gc_mark/finalizer reclaim it (no explicit free).
+	// Dirty-mark the parent on a real removal.
 	FDomNode* ChildNode = Document ? Document->NodeFromWrapper(ChildWrapper) : nullptr;
 	const int32 Removed = Children.RemoveAll(
 		[&ChildWrapper](const FJsValue& Held) { return SameJsObject(Held, ChildWrapper.GetValue()); });
@@ -174,7 +173,7 @@ void FDomNode::RemoveChild(const FJsValue& ChildWrapper)
 	}
 }
 
-// --- Tree reads (S3) — return NodeIds (INDEX_NONE when absent); resolve child wrappers via the index ---
+// --- Tree reads — return NodeIds (INDEX_NONE when absent); resolve child wrappers via the index ---
 
 FDomNodeId FDomNode::GetParentNode() const
 {
@@ -233,7 +232,7 @@ FDomNodeId FDomNode::GetNextSibling() const
 	return INDEX_NONE;
 }
 
-// --- Attribute / property access (S4; the bounded string-valued surface) ---
+// --- Attribute / property access (the bounded string-valued surface) ---
 
 bool FDomNode::GetAttribute(const FString& Name, FString& OutValue) const
 {
@@ -264,7 +263,7 @@ void FDomNode::RemoveAttribute(const FString& Name)
 	}
 }
 
-// Form LIVE state (sprint 012 forms) — the dirty-value model: el.value/checked are the LIVE state, distinct from the
+// Form LIVE state — the dirty-value model: el.value/checked are the LIVE state, distinct from the
 // value/checked ATTRIBUTES (= defaultValue/defaultChecked). The getter returns the live state once dirtied, else the
 // attribute default; the setter writes the live state only (the attribute is untouched -> getAttribute stays the default).
 
@@ -332,7 +331,7 @@ void FDomNode::SetTextContent(const FString& Text)
 			Child->ParentId = INDEX_NONE; // detach removed children (reference-drop on Reset below)
 		}
 	}
-	Children.Reset(); // drop the child wrapper refs (reference-drops; 007 reclaims the unreferenced subtree)
+	Children.Reset(); // drop the child wrapper refs (reference-drops; CathodeBinding reclaims the unreferenced subtree)
 	FJsValue TextWrapper = Document->CreateTextNode(Text);
 	if (FDomNode* TextNode = Document->NodeFromWrapper(TextWrapper))
 	{
@@ -342,7 +341,7 @@ void FDomNode::SetTextContent(const FString& Text)
 	Document->MarkDirty(NodeId, EDirtyKind::Structure);
 }
 
-// --- Sprint 012 slice 2: thin backing for the node-core member bindings (spec-anchored, additive) ---
+// --- Thin backing for the node-core member bindings (spec-anchored, additive) ---
 
 FString FDomNode::GetNodeName() const
 {
@@ -393,7 +392,7 @@ void FDomNode::SetData(const FString& Value)
 
 void FDomNode::Remove()
 {
-	// ChildNode.remove(): the parent drops its OWNING ref to THIS node's wrapper (a reference-drop; 007 reclaims
+	// ChildNode.remove(): the parent drops its OWNING ref to THIS node's wrapper (a reference-drop; CathodeBinding reclaims
 	// if nothing else holds it). Self does not hold its own wrapper (Model A), so find it in the parent's Children
 	// by native identity. Dirty-mark the parent's subtree on a real removal.
 	if (Document == nullptr || ParentId == INDEX_NONE)
@@ -427,7 +426,7 @@ FDomDocument* FDomNode::GetOwningDocument() const
 	return Document;
 }
 
-// --- IMatchableNode (012 selectors): the structural surface the CathodeLayout matcher walks over the LIVE tree.
+// --- IMatchableNode (selectors): the structural surface the CathodeLayout matcher walks over the LIVE tree.
 //     Reads this node's current state directly (no serialization) so a freshly-mutated node matches without relayout. ---
 
 FString FDomNode::GetMatchTagName() const
@@ -510,7 +509,7 @@ void FDomNode::GetMatchChildren(TArray<const IMatchableNode*>& OutChildren) cons
 	}
 }
 
-// --- Event system (S6) — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
+// --- Event system — listeners are held JS refs; dispatch bubbles; removal is a reference-drop ---
 
 void FDomNode::AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture)
 {
@@ -541,7 +540,7 @@ void FDomNode::RemoveEventListener(const FString& EventType, JSValueConst Listen
 
 void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoker)
 {
-	// The dispatch ALGORITHM (extends 008's AtTarget+bubble with the CAPTURE phase): CAPTURE (ancestors top-down,
+	// The dispatch ALGORITHM: CAPTURE (ancestors top-down,
 	// capture listeners) -> AT-TARGET (the target, ALL its listeners in registration order) -> BUBBLE (ancestors
 	// bottom-up, non-capture listeners, if bBubbles). ONE shared Event walks the tree (CurrentTarget/Phase
 	// advance). The (type, capture) tuple selects per phase. stopPropagation halts the REST of the walk; the SAME
@@ -564,7 +563,7 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 	auto FireAt = [&Event, &Invoker](FDomNode* Node, EDomEventPhase Ph, bool bCapturePhase) -> bool
 	{
 		Event.CurrentTarget = Node->NodeId;
-		Event.bCurrentTargetIsDocument = false; // 030 S1-P1 — a NODE currentTarget (clears any prior document pass)
+		Event.bCurrentTargetIsDocument = false; // a NODE currentTarget (clears any prior document pass)
 		Event.Phase = Ph;
 		for (const FDomEventListener& Listener : Node->Listeners)
 		{
@@ -584,7 +583,7 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 		return !Event.bPropagationStopped; // same-node remaining already ran; halt the REST of the walk
 	};
 
-	// 030 S1-P1 — the DOCUMENT is the OUTERMOST EventTarget (above the root node). CAPTURE is top-down, so the document's
+	// The DOCUMENT is the OUTERMOST EventTarget (above the root node). CAPTURE is top-down, so the document's
 	// capture listeners fire FIRST. A listener-free document is a zero-iteration no-op (no change to node-only dispatch).
 	if (!Document->FireListeners(Event, EDomEventPhase::Capturing, /*bCapturePhase*/ true, Invoker))
 	{
@@ -615,7 +614,7 @@ void FDomNode::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& Invoke
 			return;
 		}
 	}
-	// 030 S1-P1 — BUBBLE reaches the DOCUMENT LAST (the outermost EventTarget), so `document.addEventListener('keydown')`
+	// BUBBLE reaches the DOCUMENT LAST (the outermost EventTarget), so `document.addEventListener('keydown')`
 	// fires after the whole node chain — exactly how a real browser delivers keydown (focused element -> ... -> document).
 	Document->FireListeners(Event, EDomEventPhase::Bubbling, /*bCapturePhase*/ false, Invoker);
 }
@@ -624,7 +623,7 @@ void FDomNode::DispatchEvent(FDomEvent& Event)
 {
 	// Production: build the LIVE shared Event JS object (NON-owning — its opaque is the caller's FDomEvent; the
 	// dispatch advances CurrentTarget/Phase + a listener's preventDefault/stopPropagation MUTATE it, all read by
-	// the same object's getters) and invoke each selected listener via a transient 007 FCallableHandle with it.
+	// the same object's getters) and invoke each selected listener via a transient CathodeBinding FCallableHandle with it.
 	if (Document == nullptr)
 	{
 		return;
@@ -665,7 +664,7 @@ void FDomNode::DispatchKeyboardEvent(FDomKeyboardEvent& Keyboard)
 	}
 }
 
-// --- 030 S1-P1: the DOCUMENT as an EventTarget (the bubble top) — mirrors the FDomNode EventTarget machinery above ---
+// --- The DOCUMENT as an EventTarget (the bubble top) — mirrors the FDomNode EventTarget machinery above ---
 
 void FDomDocument::AddEventListener(const FString& EventType, FJsValue Listener, bool bCapture)
 {
@@ -723,7 +722,7 @@ void FDomDocument::DispatchEvent(FDomEvent& Event, const FDomListenerInvoker& In
 	FireListeners(Event, EDomEventPhase::AtTarget, /*bCapturePhase*/ false, Invoker);
 }
 
-// --- Observation reads (S5) — OFF the author surface; COMPOSE 005's geometry/style by NodeId ---
+// --- Observation reads — COMPOSE CathodeLayout's geometry/style by NodeId ---
 
 bool FDomNode::GetBoundingClientRect(FBox2f& OutBox) const
 {
@@ -735,7 +734,7 @@ bool FDomNode::GetBoundingClientRect(FBox2f& OutBox) const
 	{
 		if (Geometry.NodeId == NodeId)
 		{
-			OutBox = Geometry.Box; // the box VALUE is 005's (real layout = validation-pass); the lookup is ours
+			OutBox = Geometry.Box; // the box VALUE is CathodeLayout's; the lookup is ours
 			return true;
 		}
 	}
@@ -752,14 +751,14 @@ bool FDomNode::GetComputedStyle(FResolvedStyle& OutStyle) const
 	{
 		if (Geometry.NodeId == NodeId)
 		{
-			OutStyle = Geometry.Style; // 005's bounded resolved style; the lookup-by-NodeId is ours
+			OutStyle = Geometry.Style; // CathodeLayout's bounded resolved style; the lookup-by-NodeId is ours
 			return true;
 		}
 	}
 	return false;
 }
 
-// --- Sprint 012 slice 1: the DOM node member bindings (the single binding-definition table) ---
+// --- The DOM node member bindings (the single binding-definition table) ---
 
 namespace
 {
@@ -789,7 +788,7 @@ JSValue StrOptStrMethodThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSV
 	return MarshalString(Ctx, Out).Release();
 }
 
-// === Sprint 012 slice 2: the full node-core surface — marshalers + thunks (every member via the ONE table) ===
+// === The full node-core surface — marshalers + thunks (every member via the ONE table) ===
 
 // Node marshaler (the identity-preserving deep oracle): an FDomNodeId -> the node's EXISTING wrapper (JS ===),
 // or JS null. Resolves via the owning wrapper graph (FDomDocument::GetWrapperForNode) — never mints a second.
@@ -851,7 +850,7 @@ FJsValue MarshalNodeList(JSContext* Ctx, const TArray<FJsValue>& Wrappers)
 	return FJsValue(Ctx, List);
 }
 
-// DOMRect (sprint 012 snapshot-returns): the [CSSOM-View] geometry VALUE type. A spec-typed object (instanceof
+// DOMRect: the [CSSOM-View] geometry VALUE type. A spec-typed object (instanceof
 // DOMRect) carrying the 8 readonly number props minted at the call (point-in-time value, behavioral-contract #8).
 // Mirrors the NodeList type-in-JS-proto pattern; the props are minted in C++ (MarshalDOMRect). Installed once.
 void InstallDOMRectType(JSContext* Ctx)
@@ -869,7 +868,7 @@ void InstallDOMRectType(JSContext* Ctx)
 }
 
 // Mint a DOMRect (proto = DOMRect.prototype) with the 8 number props from a layout box. The geometry VALUE is the
-// layout's (real layout = validation-pass); top/left/right/bottom derive from x/y/width/height per spec. An all-zeros
+// layout's; top/left/right/bottom derive from x/y/width/height per spec. An all-zeros
 // box (no laid-out geometry) mints an all-zeros DOMRect — the spec's unrendered-element rect, never null.
 FJsValue MarshalDOMRect(JSContext* Ctx, const FBox2f& Box)
 {
@@ -895,9 +894,9 @@ FJsValue MarshalDOMRect(JSContext* Ctx, const FBox2f& Box)
 	return FJsValue(Ctx, Rect);
 }
 
-// NamedNodeMap (sprint 012 snapshot-returns, Element.attributes): the spec-typed SURFACE (length / item /
-// getNamedItem / [i] / iterator) over MINIMAL { name, value } Attr-shaped items — browse-design's #8 ruling
-// (obs-tier, consumer-scoped depth; a minimal SUBSET of Attr, NO Attr class; the consumer reads only name/value).
+// NamedNodeMap (Element.attributes): the spec-typed SURFACE (length / item /
+// getNamedItem / [i] / iterator) over MINIMAL { name, value } Attr-shaped items — behavioral-contract #8
+// (consumer-scoped depth; a minimal SUBSET of Attr, NO Attr class; the consumer reads only name/value).
 // A SNAPSHOT mint (read at a point). Mirrors the NodeList type-in-JS-proto pattern.
 void InstallNamedNodeMapType(JSContext* Ctx)
 {
@@ -937,7 +936,7 @@ FJsValue MarshalNamedNodeMap(JSContext* Ctx, const TArray<TPair<FString, FString
 	return FJsValue(Ctx, Map);
 }
 
-// --- Template thunks (one C++ member-ptr -> one install thunk), mirroring slice 1. ---
+// --- Template thunks (one C++ member-ptr -> one install thunk). ---
 
 // By-value string getter (return FString) — the const-ref StrGetterThunk's sibling.
 template <FString (FDomNode::*Getter)() const>
@@ -1075,7 +1074,7 @@ JSValue InsertBeforeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValu
 	return JS_DupValue(Ctx, Argv[0]); // the inserted node (=== the arg)
 }
 
-// === Sprint 012 slice 3: reflected properties (behavioral-contract #1 — name-in-dom routing) ===
+// === Reflected properties (behavioral-contract #1 — name-in-dom routing) ===
 // A reflected property's JS member is backed by an ATTRIBUTE (not a private field): the getter reads, the setter
 // writes, the live attribute store — so it can NEVER desync from setAttribute/getAttribute (Preact writes both
 // paths). PURITY is the correctness guarantee: NO cached value anywhere; always read/write the attribute.
@@ -1105,10 +1104,10 @@ JSValue ReflectedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst 
 	return JS_UNDEFINED;
 }
 
-// === Sprint 012 events: the node event members + the live Event/KeyboardEvent object thunks ===
+// === The node event members + the live Event/KeyboardEvent object thunks ===
 
 // addEventListener(type, fn, useCapture?) — function-marshaling: VALIDATE a JS function, hold an OWNING dup keyed
-// by (type, capture) (008's store; dedup + identity in FDomNode). useCapture is the optional 3rd arg.
+// by (type, capture) (dedup + identity in FDomNode). useCapture is the optional 3rd arg.
 JSValue AddEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
 	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
@@ -1173,7 +1172,7 @@ JSValue EventCurrentTargetGetter(JSContext* Ctx, JSValueConst ThisVal)
 {
 	FDomEvent* E = EventBaseFrom(ThisVal);
 	if (E == nullptr) { return JS_NULL; }
-	// 030 S1-P1 — during the document EventTarget pass, currentTarget IS the document (not a node) -> `e.currentTarget === document`.
+	// During the document EventTarget pass, currentTarget IS the document (not a node) -> `e.currentTarget === document`.
 	if (E->bCurrentTargetIsDocument && E->Document != nullptr)
 	{
 		FJsValue Wrapper = E->Document->GetDocumentWrapper();
@@ -1332,7 +1331,7 @@ JSValue AttributesGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 	return MarshalNamedNodeMap(Ctx, Attrs).Release();
 }
 
-// namespaceURI (Node, getter, sprint 012 come-due): the element's stored namespace, or JS null for a text node.
+// namespaceURI (Node, getter): the element's stored namespace, or JS null for a text node.
 JSValue NamespaceURIGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 {
 	FDomNode* Self = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, ThisVal, GDomNodeClassId));
@@ -1342,7 +1341,7 @@ JSValue NamespaceURIGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 	return MarshalString(Ctx, Ns).Release();
 }
 
-// checked (Element, get/set, sprint 012 forms): the LIVE checked state (dirty-value model). The getter reads the
+// checked (Element, get/set): the LIVE checked state (dirty-value model). The getter reads the
 // live-or-default; the setter coerces to boolean (spec) and writes the LIVE state — the attribute is untouched.
 JSValue CheckedGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 {
@@ -1360,12 +1359,12 @@ JSValue CheckedSetterThunk(JSContext* Ctx, JSValueConst ThisVal, JSValueConst Va
 	return JS_UNDEFINED;
 }
 
-// ===== CSSStyleDeclaration (sprint 012 style) — ONE C++-EXOTIC class, two BACKINGS. The 'style' ATTRIBUTE is the
+// ===== CSSStyleDeclaration — ONE C++-EXOTIC class, two BACKINGS. The 'style' ATTRIBUTE is the
 // SINGLE SOURCE OF TRUTH for inline style: element.style is a write-through ACCESSOR over it (no parallel store);
-// getComputedStyle is a read-only view over FResolvedStyle (the slice-5 stub -> EMPTY values until the CSS epic).
+// getComputedStyle is a read-only view over FResolvedStyle (CathodeLayout's bounded resolved style).
 // Open-ended named property access via the quickjs EXOTIC handler (get_own_property/set_property — NOT a JS Proxy).
 // Registered DIRECTLY here (CathodeDom calls JS_* directly) because FNativeClassDef can't express exotic methods —
-// CathodeBinding stays untouched (negative control). =====
+// CathodeBinding stays untouched. =====
 
 JSClassID GStyleDeclClassId = 0;
 
@@ -1458,8 +1457,8 @@ void SetInlineProperty(FDomNode* Node, const FString& CssName, const FString& Va
 	Node->SetAttribute(TEXT("style"), SerializeInlineStyle(Decls)); // canonical 'style' attribute + dirty-mark
 }
 
-// Read a resolved/computed property from FResolvedStyle (getComputedStyle's backing) — the slice-5 stub: present
-// keys with EMPTY values until the CSS epic implements QueryComputedValue (the 1-line-real downstream joint).
+// Read a resolved/computed property from FResolvedStyle (getComputedStyle's backing) — CathodeLayout's
+// bounded resolved style from the last layout.
 bool GetResolvedProperty(FDomNode* Node, const FString& CssName, FString& OutValue)
 {
 	if (Node == nullptr) { return false; }
@@ -1507,8 +1506,8 @@ int StyleGetOwnProperty(JSContext* Ctx, JSPropertyDescriptor* Desc, JSValueConst
 
 // EXOTIC set_property: cssText + named CSS properties write through to the canonical 'style' attribute. A READ-ONLY
 // backing (getComputedStyle) silently no-ops (spec). Arbitrary names route here (--custom / anyName), not just color.
-// 013 slice 1 — the element.style ACCEPT-AND-IGNORE gate (fork-3): a CSS property write is accepted iff its name is
-// in the capability mirror (Present or either BuildHow) OR is a custom property (--x, the var() theming model, always
+// The element.style ACCEPT-AND-IGNORE check: a CSS property write is accepted iff its name is
+// in the baked CSS allow-list (IsDeclaredCssProperty) OR is a custom property (--x, the var() theming model, always
 // valid). An undeclared/OUT name is SILENTLY DROPPED (not written to the canonical 'style' attribute, never reaches
 // the cascade) — CSSOM parity. (Distinct from the el[name] undefined-member backstop, which THROWS.)
 bool IsAcceptedStyleProperty(const FString& CssName)
@@ -1516,12 +1515,12 @@ bool IsAcceptedStyleProperty(const FString& CssName)
 	return CssName.StartsWith(TEXT("--")) || IsDeclaredCssProperty(CssName); // custom props + declared props
 }
 
-// cssText filter (013 slice 1): drop the unsupported declarations, KEEP the accepted ones VERBATIM (the author's exact
+// cssText filter: drop the unsupported declarations, KEEP the accepted ones VERBATIM (the author's exact
 // spacing/order). FILTER-ONLY, deliberately NOT a parse->SerializeInlineStyle round-trip: re-serializing would NORMALIZE
-// whitespace ('color:red' -> 'color: red') and rewrite the canonical 'style' bytes, regressing the cssText verbatim
-// round-trip (the pre-slice-1 cssText path set the raw string as-is). We split on ';', drop only the declarations whose
+// whitespace ('color:red' -> 'color: red') and rewrite the canonical 'style' bytes, breaking the cssText verbatim
+// round-trip. We split on ';', drop only the declarations whose
 // name is unsupported (or malformed), and rejoin the kept RAW substrings. (Moving to CSSOM-normalized serialization would
-// be a separate, intentional behavior change + a CathodeDomStyleTests update — out of this slice's filter-only scope.)
+// be a separate, intentional behavior change + a CathodeDomStyleTests update.)
 FString FilterDeclaredInlineStyle(const FString& Css)
 {
 	TArray<FString> RawDecls;
@@ -1599,8 +1598,8 @@ JSValue StyleSetPropertyMethod(JSContext* Ctx, JSValueConst ThisVal, int Argc, J
 // Install the CSSStyleDeclaration exotic class + globalThis.CSSStyleDeclaration (for instanceof). The idempotency
 // guard is PER-CONTEXT (the class GLOBAL + proto are per-context, like InstallNodeListType) — a process-global
 // class-id guard would wrongly skip the per-context global on every context after the first (the bug that threw
-// `x instanceof CSSStyleDeclaration` everywhere but the first test). The class id is allocated ONCE (process-global;
-// quickjs ids are unique + reusable across runtimes); the class is (re)registered on this runtime; the proto + the
+// `x instanceof CSSStyleDeclaration` everywhere but the first test). The class id is allocated FRESH per install
+// (see below); the class is (re)registered on this runtime; the proto + the
 // global constructor are set PER CONTEXT.
 void InstallCSSStyleDeclarationClass(JSContext* Ctx)
 {
@@ -1656,14 +1655,14 @@ JSValue StyleGetterThunk(JSContext* Ctx, JSValueConst ThisVal)
 	return MarshalStyleDeclaration(Ctx, Self->GetOwningDocument(), Self->GetNodeId(), /*bWritable*/ true).Release();
 }
 
-// getComputedStyle(elt) — the GLOBAL function (a faculty-A HOST_GLOBAL): a READ-ONLY CSSStyleDeclaration over the
-// element's FResolvedStyle (the read path; values empty = the stubbed cascade, the 1-line-real downstream joint).
+// getComputedStyle(elt) — the GLOBAL function (a host global): a READ-ONLY CSSStyleDeclaration over the
+// element's FResolvedStyle (the read path).
 JSValue GetComputedStyleThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int Argc, JSValueConst* Argv)
 {
 	if (Argc < 1) { return JS_ThrowTypeError(Ctx, "getComputedStyle expects an element"); }
 	FDomNode* El = static_cast<FDomNode*>(JS_GetOpaque2(Ctx, Argv[0], GDomNodeClassId));
 	if (El == nullptr) { return JS_EXCEPTION; }
-	// 013 slice 5: LAZY flush-on-read — re-cascade if an element.style write is pending, so getComputedStyle reflects it.
+	// LAZY flush-on-read — re-cascade if an element.style write is pending, so getComputedStyle reflects it.
 	if (FDomDocument* OwnerDoc = El->GetOwningDocument()) { OwnerDoc->FlushLayoutIfDirty(); }
 	return MarshalStyleDeclaration(Ctx, El->GetOwningDocument(), El->GetNodeId(), /*bWritable*/ false).Release();
 }
@@ -1676,7 +1675,7 @@ void InstallGetComputedStyleGlobal(JSContext* Ctx)
 }
 } // namespace
 
-// 030 S1-P1 — bridge for document.dispatchEvent. The event-recovery helper (EventBaseFrom) + the event class-ids are
+// Bridge for document.dispatchEvent. The event-recovery helper (EventBaseFrom) + the event class-ids are
 // file-LOCAL (the anonymous namespace above), so DocDispatchEventThunk (in CathodeDomDocument.cpp, where GDomDocumentClassId
 // lives) routes through this NON-anon function. Recover the base FDomEvent from the JS event arg + dispatch AT the document
 // (the document is target + currentTarget; no ancestors). bOutValidEvent is false if the arg isn't a live Cathode Event.
@@ -1697,7 +1696,7 @@ bool DispatchJsEventAtDocument(JSValueConst EventArg, FDomDocument& Doc, bool& b
 }
 
 // Shared (declared in CathodeDom.h): a selector-match list -> a STATIC NodeList of the matches' EXISTING wrappers
-// (=== identity), reusing the slice-2 MarshalNodeList recipe. querySelectorAll on Element + Document both call this
+// (=== identity), reusing the MarshalNodeList recipe. querySelectorAll on Element + Document both call this
 // (compose-not-duplicate). The snapshot is inherently static — it captures the wrappers now; later DOM mutations do
 // not alter a returned list.
 JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArray<const IMatchableNode*>& Matches)
@@ -1722,7 +1721,7 @@ JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArr
 #define CATHODE_BIND_OPT_STR_METHOD(JsName, Iface, Tag, Sig, CppMethod) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, \
 	  &StrOptStrMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
-// Slice 2 shapes — each instantiates its template thunk from the C++ member name (or names a one-off thunk).
+// Shape macros — each instantiates its template thunk from the C++ member name (or names a one-off thunk).
 #define CATHODE_BIND_VAL_GETTER(JsName, Iface, Tag, Sig, CppGetter) \
 	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
 	  reinterpret_cast<JSCFunction*>(&StrValGetterThunk<&FDomNode::CppGetter>), nullptr }
@@ -1757,12 +1756,12 @@ JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArr
 	  &NodeArgMethodThunk<&FDomNode::CppMethod>, nullptr, nullptr }
 #define CATHODE_BIND_METHOD_FN(JsName, Iface, Tag, Sig, ThunkFn) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
-// Slice 3 — a reflected property: getter+setter both route to the attribute store (AttrConst), no backing field.
+// A reflected property: getter+setter both route to the attribute store (AttrConst), no backing field.
 #define CATHODE_BIND_REFLECTED(JsName, Iface, Tag, Sig, AttrConst) \
 	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
 	  reinterpret_cast<JSCFunction*>(&ReflectedGetterThunk<AttrConst>), \
 	  reinterpret_cast<JSCFunction*>(&ReflectedSetterThunk<AttrConst>) }
-// Sprint 012 forms — a read/write PROPERTY with CUSTOM getter/setter thunks (NOT attribute-reflected): for `checked`,
+// A read/write PROPERTY with CUSTOM getter/setter thunks (NOT attribute-reflected): for `checked`,
 // whose live-state get/set + boolean coercion the templated string macros don't cover.
 #define CATHODE_BIND_PROP_FN(JsName, Iface, Tag, Sig, GetterFn, SetterFn) \
 	{ JsName, Iface, EBoundMemberKind::Property, Tag, Sig, nullptr, \
@@ -1770,11 +1769,11 @@ JSValue MarshalMatchListToNodeList(JSContext* Ctx, FDomDocument* Doc, const TArr
 
 // THE ONE binding-definition table for the DOM node. INSTALL (InstallBoundMembers) + ENUMERATE
 // (EnumerateBoundMembersJson) BOTH consume THIS — no second list, so install<->enumerate cannot drift. The
-// node-core surface (sprint 012 S2) extends the slice-1 first members; the contract grows HERE. Names are
+// contract grows HERE. Names are
 // distinct across ifaces (no cross-iface name clash), so the name-keyed lockstep dedupes nothing.
 static const FBoundMember GDomNodeMembers[] =
 {
-	// Element — attributes + tag (tagName/getAttribute landed slice 1)
+	// Element — attributes + tag
 	CATHODE_BIND_GETTER("tagName", "Element", "margin", "string", GetTagName),
 	CATHODE_BIND_OPT_STR_METHOD("getAttribute", "Element", "margin", "(qualifiedName: string) -> string | null", GetAttribute),
 	CATHODE_BIND_STR_STR_METHOD("setAttribute", "Element", "required", "(qualifiedName: string, value: string) -> void", SetAttribute),
@@ -1783,7 +1782,7 @@ static const FBoundMember GDomNodeMembers[] =
 	CATHODE_BIND_NODETYPE_GETTER("nodeType", "Node", "required", "number", GetNodeType),
 	CATHODE_BIND_VAL_GETTER("nodeName", "Node", "obs", "string", GetNodeName),
 	CATHODE_BIND_OPT_RW("nodeValue", "Node", "obs", "string | null", GetNodeValue, SetNodeValue),
-	// Node — namespaceURI (sprint 012 come-due): the element ns (stored at createElement/createElementNS) | null (text).
+	// Node — namespaceURI: the element ns (stored at createElement/createElementNS) | null (text).
 	CATHODE_BIND_GETTER_FN("namespaceURI", "Node", "margin", "string | null", NamespaceURIGetterThunk),
 	// Node — tree reads (identity-preserving)
 	CATHODE_BIND_NODE_GETTER("parentNode", "Node", "required", "Node | null", GetParentNode),
@@ -1802,27 +1801,27 @@ static const FBoundMember GDomNodeMembers[] =
 	// no backing field). className reflects the 'class' attribute (the name translation).
 	CATHODE_BIND_REFLECTED("id", "Element", "reflected", "string", ReflectAttrId),
 	CATHODE_BIND_REFLECTED("className", "Element", "reflected", "string", ReflectAttrClass),
-	// EventTarget — the event surface (sprint 012 events): function-marshaling listener registry + dispatch.
+	// EventTarget — the event surface: function-marshaling listener registry + dispatch.
 	CATHODE_BIND_METHOD_FN("addEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", AddEventListenerThunk),
 	CATHODE_BIND_METHOD_FN("removeEventListener", "EventTarget", "required", "(type: string, listener: EventListener, useCapture?: boolean) -> void", RemoveEventListenerThunk),
 	CATHODE_BIND_METHOD_FN("dispatchEvent", "EventTarget", "margin", "(event: Event) -> boolean", DispatchEventThunk),
-	// Element — selectors (sprint 012): querySelector scopes to descendants (exclude-self), first match in pre-order.
+	// Element — selectors: querySelector scopes to descendants (exclude-self), first match in pre-order.
 	CATHODE_BIND_METHOD_FN("querySelector", "Element", "required", "(selectors: string) -> Element | null", QuerySelectorThunk),
 	// Element — the selector TRIO over the SAME matcher: all-vs-first (static NodeList) / self-bool / ancestor-or-self.
 	CATHODE_BIND_METHOD_FN("querySelectorAll", "Element", "margin", "(selectors: string) -> NodeList", QuerySelectorAllThunk),
 	CATHODE_BIND_METHOD_FN("matches", "Element", "margin", "(selectors: string) -> boolean", MatchesThunk),
 	CATHODE_BIND_METHOD_FN("closest", "Element", "margin", "(selectors: string) -> Element | null", ClosestThunk),
-	// Element — snapshot-returns (sprint 012): attributes -> NamedNodeMap snapshot; getBoundingClientRect -> DOMRect value.
+	// Element — snapshot-returns: attributes -> NamedNodeMap snapshot; getBoundingClientRect -> DOMRect value.
 	CATHODE_BIND_GETTER_FN("attributes", "Element", "obs", "NamedNodeMap", AttributesGetterThunk),
 	CATHODE_BIND_METHOD_FN("getBoundingClientRect", "Element", "obs", "() -> DOMRect", GetBoundingClientRectThunk),
-	// HTMLInputElement — forms LIVE state (sprint 012): value/checked are the live input state (dirty-value model),
+	// HTMLInputElement — forms LIVE state: value/checked are the live input state (dirty-value model),
 	// DISTINCT from the value/checked attributes — so they route to the live-state get/set, NOT CATHODE_BIND_REFLECTED.
 	CATHODE_BIND_STR_RW("value", "HTMLInputElement", "reflected", "string", GetValue, SetValue),
 	CATHODE_BIND_PROP_FN("checked", "HTMLInputElement", "reflected", "boolean", CheckedGetterThunk, CheckedSetterThunk),
-	// HTMLElement — style (sprint 012): a WRITE-THROUGH CSSStyleDeclaration over the canonical 'style' attribute.
+	// HTMLElement — style: a WRITE-THROUGH CSSStyleDeclaration over the canonical 'style' attribute.
 	// (CSSStyleDeclaration is a C++-EXOTIC class — NOT lockstep-bound; getComputedStyle is a GLOBAL, installed separately.)
 	CATHODE_BIND_GETTER_FN("style", "HTMLElement", "required", "CSSStyleDeclaration", StyleGetterThunk),
-	// HTMLElement — focus (sprint 012 DOM-completion): set/clear the document's focus state (-> document.activeElement).
+	// HTMLElement — focus: set/clear the document's focus state (-> document.activeElement).
 	CATHODE_BIND_VOID_METHOD("focus", "HTMLElement", "required", "() -> void", Focus),
 	CATHODE_BIND_VOID_METHOD("blur", "HTMLElement", "margin", "() -> void", Blur),
 };
@@ -1852,7 +1851,7 @@ FString GetDomNodeDescriptorJson()
 JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Context)
 {
 	// One class for both node kinds. gc_mark marks the node's held refs (cycle visibility); the finalizer
-	// frees the native side (de-register + FreeRT held refs). 007 owns the mechanism; the DOM supplies the hooks.
+	// frees the native side (de-register + FreeRT held refs). CathodeBinding owns the mechanism; the DOM supplies the hooks.
 	FNativeClassDef Def;
 	Def.Name = "CathodeDomNode";
 	Def.Finalizer = &FinalizeNativeObject<FDomNode>;
@@ -1867,24 +1866,24 @@ JSClassID RegisterDomNodeClass(INativeClassRegistry& Registry, JSContext* Contex
 	const JSClassID ClassId = Registry.RegisterClass(Def);
 	GDomNodeClassId = ClassId; // the member thunks recover the native via this id
 
-	// INSTALL side (sprint 012 slice 1): build the proto + install every bound member from the one table +
+	// INSTALL side: build the proto + install every bound member from the one table +
 	// JS_SetClassProto. CreateWrappedObject's JS_GetClassProto path then gives every node instance the members.
 	InstallBoundMembers(Context, ClassId, GDomNodeMembers, UE_ARRAY_COUNT(GDomNodeMembers));
 
-	// Slice 2: install the NodeList TYPE (childNodes' return type — behavioral-contract #8) so MarshalNodeList can
+	// Install the NodeList TYPE (childNodes' return type — behavioral-contract #8) so MarshalNodeList can
 	// mint typed snapshots. Idempotent (no-op if already present on this context's global).
 	InstallNodeListType(Context);
-	// Sprint 012 snapshot-returns: the object-return TYPES (Element.attributes / getBoundingClientRect). Idempotent.
+	// The object-return TYPES (Element.attributes / getBoundingClientRect). Idempotent.
 	InstallNamedNodeMapType(Context);
 	InstallDOMRectType(Context);
-	// Sprint 012 style: the CSSStyleDeclaration EXOTIC class (element.style / getComputedStyle backing) + the
+	// The CSSStyleDeclaration EXOTIC class (element.style / getComputedStyle backing) + the
 	// getComputedStyle GLOBAL function (a host global). Idempotent.
 	InstallCSSStyleDeclarationClass(Context);
 	InstallGetComputedStyleGlobal(Context);
 	return ClassId;
 }
 
-// === Sprint 012 events: the Event + KeyboardEvent JS classes (NEW bound classes via the ONE mechanism) ===
+// === The Event + KeyboardEvent JS classes (NEW bound classes via the ONE mechanism) ===
 
 namespace
 {
@@ -1925,7 +1924,7 @@ static const FBoundMember GKeyboardEventMembers[] =
 #undef CATHODE_EVENT_METHOD
 } // namespace
 
-// 025 S1 — codegen accessors: expose the PRODUCTION node/event/keyboard binding tables (file-local above) so
+// Codegen accessors: expose the PRODUCTION node/event/keyboard binding tables (file-local above) so
 // GenerateAuthoringDts projects the SAME tables InstallBoundMembers registers.
 void GetDomNodeBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
 {
@@ -1945,7 +1944,7 @@ void RegisterDomEventClasses(INativeClassRegistry& Registry, JSContext* Context,
 {
 	// NON-OWNING event wrappers (the FDomEvent is the dispatch's stack; the dispatch NULLs the opaque after) ->
 	// NULL finalizer; NO gc_mark (the event holds no JS refs of its own — target/currentTarget resolve via the
-	// document, not held). The members install from the one table (crit-1).
+	// document, not held). The members install from the one table.
 	FNativeClassDef EventDef;
 	EventDef.Name = "CathodeDomEvent";
 	EventDef.Finalizer = nullptr;

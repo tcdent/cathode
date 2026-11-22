@@ -1,8 +1,8 @@
-// The Cathode author-side CSS linter (025 S5). css-tree parses a stylesheet, walks its Declarations, and flags any
-// property NOT in css-allow-list.toml (the S2 generated allow-list). This is a MEMBERSHIP test, NOT a hand denylist —
+// The Cathode author-side CSS linter. css-tree parses a stylesheet, walks its Declarations, and flags any
+// property NOT in css-allow-list.toml (the generated allow-list). This is a MEMBERSHIP test, NOT a hand denylist —
 // a property fails by ABSENCE from the generated list (grid/gap/animation aren't litehtml parse-names, so they're not
-// in the .toml). Model-A no-drift: a litehtml add/remove flows through the .toml, so the gate tracks the engine with no
-// hand maintenance. Reports each violation as { property, line } (file:line), mirroring the S4 tsc bite shape.
+// in the .toml). No drift: a litehtml add/remove flows through the .toml, so the gate tracks the engine with no
+// hand maintenance. Reports each violation as { property, line } (file:line), mirroring the tsc bite shape.
 import * as csstree from "css-tree";
 import { readFileSync } from "node:fs";
 
@@ -35,7 +35,7 @@ export function lintCssFile(cssPath, allow) {
 	csstree.walk(ast, (node) => {
 		if (node.type === "Declaration") {
 			// CSS property names are CASE-INSENSITIVE per the CSS standard, so we lowercase before the membership test
-			// (the allow Set is lowercased too, in parseAllowList). This is correct + DISTINCT-BY-DOMAIN from the S3
+			// (the allow Set is lowercased too, in parseAllowList). This is correct + DISTINCT-BY-DOMAIN from the
 			// JS-path IsDeclaredCssProperty, which is CaseSensitive (JS identifiers are case-sensitive) — not a divergence.
 			const prop = node.property.toLowerCase();
 			if (prop.startsWith("--")) { return; }      // custom property — accepted

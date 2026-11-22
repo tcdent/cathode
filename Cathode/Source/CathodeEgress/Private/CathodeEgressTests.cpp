@@ -4,7 +4,7 @@
 #include "CathodeEgress.h"
 #include "CathodeEgressUploader.h"
 #include "CathodeSurfaces.h"
-#include "CathodeTripleBuffer.h" // 029 #24 — the lock-free triple-buffer (slot-logic unit test below)
+#include "CathodeTripleBuffer.h" // the lock-free triple-buffer (slot-logic unit test below)
 
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
@@ -12,14 +12,14 @@
 #include "RHICommandList.h"
 #include "RHIResources.h"
 
-// 024 slice 1b — the Texture Egress production path. TWO proofs, BOTH riding DriveAll(egress.GetSeam()) end-to-end
+// The Texture Egress production path. TWO proofs, BOTH riding DriveAll(egress.GetSeam()) end-to-end
 // (the egress's own copy + marshal + upload made the result; the test NEVER calls RHIUpdateTexture2D, and reads the
 // EGRESS's own UTexture2D — a test-built texture / a re-hand-upload would prove the MECHANISM, not the egress):
 //
-//  - THE READBACK (the HARD GATE): read the egress-uploaded UTexture2D's GPU pixels back and compare to the source
+//  - THE READBACK (the load-bearing proof): read the egress-uploaded UTexture2D's GPU pixels back and compare to the source
 //    bitmap. Binds source + region + pitch + FORMAT together via the on-GPU result. A DISTINCT-channel pattern
 //    (R=200 dominant, B=40 low) makes a wrong format-map (B<->R, PF_B8G8R8A8 vs PF_R8G8B8A8) read R-dominant as
-//    blue -> RED. Win64 + the real D3D RHI (the desktop session) — the de-risked slice-0 path.
+//    blue -> RED. Win64 + the real D3D RHI.
 //  - THE SEAM-SPY: captures the EGRESS's assembled values and binds the TWO the readback cannot see — ON-CHANGE
 //    (an idle drive must NOT invoke the uploader; a stale-but-correct readback would pass trivially) and
 //    RENDER-THREAD (IsInRenderingThread at the upload). The source/region/pitch checks are corroborating-DIAGNOSTIC
@@ -41,7 +41,7 @@ namespace
 	};
 
 	// A synthetic render target that publishes a KNOWN bitmap as the neutral view and CHANGES exactly once (so the
-	// second drive is idle — for the on-change gate). The dirty rect is the full surface (the 1b full-texture case).
+	// second drive is idle — for the on-change gate). The dirty rect is the full surface (the full-texture case).
 	class FSyntheticEgressTarget final : public ISurfaceRenderTarget
 	{
 	public:
@@ -86,8 +86,8 @@ namespace
 	// A distinct-channel, PER-ROW-DISTINCT pattern: R=200 dominant (binds the format-map — a B<->R swap reads as
 	// blue), G=80, and B varies BY ROW (4 + Y*8, kept < 90 so R stays dominant). The per-row B is what binds the
 	// COPY'S STRIDED READ over a padded source: a wrong read-stride reads the wrong row's B -> the readback
-	// mismatches (the relocated padded-stride discriminator, since the slice-2 uniform-tight copy's UPLOAD pitch is
-	// now the tight Width*4, not the source Stride). Laid out at the given (possibly padded) stride.
+	// mismatches (the padded-stride discriminator, since the uniform-tight copy's UPLOAD pitch is
+	// the tight Width*4, not the source Stride). Laid out at the given (possibly padded) stride.
 	void FillDistinctPattern(TArray<uint8>& Bytes, int32 Stride, int32 W, int32 H)
 	{
 		Bytes.SetNumZeroed(H * Stride);
@@ -126,7 +126,7 @@ bool FCathodeEgressReadbackTest::RunTest(const FString& Parameters)
 	const FSurfaceId Surface = RegisterSynthetic(*Registry, Source.GetData(), Stride, W, H);
 
 	// Drive the production path: the egress copies + marshals + uploads into ITS OWN UTexture2D.
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 
 	UTexture2D* Texture = Egress->GetTexture(Surface);
@@ -227,7 +227,7 @@ bool FCathodeEgressSeamSpyTest::RunTest(const FString& Parameters)
 	const FSurfaceId Surface = RegisterSynthetic(*Registry, Source.GetData(), Stride, W, H);
 
 	// Drive once (a real change) -> one upload.
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 
 	// === The spy's UNIQUE load-bearing gates (the readback cannot see these) ===
@@ -235,10 +235,8 @@ bool FCathodeEgressSeamSpyTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("[WIN64-EXECUTED] the upload ran ON the render thread (IsInRenderingThread at the upload)"), Spy.bInRenderThread);
 
 	// === Corroborating DIAGNOSTIC: egress-assembled vs the independently-KNOWN document (not test-fed -> not circular) ===
-	// slice 2: the copy is uniform-TIGHT — the strided 1b shape evolved. The upload pitch is now the tight Width*4
-	// (NOT the source Stride), the copy is BOUNDED to the rect, and the padded-source read correctness relocated to
-	// the readback's per-row-distinct strided read. (Adapting a committed assertion for a real later-slice behavior
-	// change; the readback RESULT is byte-identical.)
+	// The copy is uniform-TIGHT: the upload pitch is the tight Width*4 (NOT the source Stride), the copy is BOUNDED
+	// to the rect, and the padded-source read correctness is bound by the readback's per-row-distinct strided read.
 	TestEqual(TEXT("[diag] the egress source pitch == the TIGHT Width*4 (uniform-tight copy; the strided 1b pitch evolved)"), static_cast<int32>(Spy.Pitch), W * 4);
 	TestEqual(TEXT("[diag] the upload region width == the (full) dirty rect"), static_cast<int32>(Spy.RegionWidth), W);
 	TestEqual(TEXT("[diag] the upload region height == the (full) dirty rect"), static_cast<int32>(Spy.RegionHeight), H);
@@ -260,7 +258,7 @@ bool FCathodeEgressSeamSpyTest::RunTest(const FString& Parameters)
 
 	// ON-CHANGE (the spy's unique job): an IDLE drive (no surface change) must NOT invoke the uploader. A readback
 	// would read the stale-but-correct texture and pass trivially -> only the spy binds idle.
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */
 	FlushRenderingCommands();
 	TestEqual(TEXT("[WIN64-EXECUTED] an idle drive (no surface change) invoked the uploader ZERO additional times"), Spy.Count, 1);
 	return true;
@@ -376,8 +374,8 @@ bool FCathodeEgressRegionalSeamSpyTest::RunTest(const FString& Parameters)
 	Frames.Add({ R });                    // frame 2: only the offset sub-rect
 	const FSurfaceId Surface = RegisterSequenced(*Registry, Bitmap.GetData(), Stride, W, H, MoveTemp(Frames));
 
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1 (full)
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2 (sub-rect)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1 (full)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2 (sub-rect)
 
 	TestEqual(TEXT("[WIN64-EXECUTED] two single-region uploads over two change-frames"), Spy.Count, 2);
 	TestTrue(TEXT("[WIN64-EXECUTED] every upload ran on the render thread"), Spy.bInRenderThread);
@@ -412,7 +410,7 @@ bool FCathodeEgressRegionalSeamSpyTest::RunTest(const FString& Parameters)
 		R.Width(), R.Height(), R.Min.X, R.Min.Y, W * H * 4));
 
 	// on-change: an idle drive (frames exhausted) -> no additional upload
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands();
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands();
 	TestEqual(TEXT("[WIN64-EXECUTED] an idle drive invoked the uploader ZERO additional times"), Spy.Count, 2);
 	return true;
 #else
@@ -443,9 +441,9 @@ bool FCathodeEgressRegionalReadbackTest::RunTest(const FString& Parameters)
 	Frames.Add({ R });                    // frame 2: only R
 	const FSurfaceId Surface = RegisterSequenced(*Registry, Bitmap.GetData(), Stride, W, H, MoveTemp(Frames));
 
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1: upload the full A
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 1: upload the full A
 	FillSubRect(Bitmap, Stride, R);                                  // change ONLY R -> pattern B (B-dominant)
-	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* 028 S2: split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2: upload ONLY R (now B)
+	Registry->DriveAll(Egress->GetSeam()); Egress->PumpGameThreadUploads(); /* split — DriveAll worker-emits (copy+store), Pump does the UObject+upload */ FlushRenderingCommands(); // frame 2: upload ONLY R (now B)
 
 	UTexture2D* Texture = Egress->GetTexture(Surface);
 	if (Texture == nullptr) { AddError(TEXT("[024-EGRESS-REGIONAL] no egress texture")); return false; }
@@ -495,9 +493,9 @@ bool FCathodeEgressRegionalReadbackTest::RunTest(const FString& Parameters)
 #endif
 }
 
-// 029 #24 — the lock-free triple-buffer SLOT LOGIC (single-threaded). The CONCURRENCY (whole-frame-or-nothing) is proven by
-// the release/acquire fence-pairing ARGUMENT documented in CathodeTripleBuffer.h, NOT a stress race (the 028 Q4 lesson:
-// prove concurrency by the fence ORDERING). This test proves the slot ROTATION the fence ordering rides: no-publish ->
+// The lock-free triple-buffer SLOT LOGIC (single-threaded). The CONCURRENCY (whole-frame-or-nothing) is proven by
+// the release/acquire fence-pairing ARGUMENT documented in CathodeTripleBuffer.h, NOT a stress race (concurrency
+// is proven by the fence ORDERING). This test proves the slot ROTATION the fence ordering rides: no-publish ->
 // Acquire false; publish -> Acquire the WHOLE value intact; publish-twice -> the LATEST (intermediate dropped); acquire
 // with no new publish -> false (no stale re-read). A multi-field value (Id + a heap TArray + Tag) bites a partial move.
 namespace
@@ -542,8 +540,7 @@ bool FCathodeTripleBufferSlotLogicTest::RunTest(const FString& Parameters)
 	// (3) a 2nd Acquire with NO new publish -> false (no stale re-read of the last value).
 	TestFalse(TEXT("[029-#24] a 2nd Acquire with no new publish returns false (no stale re-read)"), Buf.Acquire(Out));
 
-	// (4) publish TWICE without acquiring -> Acquire returns the LATEST (the intermediate is dropped — latest-wins, as the
-	//     old FindOrAdd-overwrite holder did).
+	// (4) publish TWICE without acquiring -> Acquire returns the LATEST (the intermediate is dropped — latest-wins).
 	Buf.Publish(MakeTripleTestFrame(11, 110));
 	Buf.Publish(MakeTripleTestFrame(22, 220));
 	TestTrue(TEXT("[029-#24] after two publishes, Acquire returns true"), Buf.Acquire(Out));

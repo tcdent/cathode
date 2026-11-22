@@ -8,7 +8,7 @@
 // Specs for the BESPOKE paint-routing translation, border decomposition, and splice offset — all
 // litehtml-FREE (the helpers take neutral params; the container does the thin litehtml->neutral edge
 // conversion elsewhere). They assert WHICH neutral op + OUR-mapped params; the inputs are scripted/opaque
-// (never litehtml's computed boxes). Authored, not run this sprint.
+// (never litehtml's computed boxes).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeLayoutPaintEmitTest,
@@ -21,7 +21,7 @@ bool FCathodeLayoutPaintEmitTest::RunTest(const FString& Parameters)
 
 	TArray<FLayoutPaintOp> Sink;
 	EmitFillRect(Sink, FBox2f(FVector2f(1, 2), FVector2f(11, 12)), FColor(10, 20, 30, 40));
-	const TArray<uint8> ImgBytes{ 0xDE, 0xAD, 0xBE, 0xEF }; // 029 #4 — the layout-carried resolved bytes
+	const TArray<uint8> ImgBytes{ 0xDE, 0xAD, 0xBE, 0xEF }; // the layout-carried resolved bytes
 	EmitDrawImage(Sink, FBox2f(FVector2f(0, 0), FVector2f(64, 64)), TEXT("logo.png"), ImgBytes);
 	EmitDrawText(Sink, TEXT("hi"), FLayoutFontRef{ 7 }, FColor(1, 2, 3, 4), FVector2f(5, 6), FBox2f(FVector2f(5, 6), FVector2f(25, 18)));
 	EmitClipPush(Sink, FBox2f(FVector2f(0, 0), FVector2f(50, 50)));

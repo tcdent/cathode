@@ -9,7 +9,7 @@ THIRD_PARTY_INCLUDES_END
 namespace Cathode
 {
 
-// The single binding-definition mechanism (sprint 012 slice 1): each bindable member is described ONCE by an
+// The single binding-definition mechanism: each bindable member is described ONCE by an
 // FBoundMember, and BOTH paths consume the SAME table — InstallBoundMembers installs the quickjs member, and
 // EnumerateBoundMembersJson emits the descriptor. There is NO second list, so a member installed-but-not-
 // enumerated (or vice versa) is structurally impossible — "the interface IS the bindings". The CATHODE_BIND_*
@@ -42,7 +42,7 @@ CATHODEBINDING_API void InstallBoundMembers(JSContext* Context, JSClassID ClassI
 
 // ENUMERATE: emit the descriptor as JSON in the CathodeVerify/SCHEMA.md section-2 shape —
 //   { "dom": [ { "iface", "name", "kind", "tag", "signature" }, ... ], "globals": [] }
-// from the SAME FBoundMember[] the install loops. The 011 faculty consumes this as __CATHODE_DECLARED__.
+// from the SAME FBoundMember[] the install loops. The CathodeVerify faculty consumes this as __CATHODE_DECLARED__.
 CATHODEBINDING_API FString EnumerateBoundMembersJson(const FBoundMember* Members, int32 Count);
 
 } // namespace Cathode

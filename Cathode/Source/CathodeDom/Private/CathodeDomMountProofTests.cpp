@@ -12,17 +12,16 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 — THE FIRST-MOUNT PROOF: a real (small, static) Preact panel mounts + renders END-TO-END on Cathode
-// through the assembled 012 surface (createElementNS -> node core + reflected props -> insertBefore -> the DOM),
-// asserted via the PRODUCTION document (globalThis.document, set by InstallAsGlobal-direct, PATH a). would-it-
+// THE FIRST-MOUNT PROOF: a real (small, static) Preact panel mounts + renders END-TO-END on Cathode
+// through the assembled DOM surface (createElementNS -> node core + reflected props -> insertBefore -> the DOM),
+// asserted via the PRODUCTION document (globalThis.document, set by InstallAsGlobal directly). would-it-
 // pass-if-test-only = NO: the document is the production InstallAsGlobal, the DOM members are the production
 // bindings, and the render is REAL Preact (not a hand-built DOM).
 //
-// FORWARD NOTE (carry-not-rediscover): the load-time SHIMS below (globalThis.process = {} + globalThis.self =
+// NOTE: the load-time SHIMS below (globalThis.process = {} + globalThis.self =
 // globalThis) are required to load the Preact UMD bundle into the BARE runtime (Preact core sets
-// process._rerenderCount at module load; the UMD detector reads self). PRODUCTION Preact-loading — the forward
-// LoadAuthorScript / surface-load flow (docs/browse/surface-load-document-wiring.md) — will need the SAME
-// runtime-environment shims. This is a FORWARD note, not this slice's wiring.
+// process._rerenderCount at module load; the UMD detector reads self). Any PRODUCTION Preact-loading path needs the
+// SAME runtime-environment shims.
 
 namespace
 {
@@ -85,9 +84,7 @@ bool FCathodeDomFirstMountProofTest::RunTest(const FString& Parameters)
 	// PATH (a): the document is exposed via the PRODUCTION install method on the live context.
 	Doc->InstallAsGlobal();
 
-	// Locate the vendored Preact bundle + the panel fixture (plugin-reachable on the build box — panels/ is not).
-	// NB: the Preact-sourcing (how/where the bundle is obtained) is browse-design-ruled; this path finalizes with
-	// that ruling.
+	// Locate the vendored Preact bundle + the panel fixture (plugin-reachable).
 	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
 	if (!Plugin.IsValid()) { AddError(TEXT("Cathode plugin not found")); return false; }
 	// TEST-FIXTURE JS (test-only; distinct from production author-JS): the genuine upstream Preact 10.29.2 UMD
@@ -128,7 +125,7 @@ bool FCathodeDomFirstMountProofTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// A container element under the document tree (documentElement/body are deferred, so wire it C++-side).
+	// A container element under the document tree (wired C++-side).
 	FJsValue RootW = Doc->GetWrapperForNode(Doc->GetRootNodeId());
 	FDomNode* Root = Doc->NodeFromWrapper(RootW);
 	FJsValue ContainerW = Doc->CreateElement(TEXT("div"));

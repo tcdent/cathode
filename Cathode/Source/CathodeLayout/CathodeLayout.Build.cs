@@ -12,12 +12,12 @@ public class CathodeLayout : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
-			"CathodeResolver", // sprint 009: document_container resource callbacks route to IResourceResolver
+			"CathodeResolver", // document_container resource callbacks route to IResourceResolver
 		});
 
 		// PRIVATE: CathodeRasterizer is used ONLY in the .cpp (CathodeResourceRouting -> DecodeImageSize, the
 		// Blend2D image-info decode for get_image_size), never in a public CathodeLayout header — so it is a
-		// private dep: it does NOT leak to CathodeLayout's consumers (e.g. CathodeDom). (sprint 011 [c])
+		// private dep: it does NOT leak to CathodeLayout's consumers (e.g. CathodeDom).
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"CathodeRasterizer",
@@ -25,12 +25,12 @@ public class CathodeLayout : ModuleRules
 
 		// --- Bundled ThirdParty: litehtml (the layout/CSS engine) ---
 		//
-		// ACTIVATED (sprint 010 bring-up): the document_container impl #includes litehtml and drives its
+		// The document_container impl #includes litehtml and drives its
 		// layout API, so this module links litehtml. Wired to the conventional ThirdParty layout —
-		// Source/ThirdParty/litehtml/{include, Win64/<lib>.lib} — populated by the vendor-lib tooling build
+		// Source/ThirdParty/litehtml/{include, Win64/<lib>.lib} — populated by the vendor library build
 		// from vendor/lib/cathode/litehtml/. litehtml statically embeds its HTML parser (gumbo) as a separate
-		// CMake target, so the tooling emits BOTH litehtml.lib and gumbo.lib; both are linked here.
-		// NOTE (tooling-gap recipe): build litehtml static (its CMake produces litehtml + gumbo); copy the
+		// CMake target, so the build emits BOTH litehtml.lib and gumbo.lib; both are linked here.
+		// NOTE (build recipe): build litehtml static (its CMake produces litehtml + gumbo); copy the
 		// litehtml public headers (litehtml.h + litehtml/) into include/.
 		string ThirdParty = Path.Combine(ModuleDirectory, "..", "ThirdParty");
 

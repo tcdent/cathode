@@ -1,7 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CathodeBuildId.h"
-#include "CathodeDom.h" // sprint 012 slice 1 lockstep proof — TEST-ONLY (this TU is WITH_DEV_AUTOMATION_TESTS-gated)
+#include "CathodeDom.h" // lockstep proof — TEST-ONLY (this TU is WITH_DEV_AUTOMATION_TESTS-gated)
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTesting.h"
 
@@ -22,12 +22,12 @@ THIRD_PARTY_INCLUDES_END
 // of CathodeRuntime's [CATHODE-BUILD-SIGNATURE]) so a run log witnesses any Cathode-module relink across runs.
 DEFINE_LOG_CATEGORY_STATIC(LogCathodeVerify, Log, All);
 
-// Sprint 011 [b] gate: drive the runtime-verification faculty in the REAL production Cathode runtime and assert
-// its structured self-report. The runtime is BARE today (the production OnInstall* assembly seams are unwired —
-// itself the faculty-A finding under test), so the faculty must report a massively UNDER-exposed surface, the
-// DOM/globals reconcile dormant (no 012 descriptor), the CSS axis under-exposed (no CSSOM), faculty-B's
-// self-test green — and, the review's core [b] requirement, the reported PRODUCTION surface must EXCLUDE every
-// name the harness injects to drive/capture the faculty (no false over-exposure). This gate also drift-proofs
+// Drive the runtime-verification faculty in a REAL Cathode runtime (the production factory) and assert
+// its structured self-report. The runtime is BARE (FScopedTestRuntime is the raw runtime — no contract-globals
+// assembly, no document), so the faculty must report a massively UNDER-exposed surface, the
+// DOM/globals reconcile dormant (no descriptor), the CSS axis under-exposed (no CSSOM), faculty-B's
+// self-test green — and, the core requirement, the reported PRODUCTION surface must EXCLUDE every
+// name the harness injects to drive/capture the faculty (no false over-exposure). This test also drift-proofs
 // that exclusion: it asserts the faculty's declared exclusion set covers exactly what this driver injects.
 
 namespace
@@ -106,7 +106,7 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 {
 	GVerifyEmittedReports.Reset();
 
-	// 1) The real production runtime on the test thread (finding-#1 seam). Gate on IsValid() before any use.
+	// 1) The real production runtime on the test thread (the FScopedTestRuntime seam). Gate on IsValid() before any use.
 	FScopedTestRuntime Runtime;
 	if (!Runtime.IsValid())
 	{
@@ -159,10 +159,9 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 		JS_SetPropertyStr(Context, Global, "__CATHODE_BUILD_ID__", JS_NewString(Context, TCHAR_TO_UTF8(*BuildId)));
 		InjectedNames.Add(TEXT("__CATHODE_BUILD_ID__"));
 
-		// NB: no CSS declared source is injected in [b]. The CSS axis is DORMANT — its declared source is
-		// Cathode's OWN litehtml-grounded CSS declaration, which is authored later on the convention track (NOT
-		// in [b], and NEVER by reading/copying panels/, which is another dev's area). So the faculty's CSS
-		// reconcile reports the dormant slot, parallel to DOM/globals (whose source is the 012 descriptor).
+		// NB: no CSS declared source is injected. The CSS axis is DORMANT — its declared source is
+		// Cathode's OWN litehtml-grounded CSS declaration (NEVER a host project's stylesheets). So the faculty's CSS
+		// reconcile reports the dormant slot, parallel to DOM/globals (whose source is the injected descriptor).
 
 		JS_FreeValue(Context, Global);
 	}
@@ -252,7 +251,7 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 	const TSharedPtr<FJsonObject>* Exposed = nullptr;
 	if (TestTrue(TEXT("surface has exposed"), (*Surface)->TryGetObjectField(TEXT("exposed"), Exposed)) && Exposed)
 	{
-		// Faculty-A finding: the bare production runtime exposes no DOM and none of the contract host-globals.
+		// Faculty-A finding: the bare runtime exposes no DOM and none of the contract host-globals.
 		bool bDomExposed = true;
 		(*Exposed)->TryGetBoolField(TEXT("domExposed"), bDomExposed);
 		TestFalse(TEXT("bare runtime: no DOM exposed (faculty-A under-exposure finding)"), bDomExposed);
@@ -269,7 +268,7 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 			}
 		}
 
-		// THE [b] GATE (review's core requirement): the reported production surface excludes every harness
+		// THE CORE REQUIREMENT: the reported production surface excludes every harness
 		// injection, AND the faculty's declared exclusion set covers exactly what this driver injects.
 		const TSet<FString> GlobalNames = ArrayFieldToSet(*Exposed, TEXT("globalNames"));
 		const TSet<FString> HarnessExcluded = ArrayFieldToSet(*Exposed, TEXT("harnessExcluded"));
@@ -282,8 +281,8 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// DOM + globals reconcile: DORMANT in 011 (no 012 descriptor) — declared + drift both null, and the
-	// declaredSource points at the on-disk descriptor contract (SCHEMA.md) so 012 lands in lockstep.
+	// DOM + globals reconcile: DORMANT (no descriptor injected) — declared + drift both null, and the
+	// declaredSource points at the on-disk descriptor contract (SCHEMA.md).
 	for (const TCHAR* Axis : { TEXT("dom"), TEXT("globals") })
 	{
 		const TSharedPtr<FJsonObject>* AxisObj = nullptr;
@@ -302,9 +301,9 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// CSS axis: DORMANT in [b], parallel to DOM/globals — declared null + drift null, declaredSource naming
-	// the pending Cathode-OWN litehtml-grounded CSS declaration (authored later on the convention track; never
-	// from panels/). Explicitly dormant, not a silent empty.
+	// CSS axis: DORMANT, parallel to DOM/globals — declared null + drift null, declaredSource naming
+	// the Cathode-OWN litehtml-grounded CSS declaration (never a host project's stylesheets).
+	// Explicitly dormant, not a silent empty.
 	const TSharedPtr<FJsonObject>* Css = nullptr;
 	if ((*Surface)->TryGetObjectField(TEXT("css"), Css) && Css)
 	{
@@ -346,7 +345,7 @@ bool FCathodeRuntimeVerificationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 slice 1 — the 011<->012 LOCKSTEP PROOF (in-engine): the 011 faculty actually CONSUMES the 012
+// The faculty<->descriptor LOCKSTEP PROOF (in-engine): the faculty actually CONSUMES the Host Bridge
 // projection's descriptor (GetDomNodeDescriptorJson, emitted from the SAME FBoundMember table the members
 // install from) and reconciles it against the REAL installed DOM proto -> near-empty drift; a discriminating
 // omit-case drifts. Conditions: A1 the exposed names come LIVE from the real proto (the faculty reads
@@ -396,7 +395,7 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Slice 5: the SECOND class — register the document class + build its proto probe (same pattern). The
+	// The SECOND class — register the document class + build its proto probe (same pattern). The
 	// lockstep reconciles the node descriptor vs the node proto AND the document descriptor vs the document proto,
 	// independently (per class), proving the mechanism generalizes beyond FDomNode.
 	const JSClassID DocClassId = RegisterDomDocumentClass(*Registry, Context);
@@ -410,7 +409,7 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Sprint 012 events: the 3rd + 4th classes — Event + KeyboardEvent. Same per-class pattern (probe vs descriptor).
+	// Events: the 3rd + 4th classes — Event + KeyboardEvent. Same per-class pattern (probe vs descriptor).
 	JSClassID EventClassId = 0;
 	JSClassID KeyboardEventClassId = 0;
 	RegisterDomEventClasses(*Registry, Context, &EventClassId, &KeyboardEventClassId);
@@ -585,7 +584,7 @@ bool FCathodeVerifyDomLockstepTest::RunTest(const FString& Parameters)
 	}
 
 	// CASES 5-8 (EVENT + KEYBOARDEVENT) — the 3rd + 4th classes reconcile per class (near-empty vs their OWN proto
-	// + a per-class omit-case), no conflation with node/document. The lockstep now spans 4 classes.
+	// + a per-class omit-case), no conflation with node/document. The lockstep spans 4 classes.
 	auto CheckClass = [&](const TCHAR* Label, JSValue Probe, const FString& Descriptor, const FString& BogusName) -> bool
 	{
 		{

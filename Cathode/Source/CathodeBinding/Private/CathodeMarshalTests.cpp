@@ -11,8 +11,8 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 // Specs for the BESPOKE marshaling: the accept/reject classification over the vocabulary, and the typed
-// primitive converters. Drive the REAL engine (like 002 lifecycle / S2) and assert OUR classification +
-// OUR converted values — never quickjs-ng internals. Authored, not run this sprint.
+// primitive converters. Drive the REAL engine (like the CathodeRuntime lifecycle tests) and assert OUR classification +
+// OUR converted values — never quickjs-ng internals.
 
 namespace
 {

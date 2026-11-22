@@ -1,11 +1,11 @@
 #include "CathodeComposition.h"
-#include "CathodeCompositionShared.h" // 028 S6 — the shared-engine variant (internal)
+#include "CathodeCompositionShared.h" // the shared-engine variant (internal)
 
 #include "CathodeShaperTextMeasurer.h"
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, CreateLiteHtmlLayoutEngine
 #include "CathodeRaster.h"   // FPaintOp, FRasterGlyph, IRasterBackend, ISurfaceProducer, CreateBlend2DBackend, CreateSurfaceRasterizer
-#include "CathodeResolver.h" // IResourceResolver, IBundleSource, CreateResourceResolver, CreateUEFileBundleSource (slice 3)
+#include "CathodeResolver.h" // IResourceResolver, IBundleSource, CreateResourceResolver, CreateUEFileBundleSource
 #include "CathodeSurfaces.h" // ISurfaceDocument, ISurfaceRenderTarget, the carries-it payloads
 #include "CathodeText.h"     // FShapedRun, FShapedGlyph (the mapper's text case shapes via the shared adapter)
 
@@ -37,10 +37,10 @@ public:
 	{
 		if (Engine.IsValid())
 		{
-			// PRODUCTION resolver wiring (slice 3): the production CALLER constructs the resolver over the
+			// PRODUCTION resolver wiring: the production CALLER constructs the resolver over the
 			// production default-root and injects it BEFORE SetDocument, so linked resources (@import/<link>)
 			// resolve from /Game/Cathode via the real FUEFileBundleSource. A null Resolver (bWireResolver=false)
-			// is the pre-hook behavior — linked rules never load -> defaults (the null-resolver control).
+			// leaves the engine without a resolver — linked rules never load -> defaults (the null-resolver control).
 			if (Resolver.IsValid())
 			{
 				Engine->SetResourceResolver(Resolver.Get());
@@ -68,9 +68,9 @@ private:
 	FLayoutResult LastResult;                // owns the paint ops the opaque batch points at, across the tick
 };
 
-// --- 028 S6: ISurfaceDocument backed by a BORROWED (shared) Layout engine ----------------------------------
+// --- ISurfaceDocument backed by a BORROWED (shared) Layout engine ----------------------------------
 //
-// The unify: the surface-load owner builds ONE real DOM-layout engine (the doc's mutation-marked engine) and the
+// The surface-load owner builds ONE real DOM-layout engine (the doc's mutation-marked engine) and the
 // composition renders off THAT engine, so a DOM mutation's MarkNodeDirty drives the re-compose. Unlike FLayoutSurfaceDocument
 // this constructs NO engine + does NO SetDocument/resolver wiring (the owner does that on the shared engine BEFORE this,
 // via CreateDomDocument's SetDocument + SetResourceResolver). Engine is BORROWED — the owner owns it + outlives the surface.
@@ -95,7 +95,7 @@ private:
 // --- ISurfaceRenderTarget backed by the real Rasterizer producer -------------------------------------------
 //
 // ProduceFrame maps the layout ops (carried opaquely from the document backer) to the Rasterizer's FPaintOp
-// stream and rasterizes into the Blend2D bitmap. The TEXT case (slice 2) shapes the un-shaped FLayoutPaintOp.Text
+// stream and rasterizes into the Blend2D bitmap. The TEXT case shapes the un-shaped FLayoutPaintOp.Text
 // via the SHARED adapter (the same FFontHandle Layout measured with), applies the glyph-run map (FShapedGlyph ->
 // FRasterGlyph), and emits a DrawGlyphRun op. The producer hands back its published front buffer + dirty rects via
 // the PUSH FFrameReadySeam — we capture + re-expose via GetReadyFrame. Backend MUST precede Producer (held by ref).
@@ -150,7 +150,7 @@ public:
 		// views into its elements must stay valid (the FontBytes views borrow the registry, alive via the adapter).
 		TArray<TArray<FRasterGlyph>> GlyphBacking;
 		GlyphBacking.Reserve(LayoutOps.Num());
-		// 029 #4 — the decoded DrawImage bitmaps. FPaintOp.Image borrows a raw ptr into the held object, so these must
+		// The decoded DrawImage bitmaps. FPaintOp.Image borrows a raw ptr into the held object, so these must
 		// outlive the synchronous RasterizeFrame below (the TUniquePtr's heap object survives any TArray reallocation).
 		TArray<TUniquePtr<IRasterBitmap>> ImageBacking;
 		ImageBacking.Reserve(LayoutOps.Num());
@@ -176,7 +176,7 @@ public:
 					if (!Adapter->ShapeText(L.Font, L.Text, Shaped, FontSizePx)) { break; } // SAME FFontHandle as the measure
 					TArrayView<const uint8> FontBytes;
 					if (!Adapter->GetFontBytes(Shaped.Font, FontBytes) || FontBytes.Num() == 0) { break; }
-					// the 022 glyph-run map: FShapedGlyph -> FRasterGlyph (id + fractional pen position from the run origin)
+					// the glyph-run map: FShapedGlyph -> FRasterGlyph (id + fractional pen position from the run origin)
 					TArray<FRasterGlyph> Glyphs;
 					Glyphs.Reserve(Shaped.Glyphs.Num());
 					for (const FShapedGlyph& G : Shaped.Glyphs) { Glyphs.Add(FRasterGlyph{ G.GlyphId, G.X, G.Y }); }
@@ -188,7 +188,7 @@ public:
 					// L.Position is the text box's TOP-LEFT (litehtml pos.y, CathodeLayoutEngine.cpp draw_text);
 					// DrawGlyphRun's origin is the BASELINE. The mapper bridges Layout's top-left convention to the
 					// Rasterizer's baseline convention by adding the font ascent. Without this the glyphs render
-					// above the box top and are clipped out -> zero glyph ink (browse 023 slice-2 diagnosis).
+					// above the box top and are clipped out -> zero glyph ink.
 					P.GlyphOrigin = FVector2f(L.Position.X, L.Position.Y + Shaped.Metrics.Ascent);
 					P.Color = L.Color;
 					P.GlyphRun.FontBytes = FontBytes;   // borrowed from the registry (the adapter outlives the tick)
@@ -200,9 +200,9 @@ public:
 				break;
 			case ELayoutPaintOpKind::DrawImage:
 				{
-					// 029 #4 — the layout carried the RESOLVED bytes (L.ImageBytes); decode them HERE -> the bitmap the blit
+					// The layout carried the RESOLVED bytes (L.ImageBytes); decode them HERE -> the bitmap the blit
 					// needs. Held in ImageBacking so it outlives the synchronous RasterizeFrame (like GlyphBacking).
-					if (L.ImageBytes.Num() == 0) { break; }          // a miss / declared-only no-op -> blank box (the proof REDs)
+					if (L.ImageBytes.Num() == 0) { break; }          // a miss / declared-only no-op -> blank box
 					TUniquePtr<IRasterBitmap> Decoded = DecodeImage(L.ImageBytes.GetData(), L.ImageBytes.Num());
 					if (!Decoded.IsValid()) { break; }               // undecodable bytes -> skip the draw
 					const IRasterBitmap* const Bitmap = Decoded.Get();
@@ -227,12 +227,11 @@ public:
 		FSurfaceReadyFrame Frame;
 		if (bHaveFrame)
 		{
-			// Populate the NEUTRAL pixel VIEW from the captured Blend2D FBitmapData (RQ2 (ii) — the seam carries no
+			// Populate the NEUTRAL pixel VIEW from the captured Blend2D FBitmapData (the seam carries no
 			// vendor type; Egress reads Pixels/Stride/dims/format, never an FBitmapData). A pass-through VIEW: the
-			// SAME Pixels pointer + Stride, no copy/conversion — the borrow contract is unchanged from the 023
-			// Handle (the async copy-at-callback that crosses the render-thread hop is Egress's, 1b). Format is
-			// populated but first READ downstream (1b picks PF_B8G8R8A8 from it); 1a's consumers read [B,G,R,A] off
-			// Pixels directly, so the format map is populated-not-bound here.
+			// SAME Pixels pointer + Stride, no copy/conversion — a BORROW (the async copy-at-callback that crosses
+			// the render-thread hop is Egress's). Format is populated here but first READ downstream (Egress picks
+			// the UE pixel format from it); consumers that read [B,G,R,A] off Pixels directly do not depend on it.
 			Frame.Buffer.Pixels = CapturedBitmap.Pixels;
 			Frame.Buffer.Stride = CapturedBitmap.Stride;
 			Frame.Buffer.Width = CapturedBitmap.Width;
@@ -265,7 +264,7 @@ FString GetDefaultResourceRoot()
 {
 	// The production content root: /Game/Cathode == ProjectContentDir()/Cathode. This literal MUST EQUAL the
 	// staging entry (+DirectoriesToAlwaysStageAsUFS=/Game/Cathode in Config/DefaultGame.ini) — a mismatch would
-	// ship a content root the cook cannot stage (the 019 coupling). /Game/ is the ProjectContentDir mount, so
+	// ship a content root the cook cannot stage. /Game/ is the ProjectContentDir mount, so
 	// /Game/Cathode resolves to ProjectContentDir()/Cathode (the editor's Content/Cathode; the cooked pak after
 	// staging).
 	return FPaths::ProjectContentDir() / TEXT("Cathode");
@@ -299,7 +298,7 @@ FSurfaceRegistration MakeCompositionSurfaceRegistrationShared(
 	int32 Height,
 	ESurfacePixelFormat Format)
 {
-	// 028 S6 — the composition renders off the owner's SHARED engine (the doc's mutation-marked engine), and the
+	// The composition renders off the owner's SHARED engine (the doc's mutation-marked engine), and the
 	// rasterizer uses the SAME measurer (the same-bytes anchor). No own-engine / SetDocument / resolver here — the owner
 	// wired the shared engine BEFORE this call.
 	FSurfaceRegistration Registration;

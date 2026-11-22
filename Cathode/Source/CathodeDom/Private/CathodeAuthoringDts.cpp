@@ -2,7 +2,7 @@
 
 #include "CathodeAuthoringTables.h"
 #include "CathodeBoundMember.h"
-#include "CathodeContractGlobalNames.h" // 025 S1 — GetContractGlobalNames (the install set the globals section binds to)
+#include "CathodeContractGlobalNames.h" // GetContractGlobalNames (the install set the globals section binds to)
 
 namespace Cathode
 {
@@ -25,7 +25,7 @@ namespace
 		{ TEXT("Document"),          TEXT("Node") },
 		{ TEXT("Event"),             nullptr },
 		{ TEXT("KeyboardEvent"),     TEXT("Event") },
-		{ TEXT("Game"),              nullptr }, // 029 #28 — the game.* host bridge surface (a standalone interface; `declare const game: Game`)
+		{ TEXT("Game"),              nullptr }, // the game.* host bridge surface (a standalone interface; `declare const game: Game`)
 	};
 
 	// Project ONE FBoundMember to a TS member declaration — name + signature BOTH from the binding's own fields (the
@@ -58,7 +58,7 @@ FString GenerateAuthoringDts()
 	GetDomDocumentBoundMembersForCodegen(Tables[1].Members, Tables[1].Count);
 	GetDomEventBoundMembersForCodegen(Tables[2].Members, Tables[2].Count);
 	GetDomKeyboardEventBoundMembersForCodegen(Tables[3].Members, Tables[3].Count);
-	GetGameBoundMembersForCodegen(Tables[4].Members, Tables[4].Count); // 029 #28 — the game.* host bridge table (the SAME table the composer installs)
+	GetGameBoundMembersForCodegen(Tables[4].Members, Tables[4].Count); // the game.* host bridge table (the SAME table the composer installs)
 
 	// Group every member under its declaring Iface (the per-member Iface flows through from the table).
 	TMap<FString, TArray<const FBoundMember*>> ByIface;
@@ -78,8 +78,8 @@ FString GenerateAuthoringDts()
 	Out += TEXT("// test asserts this committed file == the regeneration. Authors compile against this file with a tsconfig\n");
 	Out += TEXT("// that OMITS \"dom\" -- any unsupported web API (fetch/localStorage/innerHTML/...) is a type error.\n");
 	// NO `export {};` here: the .d.ts must be an AMBIENT-GLOBAL script, NOT a module — so its globals/interfaces resolve
-	// in author code WITHOUT an import. (025 S4 proved an `export {};` makes it a module -> tsc rejects even console/document
-	// -> the gate is broken. The ambient form is the only one where the gate discriminates supported-vs-banned.)
+	// in author code WITHOUT an import. (An `export {};` makes it a module -> tsc rejects even console/document
+	// -> the type check is useless. The ambient form is the only one where it discriminates supported-vs-banned.)
 	Out += TEXT("\n");
 
 	// --- the standard globals: BOUND to the install set (GetContractGlobalNames + document via InstallAsGlobal). One
@@ -99,7 +99,7 @@ FString GenerateAuthoringDts()
 		};
 		TArray<FString> GlobalNames = GetContractGlobalNames(); // the CathodeContractGlobals install set (the single source)
 		GlobalNames.Add(TEXT("document"));                     // the documented known: FDomDocument::InstallAsGlobal (per-surface)
-		GlobalNames.Add(TEXT("game"));                         // 029 #28 — the documented known: InstallGameBridgeAsGlobal (the composer, design B)
+		GlobalNames.Add(TEXT("game"));                         // the documented known: InstallGameBridgeAsGlobal (the composer)
 		for (const FString& Name : GlobalNames)
 		{
 			if (const FString* Sig = GlobalSignatures.Find(Name)) { Out += *Sig + TEXT("\n"); }

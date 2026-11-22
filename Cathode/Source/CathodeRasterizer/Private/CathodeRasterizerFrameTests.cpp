@@ -10,7 +10,7 @@
 // RECORDING backend (records the dispatch + clip, supplies bitmap data) and a recording output seam, and
 // assert OUR handoff bookkeeping — the live entry routes through the SAME DispatchPaintOps, clips to the
 // dirty rects (dirty-only rendering), produces + hands off the bitmap + dirty-rect, and fires frame-ready
-// ONLY on change. NEVER pixels. Authored, not run this sprint.
+// ONLY on change. NEVER pixels.
 
 namespace
 {

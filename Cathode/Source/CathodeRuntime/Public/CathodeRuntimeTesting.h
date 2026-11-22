@@ -11,10 +11,10 @@ namespace Cathode
 {
 
 /**
- * TEST-ONLY runtime seam (sprint 011, finding-#1 unblock).
+ * TEST-ONLY runtime seam.
  *
  * The plugin auto-starts ONE JS runtime at module load — correct product behaviour, and the single-instance
- * guard gracefully refuses a second (the finding-#1 product side is correct). An automation test that needs
+ * guard gracefully refuses a second. An automation test that needs
  * to own the runtime lifecycle (create/use/destroy on the TEST thread — quickjs is single-thread-affine, the
  * same affinity that ruled out driving the worker-thread-bound auto-started instance) must first RELEASE that
  * auto-started singleton.
@@ -42,9 +42,9 @@ namespace Testing
  * runtime on the CALLING (test) thread via the production factory. On destruction: the runtime is torn down
  * (TUniquePtr), freeing the claim for the next test — leaving the coherent free-singleton state.
  *
- * IsValid() is the DEFENSIVE GUARD against finding-#1: tests MUST assert IsValid() before using Context(),
- * which returns nullptr when invalid rather than handing back a value to null-deref (the exact crash the
- * use-tests hit). The runtime is a production-factory instance reached through the legitimate reset seam on
+ * IsValid() is the DEFENSIVE GUARD: tests MUST assert IsValid() before using Context(),
+ * which returns nullptr when invalid rather than handing back a value to null-deref (the exact crash an
+ * unguarded use-test hits). The runtime is a production-factory instance reached through the legitimate reset seam on
  * the test thread — production-path, not a parallel runtime.
  */
 class CATHODERUNTIME_API FScopedTestRuntime
@@ -53,10 +53,10 @@ public:
 	FScopedTestRuntime();
 
 	/**
-	 * The DEFENSIVE GUARD (the finding-#1 lesson): true only when the test-owned runtime was created and
+	 * The DEFENSIVE GUARD: true only when the test-owned runtime was created and
 	 * reports valid. Each test MUST gate on this before using the runtime (e.g.
 	 * `if (!RT.IsValid()) { AddError(...); return false; }`) — abort rather than deref an invalid runtime,
-	 * which is the exact crash the use-tests hit (deref of a refused CreateJsRuntime result).
+	 * which is the exact crash an unguarded use-test hits (deref of a refused CreateJsRuntime result).
 	 */
 	bool IsValid() const;
 

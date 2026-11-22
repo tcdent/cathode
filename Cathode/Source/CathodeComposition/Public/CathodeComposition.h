@@ -9,7 +9,7 @@ namespace Cathode
 
 class ILayoutDocumentSource; // CathodeLayout — the document to lay out (the real DOM at integration)
 
-// The PRODUCTION content root (sprint 023 slice 3, the A2 default-root): FPaths::ProjectContentDir()/Cathode.
+// The PRODUCTION content root: FPaths::ProjectContentDir()/Cathode.
 // The cooked content location for Cathode's HTML/CSS/JS/font resources; the production caller passes this as the
 // resolver root. (The first production ProjectContentDir() use in the plugin; staged via
 // +DirectoriesToAlwaysStageAsUFS=/Game/Cathode.)
@@ -26,10 +26,9 @@ CATHODECOMPOSITION_API FString GetDefaultResourceRoot();
 //
 // LIFETIME (load-bearing): the returned registration's document backer holds `Document` by REFERENCE — the
 // document source (the live DOM at integration) is owned by the CALLER and MUST outlive the surface the
-// registration is bound into. `FontFilePath` sources the measurer's font: production injects the A2-staged font
-// (slice 3); the slice-1 tick proof injects the committed OFL fixture. (Slice 1: the text path is WIRED but not
-// exercised — the measurer constructs Layout; glyph fill is slice 2.)
-// bWireResourceResolver (sprint 023 slice 3): when true (production default), the document backer constructs the
+// registration is bound into. `FontFilePath` sources the measurer's font: production injects its staged font;
+// the tick proofs inject the committed OFL fixture.
+// bWireResourceResolver: when true (production default), the document backer constructs the
 // PRODUCTION resource resolver — CreateResourceResolver(CreateUEFileBundleSource(GetDefaultResourceRoot())) — and
 // injects it into the Layout engine before SetDocument, so linked resources (@import/<link>) resolve from the
 // production default-root /Game/Cathode (= GetDefaultResourceRoot()). false = no resolver (the null-resolver

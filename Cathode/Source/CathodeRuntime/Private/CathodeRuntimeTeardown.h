@@ -23,7 +23,7 @@ enum class ETeardownStep : uint8
 };
 
 #if WITH_DEV_AUTOMATION_TESTS
-// Test-injection seam (RQ1-sanctioned): when set, the production destructor taps this observer at
+// Test-injection seam: when set, the production destructor taps this observer at
 // each ordered teardown step, so a lifecycle spec records and asserts the REAL teardown order
 // without forking the teardown code. Unset in production; defined in CathodeJsRuntime.cpp.
 extern TFunction<void(ETeardownStep)> GTeardownObserver;

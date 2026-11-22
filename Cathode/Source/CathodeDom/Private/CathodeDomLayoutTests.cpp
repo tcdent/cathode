@@ -11,17 +11,17 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 // Specs for the layout handshake — ILayoutDocumentSource structure reads + the MARKUP SERIALIZATION the whole
-// Model-A design rests on — and the observation reads composing 005's geometry. Assert OUR bookkeeping: the
+// design rests on — and the observation reads composing CathodeLayout's geometry. Assert OUR bookkeeping: the
 // serialized string for a hand-built tree, the structure NodeIds, and that the observation reads look up the
-// right NodeId's FLayoutNodeGeometry (geometry VALUES scripted, standing in for 005's; real layout deferred
-// to validation-pass). ZERO real-layout / litehtml-internal assertions. Authored, not run this sprint.
+// right NodeId's FLayoutNodeGeometry (geometry VALUES scripted, standing in for CathodeLayout's; real layout is
+// covered by RealLayoutGeometry below). ZERO real-layout / litehtml-internal assertions.
 
 namespace
 {
 using namespace Cathode;
 
 // A scripted layout engine: SetDocument/MarkNodeDirty are no-ops; Relayout returns a scripted FLayoutResult so
-// the observation reads have geometry to compose (standing in for real 005 layout output).
+// the observation reads have geometry to compose (standing in for real CathodeLayout output).
 class FScriptedLayoutEngine final : public ILayoutEngine
 {
 public:
@@ -31,7 +31,7 @@ public:
 	virtual FLayoutResult Relayout(int32) override { return Scripted; }
 };
 
-// Minimal text measurer for driving the REAL litehtml engine (T3) — block layout with explicit inline sizes
+// Minimal text measurer for driving the REAL litehtml engine — block layout with explicit inline sizes
 // barely exercises it (the fixture has no text content).
 class FStubMeasurer final : public ITextMeasurer
 {
@@ -70,10 +70,10 @@ bool FCathodeDomSerializeTest::RunTest(const FString& Parameters)
 	Div->SetTextContent(TEXT("hi"));
 	Doc->FindNode(Doc->GetRootNode())->AppendChild(DivW);
 
-	// Serialization now emits the data-node-id correlation handle (sprint 011 [c] T1) FIRST on each element,
+	// Serialization emits the data-node-id correlation handle FIRST on each element,
 	// before the sorted author attributes (it is what the layout engine reads back to map litehtml's placed
 	// element to our NodeId). Built with the ACTUAL NodeIds (not hard-coded) so the match stays exact.
-	// 028 S1 body-seed: the ctor now seeds documentElement > [head, body], so the whole-tree serialization carries
+	// Body-seed: the ctor seeds documentElement > [head, body], so the whole-tree serialization carries
 	// the (empty) head+body before the appended div. Read the seeded head/body NodeIds from the root's children so
 	// the exact match stays NodeId-accurate.
 	TArray<int32> RootKidsForSerialize;
@@ -122,7 +122,7 @@ bool FCathodeDomStructureReadsTest::RunTest(const FString& Parameters)
 	const FDomNodeId DivId = Doc->NodeFromWrapper(DivW)->GetNodeId();
 	Doc->FindNode(RootId)->AppendChild(DivW);
 
-	// The 005 structure reads answered from the wrapper-governed index, by NodeId.
+	// The CathodeLayout structure reads answered from the wrapper-governed index, by NodeId.
 	TestTrue(TEXT("GetRootNode is the root"), RootId != INDEX_NONE);
 	TestEqual(TEXT("GetParentNode(div) is the root"), Doc->GetParentNode(DivId), RootId);
 	{
@@ -156,7 +156,7 @@ bool FCathodeDomObservationTest::RunTest(const FString& Parameters)
 	const FDomNodeId DivId = Div->GetNodeId();
 	Doc->FindNode(Doc->GetRootNode())->AppendChild(DivW);
 
-	// Script 005's geometry for the div (the box/style VALUES stand in for real layout output).
+	// Script CathodeLayout's geometry for the div (the box/style VALUES stand in for real layout output).
 	FLayoutNodeGeometry Geom;
 	Geom.NodeId = DivId;
 	Geom.Box = FBox2f(FVector2f(1, 2), FVector2f(11, 12));
@@ -165,7 +165,7 @@ bool FCathodeDomObservationTest::RunTest(const FString& Parameters)
 
 	Doc->Relayout(800); // caches the scripted result
 
-	// The observation reads COMPOSE 005's geometry by NodeId (our lookup; the values are 005's).
+	// The observation reads COMPOSE CathodeLayout's geometry by NodeId (our lookup; the values are CathodeLayout's).
 	FBox2f Box;
 	TestTrue(TEXT("getBoundingClientRect finds the laid-out box"), Div->GetBoundingClientRect(Box));
 	TestTrue(TEXT("the box is the node's geometry"), Box == FBox2f(FVector2f(1, 2), FVector2f(11, 12)));
@@ -184,7 +184,7 @@ bool FCathodeDomObservationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 011 [c] target 3 — REAL OBSERVATION GEOMETRY (the come-due discharge).
+// REAL OBSERVATION GEOMETRY.
 //
 // Drives the DOM observation READ path (FDomNode::GetBoundingClientRect) over the REAL FLiteHtmlLayoutEngine
 // (NOT FScriptedLayoutEngine): a real FDomDocument tree — whose SerializeNode emits the data-node-id handle —

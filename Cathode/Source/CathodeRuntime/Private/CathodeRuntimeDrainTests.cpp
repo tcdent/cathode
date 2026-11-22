@@ -15,16 +15,16 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 016 slice 2 — real ExecutePendingJob (the confirmed tri-state) + the INTEGRATED drain, against the REAL engine
-// (FScopedTestRuntime). The PRODUCTION DrainMicrotasks loop (FCathodeTick::Tick, git-UNCHANGED) drives the REAL one-job
+// Real ExecutePendingJob (the confirmed tri-state) + the INTEGRATED drain, against the REAL engine
+// (FScopedTestRuntime). The PRODUCTION DrainMicrotasks loop (FCathodeTick::Tick) drives the REAL one-job
 // primitive. Throw-on-success via Contains (a stub's ExecutePendingJob is NoPending-always -> the drain never runs ->
-// the check's bThrew==false -> the assert FAILS). The drain "drained:ab" + the faulted "42" are RED on a stub binary.
+// the check's bThrew==false -> the assert FAILS). The drain "drained:ab" + the faulted "42" are RED on a stubbed runtime.
 //
-// THE FAULTED PROOF (B', tcdent-ruled): a plain author-JS `Promise.then(throw)` is CAUGHT by the reaction -> Executed(1)
+// THE FAULTED PROOF: a plain author-JS `Promise.then(throw)` is CAUGHT by the reaction -> Executed(1)
 // + an unhandled rejection (host-tracker channel), NOT Faulted(-1). The REACHABLE <0 path is a HOST-enqueued raw job
 // whose JSJobFunc returns JS_EXCEPTION (JS_EnqueueJob) -> JS_ExecutePendingJob returns -1 -> Faulted -> the tick's
-// pre-existing Faulted->Sink routing surfaces the message. This proves the <0->Faulted MAPPING (the slice-2 deliverable)
-// with NO new production seam. (The author-JS unhandled-rejection->sink is a TRACKED follow-on, out of 016.)
+// Faulted->Sink routing surfaces the message. This proves the <0->Faulted MAPPING
+// with NO test-only production seam. (The author-JS unhandled-rejection->sink channel is covered by CathodeRuntimeRejectionTests.)
 
 namespace
 {

@@ -4,7 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 
-// Sprint 011 [c] target 1 — REAL litehtml layout output (the come-due discharge).
+// REAL litehtml layout output.
 //
 // Drives the REAL FLiteHtmlLayoutEngine (CreateLiteHtmlLayoutEngine) on real HTML — NOT the recording/stub
 // backend the other CathodeLayout tests use — and asserts against litehtml's OWN computed boxes. The source
@@ -12,7 +12,7 @@
 // production); the engine maps each NodeId to litehtml's placed element and reads get_placement(). Per the
 // oracle, the assertions are RELATIONAL/STRUCTURAL invariants only real layout produces (non-zero box on a
 // sized element; child nests in its parent; sibling blocks stack at increasing Y; the parent encloses its
-// stacked children) — NEVER a hand-typed pixel. checked = the boxes asserted against litehtml's output.
+// stacked children) — NEVER a hand-typed pixel.
 
 namespace
 {
@@ -57,8 +57,8 @@ public:
 	}
 };
 
-// 029 #33 — a body background-color (gate-allowed CSS) drives litehtml's ROOT/canvas-background paint path. This is the CSS
-// that NULL-derefed the draw (029 #4's abandoned blue-body-fill crashed the box). A single sized child + `body { background }`.
+// A body background-color (authoring-gate-allowed CSS) drives litehtml's ROOT/canvas-background paint path. This is the CSS
+// that NULL-derefs the draw when the clip is a nullptr. A single sized child + `body { background }`.
 class FBodyBackgroundSource final : public ILayoutDocumentSource
 {
 public:
@@ -129,9 +129,9 @@ bool FCathodeLayoutLiteHtmlBoxTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 029 #33 — the body{background-color} CONTAINER-CRASH fix (the #4 follow-on). A body/html background-color drives litehtml's
-// ROOT/canvas-background paint path, which dereferenced the draw's clip pointer UNCONDITIONALLY -> EXCEPTION_ACCESS_VIOLATION
-// reading 0x0 on the nullptr clip CathodeLayout passed (so ordinary gate-allowed CSS crashed the device). The fix passes a
+// The body{background-color} CONTAINER-CRASH guard. A body/html background-color drives litehtml's
+// ROOT/canvas-background paint path, which dereferences the draw's clip pointer UNCONDITIONALLY -> EXCEPTION_ACCESS_VIOLATION
+// reading 0x0 on a nullptr clip (so ordinary authoring-gate-allowed CSS would crash the device). CathodeLayout passes a
 // valid viewport clip (get_client_rect). THE CRASH->SURVIVE FLIP: reaching the assertions at all proves the draw SURVIVED
 // (a still-crashing build faults inside Relayout and never reaches them); the blue FillRect proves the body bg DREW (a real
 // fix, not a skip-the-draw mask).
@@ -149,7 +149,7 @@ bool FCathodeLayoutBodyBackgroundTest::RunTest(const FString& Parameters)
 	FBodyBackgroundSource Source;
 	Engine->SetDocument(Source);
 
-	// This Relayout drives the root/canvas-background paint that CRASHED on the nullptr clip. Without the fix the box faults
+	// This Relayout drives the root/canvas-background paint that CRASHES on a nullptr clip. Without the viewport clip the process faults
 	// HERE (EXCEPTION_ACCESS_VIOLATION) and never returns -> reaching the asserts below IS the crash->survive evidence.
 	const FLayoutResult Result = Engine->Relayout(800);
 

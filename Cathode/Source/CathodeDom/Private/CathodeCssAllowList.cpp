@@ -20,7 +20,7 @@ bool LoadLitehtmlStringIdH(FString& OutContents)
 
 void ParseLitehtmlPropertyNames(const FString& StringIdH, TSet<FString>& Out)
 {
-	// Migrated verbatim from CathodeDomCssCapabilityTests.cpp — the litehtml `// CSS property names` block.
+	// The litehtml `// CSS property names` block.
 	TArray<FString> Lines;
 	StringIdH.ParseIntoArrayLines(Lines);
 	bool bInBlock = false;
@@ -40,8 +40,8 @@ void ParseLitehtmlPropertyNames(const FString& StringIdH, TSet<FString>& Out)
 
 const TArray<FString>& CssAuditedExclusions()
 {
-	// THE 7 AUDITED EXCLUSIONS (hand-curated; each guarded to be a real litehtml parse-name). Migrated from the test TU
-	// (was the single source for the capability tests; the manifest is retired, so this is now THE source for the codegen).
+	// THE 7 AUDITED EXCLUSIONS (hand-curated; each guarded to be a real litehtml parse-name).
+	// THE source for the codegen.
 	static const TArray<FString> E = {
 		TEXT("litehtml-border-spacing-x"), TEXT("litehtml-border-spacing-y"),
 		TEXT("background-image-baseurl"), TEXT("list-style-image-baseurl"),
@@ -52,8 +52,8 @@ const TArray<FString>& CssAuditedExclusions()
 
 const TArray<FString>& CssCathodeComputed()
 {
-	// THE 2 cathode_computed props — Axis-3-IN but NOT litehtml parse-names (opacity 014/2 terminal; letter-spacing
-	// 014/1 transitional). The named +2 exception (RQ3 (i) KEEP); guarded so a 3rd silent non-litehtml prop flags.
+	// THE 2 cathode_computed props — Axis-3-IN but NOT litehtml parse-names (opacity, letter-spacing).
+	// The named +2 exception; guarded so a 3rd silent non-litehtml prop flags.
 	static const TArray<FString> E = { TEXT("opacity"), TEXT("letter-spacing"), };
 	return E;
 }

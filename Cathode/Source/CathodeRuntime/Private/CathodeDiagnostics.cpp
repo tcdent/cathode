@@ -21,7 +21,7 @@ void FLogDiagnosticSink::ReportError(const FJsError& Error)
 
 void FLogDiagnosticSink::ReportConsole(EConsoleLevel Level, const FString& Message)
 {
-	// REAL override (sprint 012 S4): route console output to the game log at its level, so production
+	// REAL override: route console output to the game log at its level, so production
 	// console.{log,warn,error} are surfaced — never silently dropped into the additive default no-op.
 	switch (Level)
 	{

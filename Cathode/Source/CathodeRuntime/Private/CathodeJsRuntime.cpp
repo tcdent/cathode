@@ -1,6 +1,6 @@
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTeardown.h"
-#include "CathodeDiagnostics.h" // 029 #18 — ICathodeDiagnosticSink::ReportError for the rejection report
+#include "CathodeDiagnostics.h" // ICathodeDiagnosticSink::ReportError for the rejection report
 
 #include "Containers/StringConv.h"
 
@@ -8,8 +8,6 @@
 
 // quickjs-ng — the embedded JS engine. Every JS_* / JSRuntime / JSContext token is confined to this
 // translation unit; swapping engines means reimplementing this file and the factory, nothing else.
-// The include path is wired by the execution-approval sprint's build (the header is vendored at
-// vendor/lib/cathode/quickjs-ng/quickjs.h); no build runs this sprint.
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -87,9 +85,9 @@ public:
 
 	virtual FEvalResult Evaluate(const FString& Source, const FString& SourceName, EEvalKind Kind) override
 	{
-		// 016 slice 1 — real JS_Eval (the shape is proven by CathodeContractGlobalsTests). FEvalResult carries
+		// Real JS_Eval (the shape is proven by CathodeContractGlobalsTests). FEvalResult carries
 		// no vendor value (the Bridge's seam); we report ONLY whether it threw + the error. Both eval-type flags
-		// are wired per Kind (Module is wired-but-dormant this slice — no caller/proof; the proof is on Global).
+		// are wired per Kind (Module is wired but has no caller/proof; the proof is on Global).
 		FEvalResult Result;
 		if (Context == nullptr)
 		{
@@ -112,7 +110,7 @@ public:
 
 	virtual EJobPumpResult ExecutePendingJob() override
 	{
-		// 016 slice 2 — the real one-job pump. The tri-state is CONFIRMED against pinned quickjs-ng v0.15.1/fd0a0210:
+		// The real one-job pump. The tri-state is CONFIRMED against pinned quickjs-ng v0.15.1/fd0a0210:
 		// "return < 0 if exception, 0 if no job pending, 1 if a job was executed successfully". Single-context, so the
 		// out *pctx == our Context; a faulted job's exception is retrieved by the existing TakePendingError (which the
 		// tick's DrainMicrotasks routes to the diagnostic sink). The drain-to-empty LOOP stays in the tick — this is the
@@ -127,7 +125,7 @@ public:
 	virtual bool TakePendingError(FJsError& OutError) override
 	{
 		// Vendor extraction: pull the engine's pending exception and map it to our FJsError. The mapping
-		// is vendor-shaped (not unit-tested — behavioural proof is the execution sprint); the bespoke
+		// is vendor-shaped (not unit-tested here); the bespoke
 		// part is the ROUTING of this FJsError to the diagnostic sink, which lives in the tick.
 		if (Context == nullptr)
 		{
@@ -196,7 +194,7 @@ public:
 
 	virtual void InstallRejectionTracker(ICathodeDiagnosticSink& Sink) override
 	{
-		// 029 #18 — install the host promise-rejection tracker. The sink reaches us via this seam (the runtime doesn't
+		// Install the host promise-rejection tracker. The sink reaches us via this seam (the runtime doesn't
 		// hold it); the C thunk's opaque is `this` so the runtime owns the unhandled set + the report logic (like the
 		// interrupt thunk). The thunk fires on the is_handled BOOL — NOT JS_ExecutePendingJob's return.
 		RejectionSink = &Sink;
@@ -229,8 +227,8 @@ public:
 
 	virtual void* GetNativeContextHandle() const override
 	{
-		// The live JSContext as an opaque void* for the JS Binding layer (sprint 007). The binding casts it
-		// back to JSContext* and derives the runtime via JS_GetRuntime; 002's public header stays JS_*-free.
+		// The live JSContext as an opaque void* for the JS Binding layer. The binding casts it
+		// back to JSContext* and derives the runtime via JS_GetRuntime; CathodeRuntime's public header stays JS_*-free.
 		return Context;
 	}
 
@@ -247,7 +245,7 @@ private:
 		return 0;
 	}
 
-	// 029 #18 — C thunk for JS_SetHostPromiseRejectionTracker. Signature MUST match the vendored typedef EXACTLY
+	// C thunk for JS_SetHostPromiseRejectionTracker. Signature MUST match the vendored typedef EXACTLY
 	// (quickjs.h:1134): void(JSContext*, JSValueConst promise, JSValueConst reason, bool is_handled, void* opaque) —
 	// quickjs-ng spells is_handled as C++ `bool` (NOT JS_BOOL). opaque is `this`. Adapts to the deferred-report below.
 	static void RejectionTrackerThunk(JSContext* Ctx, JSValueConst Promise, JSValueConst Reason, bool bIsHandled, void* Opaque)
@@ -306,11 +304,10 @@ private:
 	{
 		// First ordered teardown step. Release the JS-touching values Runtime Core holds before the
 		// context is destroyed. The interrupt closure is one such held value (it captures our policy);
-		// reset it here so nothing dangles. Later slices release DOM tree roots, host-bound callables,
-		// and cached exceptions here too.
+		// reset it here so nothing dangles.
 		InterruptHandler = nullptr;
 
-		// 029 #18 — free the dup'd promises held for unhandled-rejection tracking BEFORE the context is destroyed
+		// Free the dup'd promises held for unhandled-rejection tracking BEFORE the context is destroyed
 		// (the JS<->native lifetime hazard: a dup outliving its context is exactly the out-of-order teardown bite).
 		if (Context != nullptr)
 		{
@@ -340,7 +337,7 @@ private:
 	bool bOwnsInstanceClaim = false;
 	FInterruptHandler InterruptHandler; // our policy closure; released first in teardown
 
-	// 029 #18 — author-JS unhandled-rejection tracking. JS_SetHostPromiseRejectionTracker fires (is_handled=FALSE) when a
+	// Author-JS unhandled-rejection tracking. JS_SetHostPromiseRejectionTracker fires (is_handled=FALSE) when a
 	// promise rejects with no handler, and fires AGAIN (is_handled=TRUE) if a handler is added LATER (the double-fire). We
 	// DEFER the report: this map holds the dup'd promise + its captured reason; a later handle REMOVES it (free the dup);
 	// ReportUnhandledRejections (called by the tick AFTER the microtask drain-to-empty — the SETTLED boundary, once no jobs

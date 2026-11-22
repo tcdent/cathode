@@ -38,21 +38,21 @@ JSValue GameGetEntityNameThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int Arg
 	{ JsName, "Game", EBoundMemberKind::Property, Tag, Sig, nullptr, reinterpret_cast<JSCFunction*>(&GetterFn), nullptr }
 
 // ---- GGameMembers — THE SINGLE SOURCE (consumed by the install below AND by GetGameBoundMembersForCodegen). The stub's
-// real-shaped game.* surface (029 #28 placeholder; the sim defines the real members later). ----
+// real-shaped game.* surface (a placeholder; the host game defines the real members). ----
 static const FBoundMember GGameMembers[] =
 {
 	CATHODE_BIND_GAME_GETTER("tickCount",     "required", "number",                        GameTickCountGetterThunk),
 	CATHODE_BIND_GAME_METHOD("getEntityName", "required", "(id: string) -> string | null", GameGetEntityNameThunk),
 };
 
-// ---- The codegen accessor: returns the SAME table the install reads (Model A — the .d.ts game.* == the installed surface
+// ---- The codegen accessor: returns the SAME table the install reads (the .d.ts game.* == the installed surface
 // by construction; a member add/remove flows through both). ----
 void GetGameBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
 {
 	OutMembers = GGameMembers; OutCount = UE_ARRAY_COUNT(GGameMembers);
 }
 
-// ---- The plain-object table-driven install (LEAN 1 — game is a singleton OBJECT, not a wrapped class; a sibling of
+// ---- The plain-object table-driven install (game is a singleton OBJECT, not a wrapped class; a sibling of
 // InstallBoundMembers that builds a plain `game` object instead of a class prototype, off the SAME GGameMembers table).
 // Sets the backing, builds `game` from the table, sets it as the global `game` (a documented-known global, like document). ----
 void InstallGameBridgeAsGlobal(JSContext* Context, ICathodeGameBridge& Bridge)
@@ -79,21 +79,21 @@ void InstallGameBridgeAsGlobal(JSContext* Context, ICathodeGameBridge& Bridge)
 		}
 	}
 	JSValue Global = JS_GetGlobalObject(Context);
-	JS_SetPropertyStr(Context, Global, "game", Game); // the DOCUMENTED-KNOWN `game` global (codegen lists it + GUARD1 expects it)
+	JS_SetPropertyStr(Context, Global, "game", Game); // the DOCUMENTED-KNOWN `game` global (the codegen lists it + its globals guard expects it)
 	JS_FreeValue(Context, Global);
 }
 
-// ---- The real-shaped STUB (029 #28 placeholder; deterministic so the reachability proof asserts exact values, and a
-// DIFFERENT bridge in the stub-swap proof yields DIFFERENT values). ----
+// ---- The real-shaped STUB (a placeholder; deterministic so the reachability test asserts exact values, and a
+// DIFFERENT bridge in the stub-swap test yields DIFFERENT values). ----
 namespace
 {
 class FStubGameBridge final : public ICathodeGameBridge
 {
 public:
-	virtual int32 GetTickCount() const override { return 42; } // a fixed stub tick (the sim's real tick later)
+	virtual int32 GetTickCount() const override { return 42; } // a fixed stub tick (a host game supplies the real tick)
 	virtual bool GetEntityName(const FString& Id, FString& OutName) const override
 	{
-		OutName = TEXT("stub:") + Id; // a deterministic stub name (the sim's real entity lookup later)
+		OutName = TEXT("stub:") + Id; // a deterministic stub name (a host game supplies the real entity lookup)
 		return true;
 	}
 };

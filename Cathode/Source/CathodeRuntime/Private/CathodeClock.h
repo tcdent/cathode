@@ -6,7 +6,7 @@
 namespace Cathode
 {
 
-// The worker's clock seam. Timers and requestAnimationFrame (Slice 4) read time through this — never
+// The worker's clock seam. Timers and requestAnimationFrame read time through this — never
 // FPlatformTime directly — so the tick can be driven deterministically against an injected fake clock
 // in tests, while production uses the real platform clock.
 class ICathodeClock

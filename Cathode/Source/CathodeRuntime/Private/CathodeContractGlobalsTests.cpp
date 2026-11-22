@@ -15,7 +15,7 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 slice 4 — the standard globals (console + timers/rAF). Each global is exercised on the LIVE
+// The standard globals (console + timers/rAF). Each global is exercised on the LIVE
 // runtime context, installed through the SHARED production assembly (BuildContractStartupSteps + FRuntimeStartup
 // — the SAME builder the worker's Run() uses), NOT a test-only hand-install: would-it-pass-if-test-only? NO.
 

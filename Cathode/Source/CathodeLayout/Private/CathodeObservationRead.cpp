@@ -26,7 +26,7 @@ const TArray<FString>& ContractStyleProperties()
 		TEXT("text-align"),
 		TEXT("visibility"),
 		TEXT("opacity"),
-		TEXT("letter-spacing"), // 014 slice 1: CathodeComputed — QueryComputedValue parses the own-inline value
+		TEXT("letter-spacing"), // CathodeComputed — QueryComputedValue parses the own-inline value
 	};
 	return Properties;
 }

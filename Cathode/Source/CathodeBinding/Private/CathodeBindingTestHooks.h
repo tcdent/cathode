@@ -8,7 +8,7 @@
 namespace Cathode
 {
 
-// Test-injection seam (the 002 GTeardownObserver pattern): FJsValue taps these AFTER the real JS_DupValue /
+// Test-injection seam (the CathodeRuntime GTeardownObserver pattern): FJsValue taps these AFTER the real JS_DupValue /
 // JS_FreeValue / JS_MarkValue / JS_FreeValueRT run, so a test can count OUR dup/free/mark/rt-free decisions
 // without forking the production path and without asserting quickjs-ng GC internals. Unset in normal use
 // (taps are no-ops). GJsValueOnFree counts the ctx-based destructor path; GJsValueOnFreeRT counts the

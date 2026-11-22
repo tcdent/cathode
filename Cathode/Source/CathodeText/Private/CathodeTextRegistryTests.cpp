@@ -8,7 +8,7 @@
 // Specs for the font registry + single-load byte store — OUR bookkeeping, via an INJECTED recording
 // loader (real UE file loading is NOT tested). They assert handle resolution, single-load (loader called
 // once per handle), and shared-byte identity. The bytes are OPAQUE test input — never asserted as
-// font-file content. Authored, not run this sprint. (hb_*/BL*-free: this slice is byte loading only.)
+// font-file content. (hb_*/BL*-free: the registry is byte loading only.)
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeTextFontRegistryTest,

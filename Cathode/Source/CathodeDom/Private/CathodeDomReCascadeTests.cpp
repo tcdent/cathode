@@ -10,18 +10,18 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 013 slice 5 — INLINE RE-CASCADE: an element.style write -> getComputedStyle reflects the mutation, via the LAZY
+// INLINE RE-CASCADE: an element.style write -> getComputedStyle reflects the mutation, via the LAZY
 // flush-on-read (getComputedStyle relayout-if-dirty, reusing the Controller's full relayout). Three discriminating cases:
 //  (1) FLUSH on a LAYOUT-COMPUTED prop (width used-px): getComputedStyle reads LastLayout (NOT the style attr), so a
 //      write of a DIFFERENT width (Y != the pre-write X) only shows up if the read FLUSHED -- a non-flushing read returns
 //      the stale X and FAILS. (Catches a missing flush, not a no-op.)
 //  (2) b2 INHERITED: a PARENT font-size write -> the child's getComputedStyle (font-size:em) re-cascades. A node-only
 //      re-cascade would leave the child stale; the full re-cascade reaches descendants.
-//  (3) b1 FULL-DOC-CONTEXT (the regression tripwire): a doc-CSS '.anc .target' with .anc ABOVE a (hypothetical) subtree
+//  (3) FULL-DOC-CONTEXT (the regression tripwire): a doc-CSS '.anc .target' with .anc ABOVE a (hypothetical) subtree
 //      boundary, target nested inside; a dirtying inline write within -> getComputedStyle(target).width STILL '50px'
 //      (the ancestor rule applies after the re-cascade). PASSES via the full relayout today; would FAIL if the subtree
 //      path (cascade-unsafe, subtree-in-isolation) were ever activated -- the tripwire for that future change.
-// FORK-1: write + flush are CathodeDom-side (via ILayoutEngine MarkNodeDirty/Relayout); the re-cascade is CathodeLayout-side.
+// Write + flush are CathodeDom-side (via ILayoutEngine MarkNodeDirty/Relayout); the re-cascade is CathodeLayout-side.
 
 namespace
 {
@@ -114,7 +114,7 @@ bool FCathodeDomReCascadeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("(2) INHERITED: parent font-size -> 20px -> child 1.5em re-cascades to '30px' (a node-only re-cascade leaves it stale '24px')"),
 		Js("(function(){ __parent.style.fontSize='20px'; return getComputedStyle(__c2)['font-size'] === '30px'; })()"));
 
-	// (3) FULL-DOC-CONTEXT (b1 tripwire): a dirtying inline write within the subtree -> getComputedStyle(.target).width
+	// (3) FULL-DOC-CONTEXT (tripwire): a dirtying inline write within the subtree -> getComputedStyle(.target).width
 	// STILL '50px' (the '.anc .target' ancestor rule applies after the re-cascade). Full relayout preserves it; a future
 	// subtree-isolation re-cascade would drop '.anc .target' (.anc outside the subtree) -> auto != 50 -> FAIL (the tripwire).
 	TestTrue(TEXT("(3) initial: __target width === '50px' (the '.anc .target' doc-CSS rule)"), Js("getComputedStyle(__target)['width'] === '50px'"));

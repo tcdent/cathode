@@ -9,9 +9,9 @@ public class CathodeRuntime : ModuleRules
 
 		// The runtime module's Unreal dependency set: Core/CoreUObject are the base object/runtime
 		// layer; Engine + Slate host the runtime's surface/device objects. The Texture Egress — the
-		// RHI texture upload (RHIUpdateTexture2D) — is its OWN module now (CathodeEgress, sprint 024,
-		// the sole RHI touchpoint), so RHI/RenderCore live THERE with it, not here; CathodeRuntime no
-		// longer touches the RHI/render path.
+		// RHI texture upload (RHIUpdateTexture2D) — is its OWN module (CathodeEgress,
+		// the sole RHI touchpoint), so RHI/RenderCore live THERE with it, not here; CathodeRuntime does
+		// not touch the RHI/render path.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
@@ -25,7 +25,7 @@ public class CathodeRuntime : ModuleRules
 		// quickjs-ng is the ONE shared vendor lib: a STATEFUL JS runtime linked by THREE modules
 		// (CathodeRuntime/Binding/Dom) that call its C API on ONE shared JSRuntime, so it is built as a DLL and
 		// all three link the ONE import lib -> a single shared runtime (NOT static-per-module — see
-		// docs/browse/vendor-lib-build.md addendum + the human's "should never have been linked twice"). Here
+		// docs/browse/vendor-lib-build.md addendum: it must never be linked twice). Here
 		// `quickjs.lib` is the IMPORT lib backing `quickjs.dll`. This (base) module STAGES the DLL next to the
 		// binaries — standard import-lib linkage, no delay-load; the loader resolves quickjs.dll from
 		// Binaries/Win64, where every dependent Cathode module also loads. The other 3 vendor libs stay static.

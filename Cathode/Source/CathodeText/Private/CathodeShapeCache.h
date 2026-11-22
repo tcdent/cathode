@@ -38,7 +38,7 @@ FShapeKey MakeShapeKey(const FShapeRequest& Request);
 
 // A shaper that caches results by key — the single shaped result both consumers reuse. A repeat
 // same-key request returns the cached result WITHOUT calling the inner shaper (no re-shape). Cache
-// policy is a sensible fixed default (bounded, FIFO eviction) — no tuning surface (human-ruled).
+// policy is a sensible fixed default (bounded, FIFO eviction) — no tuning surface.
 class FCachingShaper final : public ITextShaper
 {
 public:

@@ -1,4 +1,4 @@
-# 025 S4 — the Authoring/ Node toolchain is dev-machine/CI only. node_modules + the IIFE build output are NOT committed
-# (package.json + package-lock.json are, for a reproducible `npm ci`). The UE build box never installs/invokes these.
+# The Authoring/ Node toolchain is dev-machine/CI only. node_modules + the IIFE build output are NOT committed
+# (package.json + package-lock.json are, for a reproducible `npm ci`). The UE build never installs/invokes these.
 node_modules/
 dist/

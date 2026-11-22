@@ -15,14 +15,14 @@
 // Blend2D pixels / HarfBuzz positions); we test only our orchestration on top.
 //
 // Layout is Core + litehtml ONLY — NO Blend2D/BL*, NO HarfBuzz/hb_*, NO CathodeRasterizer/CathodeText
-// coupling. The paint-op output is OUR neutral type (mapped to 003 FPaintOp at integration); text
-// measurement is a neutral ITextMeasurer (backed by 004 at integration); the DOM is a neutral source.
+// coupling. The paint-op output is OUR neutral type (mapped to CathodeRasterizer's FPaintOp at integration); text
+// measurement is a neutral ITextMeasurer (backed by CathodeText at integration); the DOM is a neutral source.
 
 namespace Cathode
 {
 
 // Engine-neutral font reference (the font litehtml's create_font resolved, via our ITextMeasurer). No
-// hb_*/BL*; the integration sprint maps it to 004's FFontHandle.
+// hb_*/BL*; the integration layer maps it to CathodeText's FFontHandle.
 struct FLayoutFontRef
 {
 	int32 Id = INDEX_NONE;
@@ -40,7 +40,7 @@ enum class EDirtyKind : uint8
 	Structure,
 };
 
-// --- The neutral paint-op output (OUR primitives; mapped to 003 FPaintOp at integration; no BL*) ---
+// --- The neutral paint-op output (OUR primitives; mapped to CathodeRasterizer's FPaintOp at integration; no BL*) ---
 
 enum class EBorderStyle : uint8
 {
@@ -67,8 +67,8 @@ struct FCornerRadii
 };
 
 // A styled/rounded border (any styled side OR any corner radius) — OUR neutral stroke primitive. Layout
-// PRODUCES this now; the Rasterizer-side draw op that CONSUMES it is the 003 COVERAGE.md #3 stroke op
-// (deferred sibling). Solid square borders decompose to 4 FillBox edges instead.
+// PRODUCES this; the Rasterizer-side draw op that CONSUMES it is the CathodeRasterizer COVERAGE.md #3 stroke op
+// (not yet implemented). Solid square borders decompose to 4 FillBox edges instead.
 struct FBorderStroke
 {
 	FBox2f Box = FBox2f(ForceInit);
@@ -84,15 +84,15 @@ enum class ELayoutPaintOpKind : uint8
 	FillRect,
 	FillBox,      // box / solid-border edge fill
 	DrawImage,
-	DrawText,     // un-shaped run; the integration sprint shapes it via 004 -> a 003 DrawGlyphRun
+	DrawText,     // un-shaped run; the integration layer shapes it via CathodeText -> a CathodeRasterizer DrawGlyphRun
 	StrokeBorder, // styled/rounded border (the neutral stroke primitive)
-	ClipPush,     // push a clip rect (maps to the 003 Rasterizer ClipToRect at integration)
-	ClipPop,      // pop the clip (maps to the 003 ResetClip)
+	ClipPush,     // push a clip rect (maps to the CathodeRasterizer ClipToRect at integration)
+	ClipPop,      // pop the clip (maps to the CathodeRasterizer ResetClip)
 	ClearRect,
 };
 
 // One paint operation — Layout's neutral output, emitted by the document_container routing. A fat tagged
-// struct (like the 003 FPaintOp) the integration sprint maps to 003 FPaintOp. Geometry in our/Core types
+// struct (like CathodeRasterizer's FPaintOp) the integration layer maps to that FPaintOp. Geometry in our/Core types
 // (FBox2f/FVector2f/FColor); no litehtml/BL* leak.
 struct FLayoutPaintOp
 {
@@ -102,9 +102,9 @@ struct FLayoutPaintOp
 	FColor Color = FColor::Black;    // fill / text color
 
 	FString ImageSource;             // DrawImage — the url() ref (kept for trace/debug; the bytes below are the source)
-	TArray<uint8> ImageBytes;        // 029 #4 — DrawImage RESOLVED bytes (the layout resolves ONCE with the baseurl + carries; the composition decodes+draws — no re-resolve). Owned, deep-copied by value through the op sink.
+	TArray<uint8> ImageBytes;        // DrawImage RESOLVED bytes (the layout resolves ONCE with the baseurl + carries; the composition decodes+draws — no re-resolve). Owned, deep-copied by value through the op sink.
 
-	FString Text;                    // DrawText — un-shaped run (integration shapes via 004)
+	FString Text;                    // DrawText — un-shaped run (integration shapes via CathodeText)
 	FLayoutFontRef Font;             // DrawText — font ref
 	FVector2f Position = FVector2f::ZeroVector; // DrawText — origin
 
@@ -141,8 +141,8 @@ struct FLayoutResult
 
 // --- The neutral seams ---
 
-// The retained-DOM source (the document to lay out) — a generalizable, evolvable seam the future DOM
-// component implements. It exposes the tree STRUCTURE (for affected-subtree selection) and the MARKUP
+// The retained-DOM source (the document to lay out) — a generalizable, evolvable seam the DOM
+// component (CathodeDom) implements. It exposes the tree STRUCTURE (for affected-subtree selection) and the MARKUP
 // (for the re-feed relayout: full document, or a subtree for the intelligent path). The dirty-DOM-fork
 // contingency may add a mutable-tree accessor later without breaking this seam.
 class ILayoutDocumentSource
@@ -165,7 +165,7 @@ public:
 };
 
 // Text measurement input — the neutral seam Layout's document_container calls (litehtml create_font /
-// text_width). Backed by 004's shaper at integration; Layout never reaches into HarfBuzz.
+// text_width). Backed by CathodeText's shaper at integration; Layout never reaches into HarfBuzz.
 class ITextMeasurer
 {
 public:
@@ -176,7 +176,7 @@ public:
 	virtual void GetFontMetrics(FLayoutFontRef Font, float& OutAscent, float& OutDescent, float& OutHeight) = 0;
 };
 
-// Sprint 009: the Resource Resolver the document_container's image/CSS/font callbacks route to. Defined by
+// The Resource Resolver the document_container's image/CSS/font callbacks route to. Defined by
 // CathodeResolver; referenced here by pointer only (forward-declared — the engine impl includes its header).
 class IResourceResolver;
 
@@ -192,9 +192,9 @@ public:
 	virtual void MarkNodeDirty(int32 NodeId, EDirtyKind Kind) = 0;
 	virtual FLayoutResult Relayout(int32 AvailableWidth) = 0;
 
-	// Sprint 009: inject the Resource Resolver the document_container's load_image/get_image_size/import_css
-	// route to. Non-pure default no-op (a null/unset resolver == the pre-hook stub behavior; keeps existing
-	// mock implementers byte-identical). Call before SetDocument. The litehtml-backed engine overrides it.
+	// Inject the Resource Resolver the document_container's load_image/get_image_size/import_css
+	// route to. Non-pure default no-op (a null/unset resolver == every resource callback is a clean miss; mock
+	// implementers need not override it). Call before SetDocument. The litehtml-backed engine overrides it.
 	virtual void SetResourceResolver(IResourceResolver* Resolver) {}
 };
 

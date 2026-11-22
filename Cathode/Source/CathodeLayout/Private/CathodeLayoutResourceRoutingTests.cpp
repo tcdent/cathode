@@ -5,10 +5,10 @@
 
 #include "Misc/AutomationTest.h"
 
-// Specs for the 005 container -> resolver routing (litehtml-FREE, the CathodePaintRouting pattern). Drive the
+// Specs for the CathodeLayout container -> resolver routing (litehtml-FREE, the CathodePaintRouting pattern). Drive the
 // routing helpers directly with a STUB IResourceResolver (input isolation — no litehtml): assert load_image ->
-// ResolveBytes, import_css -> ResolveText, and a null resolver yields the pre-hook not-found result.
-// get_image_size -> RouteImageSize now drives the REAL 003 Blend2D image-info decode (sprint 011 [c]): a real
+// ResolveBytes, import_css -> ResolveText, and a null resolver yields the not-found result.
+// get_image_size -> RouteImageSize drives the REAL CathodeRasterizer Blend2D image-info decode: a real
 // PNG fixture decodes to its intrinsic 7x3 (oracle = the image's OWN dims, not hardcoded in the path), and
 // non-image bytes decode to 0x0 (negative control). Still litehtml-FREE.
 
@@ -98,7 +98,7 @@ bool FCathodeLayoutResourceRoutingTest::RunTest(const FString& Parameters)
 	}
 
 	// get_image_size -> RouteImageSize: routes to the resolver, then DECODES the bytes' intrinsic dimensions via
-	// the REAL 003 Blend2D image-info decode (the sprint 011 [c] discharge).
+	// the REAL CathodeRasterizer Blend2D image-info decode.
 	{
 		// A real PNG decodes to its OWN dims — 7x3 comes from the real decode of the fixture bytes, NOT a
 		// constant in the path (the oracle: a faked/constant decode FAILS these).
@@ -116,7 +116,7 @@ bool FCathodeLayoutResourceRoutingTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("non-image bytes do not decode -> 0x0"), GW == 0 && GH == 0);
 	}
 
-	// Null resolver == the pre-hook stub behavior (no resolver wired): miss on every path, no crash.
+	// Null resolver (no resolver wired): miss on every path, no crash.
 	{
 		TArray<uint8> Bytes;
 		TestFalse(TEXT("null resolver: image miss"), RouteImageBytes(nullptr, TEXT("logo.png"), TEXT(""), Bytes));

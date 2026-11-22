@@ -1,6 +1,6 @@
 #include "CathodeBinding.h"
 
-// quickjs-ng — confined to this TU. Include path wired at the execution-approval sprint; no build this sprint.
+// quickjs-ng — confined to this TU.
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -13,7 +13,7 @@ namespace
 
 // The appendable native-class registry — one generic path consumers add their native classes to. Holds the
 // class IDs registered for the runtime; backed by quickjs-ng's own class machinery. Private to this TU; only
-// the factory is exposed. Composes 002's ONE confined context (obtained via the opaque accessor), never a
+// the factory is exposed. Composes CathodeRuntime's ONE confined context (obtained via the opaque accessor), never a
 // second runtime.
 class FNativeClassRegistry final : public INativeClassRegistry
 {
@@ -31,7 +31,7 @@ public:
 		}
 		JSRuntime* Runtime = JS_GetRuntime(Context);
 
-		// 029 #27 — IDEMPOTENT BY NAME, scoped to THIS registry (= this ONE runtime/context). CreateDomDocument re-registers
+		// IDEMPOTENT BY NAME, scoped to THIS registry (= this ONE runtime/context). CreateDomDocument re-registers
 		// the DOM classes once PER DOCUMENT; without this each call allocates a FRESH JS class id, and the consumers'
 		// process-global class-id (e.g. GDomNodeClassId) is reassigned to the LAST document's id — ORPHANING every earlier
 		// document's node wrappers (they still carry the old id, so their method thunks fail the JS_GetOpaque class-id check
@@ -53,15 +53,15 @@ public:
 		// TODO-PREBUILD(signature): JSClassFinalizer = void(JSRuntime*, JSValueConst) (quickjs.h:654);
 		// JSClassGCMark = void(JSRuntime*, JSValueConst, JS_MarkFunc*) (quickjs.h:655). Verify exact typedefs.
 		ClassDef.finalizer = Def.Finalizer;
-		// gc_mark pass-through ONLY — a null GcMark must behave exactly as today (no cycle-collection policy
-		// is baked here; that is the human's Slice 4 call). Non-null wires -ng's native cycle-traversal hook.
+		// gc_mark pass-through ONLY — a null GcMark installs no hook (no cycle-collection policy
+		// is baked here; that is the consumer's choice). Non-null wires -ng's native cycle-traversal hook.
 		ClassDef.gc_mark = Def.GcMark;
 
 		// TODO-PREBUILD(signature): JS_NewClass(rt, id, &def) -> int (quickjs.h:691).
 		JS_NewClass(Runtime, ClassId, &ClassDef);
 
 		RegisteredClasses.Add(ClassId);
-		ClassIdByName.Add(Name, ClassId); // 029 #27 — cache so a re-register (per-document) returns this SAME id (id stays stable)
+		ClassIdByName.Add(Name, ClassId); // cache so a re-register (per-document) returns this SAME id (id stays stable)
 		return ClassId;
 	}
 
@@ -72,8 +72,8 @@ public:
 			return FJsValue();
 		}
 
-		// The class proto (JS_NULL when none was registered — fine for the generic mechanism; consumers/later
-		// slices set a proto via JS_SetClassProto). JS_GetClassProto returns an owned ref we must free.
+		// The class proto (JS_NULL when none was registered — fine for the generic mechanism; consumers
+		// set a proto via JS_SetClassProto). JS_GetClassProto returns an owned ref we must free.
 		JSValue Proto = JS_GetClassProto(Context, ClassId);
 		// TODO-PREBUILD(signature): JS_NewObjectProtoClass(ctx, proto, class_id) -> JSValue (quickjs.h:904).
 		JSValue Object = JS_NewObjectProtoClass(Context, Proto, ClassId);
@@ -94,7 +94,7 @@ public:
 private:
 	JSContext* Context;
 	TSet<JSClassID> RegisteredClasses;
-	TMap<FString, JSClassID> ClassIdByName; // 029 #27 — name -> id, so re-registration in this runtime is idempotent (stable id)
+	TMap<FString, JSClassID> ClassIdByName; // name -> id, so re-registration in this runtime is idempotent (stable id)
 };
 
 } // namespace

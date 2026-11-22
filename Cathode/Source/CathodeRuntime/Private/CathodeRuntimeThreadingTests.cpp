@@ -9,8 +9,7 @@
 // Specs for Runtime Core's BESPOKE threading logic: the message-boundary FIFO drain and the
 // single-thread affinity guard. They drive OUR queue/affinity code and assert observable behaviour;
 // they do NOT test UE's threading primitives (FRunnableThread/TQueue/FPlatformTLS) themselves. Expecteds
-// are design invariants (FIFO order; on/off-thread outcome) asserted directly. Authored, not run this
-// sprint; pass by construction when the execution sprint runs them.
+// are design invariants (FIFO order; on/off-thread outcome) asserted directly.
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeRuntimeQueueOrderingTest,
@@ -22,7 +21,7 @@ bool FCathodeRuntimeQueueOrderingTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 	// Enqueue inbound messages tagged 0..N-1; each records its tag when applied. Draining must apply
-	// them in FIFO order — the contract Slice 4's tick depends on.
+	// them in FIFO order — the contract the tick depends on.
 	TCathodeMessageQueue<FHostInboundMessage> Queue;
 	TArray<int32> Applied;
 	const int32 N = 5;

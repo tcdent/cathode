@@ -13,17 +13,15 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 020 slice 1 (A1) — litehtml on the REAL RESOLVER: a LINKED-CSS round-trip through the REAL FUEFileBundleSource.
-// The genuine gap (the 019 deferred wiring): SetResourceResolver has NO production caller; nothing proves a real
-// EXTERNAL resource resolves THROUGH the real resolver into litehtml. This test wires the real resolver
+// litehtml on the REAL RESOLVER: a LINKED-CSS round-trip through the REAL FUEFileBundleSource.
+// Proves a real EXTERNAL resource resolves THROUGH the real resolver into litehtml. This test wires the real resolver
 // (CreateResourceResolver(CreateUEFileBundleSource(<test fixtures dir>))) onto a real FDomDocument's litehtml engine,
 // and proves a `<style>@import url('linked.css')` GENUINELY drives litehtml's import_css -> RouteLinkedCss -> the real
 // FFileHelper disk read -> litehtml cascades the linked rule -> getComputedStyle reflects the LINKED value.
 //
 // THE TRIGGER IS GENUINE (not a C++ hand-call -- that would be the existing RouteLinkedCss routing coverage): litehtml's
 // OWN parse of the serialized document (createFromString over Source.GetDocumentHtml()) fires import_css. The @import
-// reaches litehtml via the <style> raw-text serialization (GetDocumentHtml; GetDocumentCss is empty -> NOT used). NO
-// production change (no GetDocumentCss impl, no <link>, no production SetResourceResolver caller).
+// reaches litehtml via the <style> raw-text serialization (GetDocumentHtml; GetDocumentCss is empty -> NOT used).
 //
 // THE NULL-RESOLVER CONTROL (the discriminator): with null, RouteLinkedCss returns false -> import_css leaves the CSS
 // empty -> the linked rule never loads -> the element gets the DEFAULT. The pair (real -> the linked value; null -> the
@@ -42,7 +40,7 @@ public:
 	virtual void GetFontMetrics(FLayoutFontRef, float& A, float& D, float& H) override { A = 12.0f; D = 4.0f; H = 16.0f; }
 };
 
-// The test fixtures dir (the 019 GetBaseDir convention); the committed linked.css lives here.
+// The test fixtures dir (under the plugin's GetBaseDir); the committed linked.css lives here.
 FString FixturesRootDir()
 {
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
@@ -74,7 +72,7 @@ bool FCathodeDomLinkedCssTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// The REAL resolver over the REAL FUEFileBundleSource (the 019 FFileHelper disk read) — outlives the per-render engines.
+	// The REAL resolver over the REAL FUEFileBundleSource (the FFileHelper disk read) — outlives the per-render engines.
 	TUniquePtr<IBundleSource> BundleSource = CreateUEFileBundleSource(RootDir);
 	TUniquePtr<IResourceResolver> Resolver = CreateResourceResolver(*BundleSource);
 

@@ -10,11 +10,11 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 style (with CSS stubs) — element.style (a LIVE write-through CSSStyleDeclaration over the canonical
-// 'style' attribute) + getComputedStyle (a GLOBAL returning a READ-ONLY CSSStyleDeclaration over FResolvedStyle, the
-// stub joint). CSSStyleDeclaration is a C++-EXOTIC class (open-ended names via get_own_property/set_property). The
+// Style — element.style (a LIVE write-through CSSStyleDeclaration over the canonical
+// 'style' attribute) + getComputedStyle (a GLOBAL returning a READ-ONLY CSSStyleDeclaration over
+// FResolvedStyle). CSSStyleDeclaration is a C++-EXOTIC class (open-ended names via get_own_property/set_property). The
 // load-bearing proof is the 'style'-attribute-as-single-source-of-truth CROSS-PATH discriminator (BOTH directions)
-// — a parallel store would pass same-path but DESYNC cross-path. The actual cascade is STUBBED (the CSS epic).
+// — a parallel store would pass same-path but DESYNC cross-path.
 
 namespace
 {
@@ -131,8 +131,8 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	Cathode::FScopedTestRuntime RuntimePtr;
 	if (!RuntimePtr.IsValid()) { AddError(TEXT("Cathode test runtime failed to initialize")); return false; }
 	TUniquePtr<INativeClassRegistry> Registry = CreateNativeClassRegistry(*RuntimePtr);
-	// The REAL litehtml engine + a Relayout populates FResolvedStyle with litehtml's REAL resolved values (013 slice 4
-	// gate-flip; QueryComputedValue) so the getComputedStyle READ PATH returns them. (The per-prop discriminating oracle
+	// The REAL litehtml engine + a Relayout populates FResolvedStyle with litehtml's REAL resolved values
+	// (QueryComputedValue) so the getComputedStyle READ PATH returns them. (The per-prop discriminating oracle
 	// is Cathode.Dom.Style.ComputedStyleRealValues; this test exercises the read-path mechanics + read-only semantics.)
 	FStubMeasurer Measurer;
 	TUniquePtr<ILayoutEngine> RealEngine = CreateLiteHtmlLayoutEngine(Measurer);
@@ -143,7 +143,7 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	FDomNode* El = Doc->NodeFromWrapper(ElW);
 	El->SetAttribute(TEXT("style"), TEXT("width:50px;height:30px"));
 	Doc->FindNode(Doc->GetRootNode())->AppendChild(ElW);
-	Doc->Relayout(800); // populate FResolvedStyle with the REAL resolved values (013 slice 4)
+	Doc->Relayout(800); // populate FResolvedStyle with the REAL resolved values
 
 	JSValue Global = JS_GetGlobalObject(Context);
 	JS_SetPropertyStr(Context, Global, "__el", JS_DupValue(Context, ElW.GetValue()));
@@ -162,10 +162,9 @@ bool FCathodeDomGetComputedStyleTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("getComputedStyle is a global function"), EvalBool("typeof getComputedStyle === 'function'"));
 	TestTrue(TEXT("getComputedStyle(el) instanceof CSSStyleDeclaration"), EvalBool("getComputedStyle(__el) instanceof CSSStyleDeclaration"));
 
-	// GATE-FLIP (013 slice 4): the read path now returns litehtml's REAL resolved value (QueryComputedValue), NOT the
-	// 012/slice-1 stub empty. color (unset on this div) resolves to the inherited/UA default -- a real rgb() value, NOT
-	// ''. (The discriminating per-prop relational oracle is the dedicated slice-4 proof; here the EXISTING test is
-	// updated empty->real, the enumerated gate-flip change.)
+	// The read path returns litehtml's REAL resolved value (QueryComputedValue), NOT a stub empty. color (unset on
+	// this div) resolves to the inherited/UA default -- a real rgb() value, NOT ''. (The discriminating per-prop
+	// relational oracle is Cathode.Dom.Style.ComputedStyleRealValues.)
 	TestTrue(TEXT("getComputedStyle(el).color is the REAL resolved value (gate-flip: a non-empty rgb() form, not '')"),
 		EvalBool("(function(){ var c=getComputedStyle(__el).color; return c.length>0 && c.indexOf('rgb')===0; })()"));
 

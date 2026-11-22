@@ -6,10 +6,10 @@ public class CathodeExampleDevice : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// 031 S3 — the REFERENCE in-world TARGETABLE device actor (host-agnostic). A screen-mesh example actor samples the
+		// The REFERENCE in-world TARGETABLE device actor (host-agnostic). A screen-mesh example actor samples the
 		// Cathode surface's egress texture onto a MID, and implements ICathodeTargetableSurface (exposes its FSurfaceId) so a
 		// host's targeting resolves it BY the interface. The plugin names NO host type: NO IPlayerInteractable here — the
-		// player-ray is the INTEGRATOR's host-side half (the corrected shape). Engine-linking (an AActor + a MID); ZERO Uptime*.
+		// player-ray is the INTEGRATOR's host-side half. Engine-linking (an AActor + a MID); ZERO Uptime*.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",

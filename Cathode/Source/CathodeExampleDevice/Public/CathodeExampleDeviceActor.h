@@ -11,7 +11,7 @@ class UMaterialInstanceDynamic;
 class UTexture2D;
 
 /**
- * ACathodeExampleDeviceActor — 031 S3: the REFERENCE in-world TARGETABLE device actor (host-agnostic; ships with the plugin).
+ * ACathodeExampleDeviceActor — the REFERENCE in-world TARGETABLE device actor (host-agnostic; ships with the plugin).
  *
  * The canonical "a Cathode surface on a 3D object, targetable by the host." It does two things:
  *  - SAMPLES the Cathode surface's egress texture onto a MID on its screen mesh each tick (the in-world device pattern). The

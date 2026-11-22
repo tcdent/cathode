@@ -95,8 +95,8 @@ FRelayoutPlan FRelayoutController::Relayout(int32 AvailableWidth, IRelayoutBacke
 	{
 		for (int32 Root : Plan.SubtreeRoots)
 		{
-			// Scaffold: constrain the subtree to the available width (the boundary's containing-block width
-			// refines at the validation pass). The request SCOPE is what the spec asserts.
+			// Constrain the subtree to the available width (the boundary's own containing-block width is
+			// not yet used). The request SCOPE is what the spec asserts.
 			Backend.RelayoutSubtree(Root, AvailableWidth);
 		}
 	}

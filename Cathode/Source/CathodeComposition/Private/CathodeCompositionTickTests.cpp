@@ -4,16 +4,16 @@
 #include "CathodeShaperTextMeasurer.h"   // the standalone Layout (to read the Layout-computed box)
 
 #include "CathodeLayout.h"   // ILayoutEngine, FLayoutResult, FLayoutPaintOp, ILayoutDocumentSource
-#include "CathodeResolver.h" // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver (slice 3)
+#include "CathodeResolver.h" // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver
 #include "CathodeSurfaces.h" // FSurface, FSurfaceId, FSurfaceReadiness, FSurfaceReadinessSeam
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
-#include "Misc/FileHelper.h"  // 029 #4 — stage the inline bg-image fixture to disk at test time (A')
-#include "HAL/FileManager.h"  // 029 #4 — failure-safe cleanup of the staged fixture
+#include "Misc/FileHelper.h"  // stage the inline bg-image fixture to disk at test time
+#include "HAL/FileManager.h"  // failure-safe cleanup of the staged fixture
 
-// 023 slice 1 — the COMPOSITION ROOT drives ONE composed frame tick end-to-end: FSurface::RenderAndRelay -> the
+// The COMPOSITION ROOT drives ONE composed frame tick end-to-end: FSurface::RenderAndRelay -> the
 // REAL Layout (ISurfaceDocument backer, RenderFrame -> paint ops) -> the REAL Rasterizer (ISurfaceRenderTarget
 // backer, ProduceFrame -> the Blend2D bitmap) -> GetReadyFrame -> the published front buffer. A known inline,
 // NON-TEXT document (a div at a NON-TRIVIAL Layout offset, with a bg color) rasterizes to the color AT its
@@ -57,8 +57,8 @@ namespace
 		virtual FString GetDocumentCss() const override { return BoxCss(); }
 	};
 
-	// 029 #4 — a real 4x4 solid-RED (#ff0000, opaque) RGBA PNG (generated; exact bytes) — the color-bound background-image
-	// fixture (grayscale is dims-only; RED binds the proof to the DECODED bytes). Staged to disk at test time (A'), cleaned up.
+	// A real 4x4 solid-RED (#ff0000, opaque) RGBA PNG (generated; exact bytes) — the color-bound background-image
+	// fixture (grayscale is dims-only; RED binds the proof to the DECODED bytes). Staged to disk at test time, cleaned up.
 	static const uint8 GRedPng4x4[] = {
 		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
 		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04,
@@ -73,7 +73,7 @@ namespace
 	static const TCHAR* BgImageCss()
 	{
 		// ONLY a bg-image (no body/sibling fill): a body{background-color} fill NULL-DEREFS litehtml's root-background path
-		// on the box (029 #4 crash, exposed by FIX-1's first attempt) — so the proof does NOT add a fill. Instead the
+		// — so the proof does NOT add a fill. Instead the
 		// null-control's "no ready frame" (no resolver -> the bg-image is the only paint intent -> 0 effective ops) IS the
 		// no-image result (RED in-box 0), handled below. The discriminator stays: resolver -> RED in-box; null -> no RED.
 		return TEXT("html,body{margin:0;padding:0;} ")
@@ -94,7 +94,7 @@ namespace
 		virtual FString GetDocumentCss() const override { return BgImageCss(); }
 	};
 
-	// An RAII guard: deletes the staged fixture on ANY scope exit (incl. a RED early-return) — failure-safe cleanup (A').
+	// An RAII guard: deletes the staged fixture on ANY scope exit (incl. a RED early-return) — failure-safe cleanup.
 	struct FStagedFixtureGuard
 	{
 		FString Path;
@@ -120,7 +120,7 @@ namespace
 		return P[0] > 200 && P[1] < 60 && P[2] < 60 && P[3] > 100;
 	}
 
-	// The slice-2 TEXT document: an absolute, SHRINK-TO-FIT div (width:auto) with a BLUE background + RED text.
+	// The TEXT document: an absolute, SHRINK-TO-FIT div (width:auto) with a BLUE background + RED text.
 	// The div's box width = the MEASURED text width (ITextMeasurer::MeasureWidth, the adapter) — so the BLUE bg's
 	// horizontal extent is the adapter's measured width OBSERVABLE in the bitmap; the RED glyphs are the shaper's
 	// output. The two colors discriminate the two halves: a stub-measurer (wrong width) collapses the blue box
@@ -155,7 +155,7 @@ namespace
 		return P[1] > 200 && P[0] < 60 && P[2] < 60 && P[3] > 100;
 	}
 
-	// The slice-3 LINKED-RESOURCE document: @import's the PRODUCTION-staged slice3.css (which sets a distinct green
+	// The LINKED-RESOURCE document: @import's the PRODUCTION-staged slice3.css (which sets a distinct green
 	// box). The green rule lives ONLY in the external fixture — NOT inline, NOT GetDocumentCss — so the rendered
 	// green proves the PRODUCTION resolver LOADED the linked resource from the default-root. A null resolver -> the
 	// @import never loads -> no green (the default; the null-resolver control).
@@ -194,7 +194,7 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 #if PLATFORM_WINDOWS
-	// Reuse 021's committed OFL fixture (the measurer's injected font; not text-exercised in slice 1).
+	// Reuse CathodeText's committed OFL fixture (the measurer's injected font; not text-exercised by this test).
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
 	if (!Plugin.IsValid()) { AddError(TEXT("could not locate the Cathode plugin base dir (IPluginManager)")); return false; }
 	const FString FontPath = Plugin->GetBaseDir() / TEXT("Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf");
@@ -254,7 +254,7 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the ready frame carries a valid front-buffer ref"), Captured.Frame.Buffer.IsValid());
 
 	// CONTENT (the load-bearing discriminator) — read the NEUTRAL front-buffer view (Pixels/Stride) directly; no
-	// vendor type pierced (the egress reads this same neutral seam in 1b).
+	// vendor type pierced (the egress reads this same neutral seam).
 	const uint8* Px = static_cast<const uint8*>(Captured.Frame.Buffer.Pixels);
 	const int32 Stride = Captured.Frame.Buffer.Stride;
 	if (Px == nullptr) { AddError(TEXT("the ready front buffer view has null pixels")); return false; }
@@ -314,13 +314,13 @@ bool FCathodeCompositionTickTest::RunTest(const FString& Parameters)
 #endif
 }
 
-// 023 slice 2 — the TEXT PATH through the composed tick. Exercises BOTH halves discriminatingly: the ADAPTER
+// The TEXT PATH through the composed tick. Exercises BOTH halves discriminatingly: the ADAPTER
 // (ITextMeasurer::MeasureWidth -> the shrink-to-fit box's WIDTH, observable as the BLUE bg's right extent) AND the
-// SHAPER + the 022 glyph-run map (the RED glyph ink). The two colors separate them: a stub-measurer collapses the
+// SHAPER + the glyph-run map (the RED glyph ink). The two colors separate them: a stub-measurer collapses the
 // blue box (no blue at the right) while the red glyphs still render -> the blue-extent assertion REDs the adapter
 // independently of the shaper. The SAME-BYTES ANCHOR: one shared FShaperTextMeasurer (one FFontHandle) threads
 // MeasureWidth (Layout) + ShapeText (the mapper) + the bytes (DrawGlyphRun). Composed through FSurface::DriveAll ->
-// real Layout (measure+position) -> the mapper (shape) -> real Rasterizer (DrawGlyphRun), NOT 022's isolation.
+// real Layout (measure+position) -> the mapper (shape) -> real Rasterizer (DrawGlyphRun), NOT the rasterizer in isolation.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeCompositionTextTickTest,
 	"Cathode.Composition.Tick.ComposedFrameRendersTextAtMeasuredWidth",
@@ -375,7 +375,7 @@ bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
 	if (!bFoundBlue) { AddError(TEXT("the real Layout produced no blue shrink-to-fit bg box for the text div")); return false; }
 	if (!bFoundText) { AddError(TEXT("the real Layout produced no DrawText op — the text did not lay out")); return false; }
 	// The blue box width IS the adapter's measured text width — assert it is a REAL measure (a stub-zero-width
-	// measurer would collapse it; this is the adapter EXERCISED, not slice-1's wired-not-exercised).
+	// measurer would collapse it; this is the adapter EXERCISED, not merely wired).
 	const float MeasuredWidth = BlueBox.Max.X - BlueBox.Min.X;
 	TestTrue(FString::Printf(TEXT("the shrink-to-fit box width is the adapter's MEASURED text width (>=40; got %.1f)"), MeasuredWidth), MeasuredWidth >= 40.0f);
 	TestTrue(FString::Printf(TEXT("the box is at the non-trivial Layout offset (Min.X=%.1f)"), BlueBox.Min.X), BlueBox.Min.X >= 15.0f);
@@ -458,14 +458,14 @@ bool FCathodeCompositionTextTickTest::RunTest(const FString& Parameters)
 #endif
 }
 
-// 023 slice 3 — the A2 PRODUCTION RESOLVER through the composed tick. A linked-CSS document (@import slice3.css,
+// The PRODUCTION RESOLVER through the composed tick. A linked-CSS document (@import slice3.css,
 // whose green-box rule lives ONLY in the external production-staged fixture) renders the linked green box through
 // the PRODUCTION resolver (CathodeComposition constructs CreateResourceResolver(CreateUEFileBundleSource(
 // GetDefaultResourceRoot())) + SetResourceResolver — the production CALLER, over the production default-root
 // /Game/Cathode, NOT a test-root). The NULL-RESOLVER CONTROL (bWireResolver=false) -> the @import never loads ->
-// no green -> the discriminator. Plus the in-tree DISPOSITIVE gate: the default-root literal == the
-// +DirectoriesToAlwaysStageAsUFS=/Game/Cathode staging path. (Cook-staging into the cooked pak is corroborated-
-// inference — an editor run reads on-disk; the empirical packaged read is a deferred packaged-build pass.)
+// no green -> the discriminator. Plus the in-tree DISPOSITIVE check: the default-root literal == the
+// +DirectoriesToAlwaysStageAsUFS=/Game/Cathode staging path. (Cook-staging into the cooked pak is NOT
+// exercised here — an editor run reads on-disk; a packaged-build read is not covered by this test.)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeCompositionResolverTickTest,
 	"Cathode.Composition.Tick.ComposedFrameRendersLinkedResource",
@@ -562,8 +562,8 @@ bool FCathodeCompositionResolverTickTest::RunTest(const FString& Parameters)
 #endif
 }
 
-// 029 #4 — background-image rendering END-TO-END (A'): stage an inline RED PNG at the production default-root, the
-// PRODUCTION resolver resolves it, the layout carries the bytes (b), the composition decodes + blits -> RED in the
+// Background-image rendering END-TO-END: stage an inline RED PNG at the production default-root, the
+// PRODUCTION resolver resolves it, the layout carries the bytes, the composition decodes + blits -> RED in the
 // DrawImage box + a blank margin; the NULL-resolver control leaves the box blank. Bound to the RESOLVED bytes (staged
 // fixture -> resolver -> carried bytes -> decode -> draw). The fixture is staged + cleaned up failure-safe (RAII guard).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -595,7 +595,7 @@ bool FCathodeCompositionBackgroundImageTest::RunTest(const FString& Parameters)
 	const int32 H = 128;
 	FInlineBgImageDocument Document; // MUST outlive the surfaces below
 
-	// (1) THE LAYOUT carries (b): WITH the production resolver, the bg-image div produces a DrawImage op whose ImageBytes ==
+	// (1) THE LAYOUT carries the bytes: WITH the production resolver, the bg-image div produces a DrawImage op whose ImageBytes ==
 	// the staged fixture (resolved ONCE + carried). Capture the layout-computed dest box.
 	FBox2f ImageBox(ForceInit);
 	bool bFoundImage = false;

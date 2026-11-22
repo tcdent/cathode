@@ -9,7 +9,7 @@
 // all litehtml-FREE. The walk runs over a scripted neutral tree; the per-node box + per-property value are
 // supplied by scripted/opaque callbacks (standing in for the vendor edge). We assert OUR traversal +
 // assembly + bounded property set + value->slot translation, NEVER litehtml's computed boxes or cascade
-// (the layout-output tautology). Authored, not run this sprint.
+// (the layout-output tautology).
 
 namespace
 {

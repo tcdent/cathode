@@ -1,14 +1,14 @@
-// Cathode author-side build GATE (025 S4-S6). Runs on the dev machine / CI ONLY — never the UE/make build (the Windows
-// build box has no Node; these files sit on its tree unused). The in-isolation fixture bites (S4/S5) THEN the REAL screen
-// end-to-end (S6). One gate; any failure hard-fails the whole gate:
-//   1. tsc the POSITIVE fixture against lib.cathode.d.ts (no `dom` lib)  -> PASS  (the supported DOM/JS surface, S4).
-//   2. tsc the NEGATIVE fixture (fetch/localStorage/innerHTML)           -> FAIL  (the DOM/JS banned-API bite, S4).
-//   3. css-tree lint the POSITIVE/NEGATIVE .css vs css-allow-list.toml   -> positive PASS, negative FAIL (the CSS bite, S5).
-//   4. the REAL screen screens/status-card/ (a .ts + its standalone .css, PM ruling (a)) -> tsc + css-tree + esbuild PASS
-//      END-TO-END -> the IIFE Cathode loads (the production author-build flow, S6).
-//   5. the BANNED real screen screens/banned/ -> HARD-FAILS on the real author-build path (the bite end-to-end, S6).
+// Cathode author-side build GATE. Runs on the dev machine / CI ONLY — never the UE/make build (the UE build
+// needs no Node; these files sit in its tree unused). The in-isolation fixture bites THEN the REAL screen
+// end-to-end. One gate; any failure hard-fails the whole gate:
+//   1. tsc the POSITIVE fixture against lib.cathode.d.ts (no `dom` lib)  -> PASS  (the supported DOM/JS surface).
+//   2. tsc the NEGATIVE fixture (fetch/localStorage/innerHTML)           -> FAIL  (the DOM/JS banned-API bite).
+//   3. css-tree lint the POSITIVE/NEGATIVE .css vs css-allow-list.toml   -> positive PASS, negative FAIL (the CSS bite).
+//   4. the REAL screen screens/status-card/ (a .ts + its standalone .css, one .css per screen) -> tsc + css-tree + esbuild PASS
+//      END-TO-END -> the IIFE Cathode loads (the production author-build flow).
+//   5. the BANNED real screen screens/banned/ -> HARD-FAILS on the real author-build path (the bite end-to-end).
 //   6. the EXAMPLE screen screens/hello/ (a body-mount + addEventListener reference) -> tsc + css-tree PASS, NO esbuild
-//      bundle (it's a gate-VALIDATED example, not a device bundle) — 029 #app->body, so a kept example is never un-checked.
+//      bundle (it's a gate-VALIDATED example, not a device bundle), so a kept example is never un-checked.
 // Exit 0 = gate PASS; non-zero = gate FAIL. `npm run gate` IS the canonical author-build step (see the Cathode README's
 // Authoring gate). The tsc and css-tree checks are INDEPENDENT mechanisms — each its own positive+negative pair.
 import { execFileSync } from "node:child_process";
@@ -56,7 +56,7 @@ if (!neg.ok) {
 	console.error("[gate] FAIL: the negative fixture COMPILED CLEAN — the gate did NOT bite (banned APIs were accepted)!");
 }
 
-// 3. CSS LINT (S5): css-tree membership vs css-allow-list.toml (the S2 artifact, parsed at lint time — the bind). A
+// 3. CSS LINT: css-tree membership vs css-allow-list.toml (the generated artifact, parsed at lint time — the bind). A
 // property NOT in the allow-list is a violation at property:line (membership-by-absence, no hand denylist). Independent
 // of the tsc checks (its own positive+negative pair).
 const allow = parseAllowList("css-allow-list.toml");
@@ -77,8 +77,8 @@ if (negCss.length > 0) {
 	console.error("[gate] FAIL: the negative CSS fixture linted CLEAN — the CSS gate did NOT bite (unsupported props accepted)!");
 }
 
-// 4. THE REAL SCREEN end-to-end (S6, the production author-build flow): the conformant screen at screens/status-card/ (a .ts +
-// its standalone screen.css, PM ruling (a)) — its .ts typechecks (no `dom` lib), its .css lints clean, and it bundles to
+// 4. THE REAL SCREEN end-to-end (the production author-build flow): the conformant screen at screens/status-card/ (a .ts +
+// its standalone screen.css, one .css per screen) — its .ts typechecks (no `dom` lib), its .css lints clean, and it bundles to
 // the IIFE Cathode loads. This processes the REAL author location end-to-end, not only the in-isolation fixtures above.
 const screenTs = tsc("tsconfig.screen.json");
 const screenCss = lintCssFile("screens/status-card/screen.css", allow);
@@ -117,7 +117,7 @@ if (!bannedTs.ok && bannedCss.length > 0) {
 
 // 6. THE EXAMPLE screen (screens/hello/) — a conformant body-mount + addEventListener reference. Gate-VALIDATED (tsc vs
 // lib.cathode.d.ts + css-tree), with NO esbuild bundle (it is an example, not a device bundle — no unused IIFE; status-card
-// is the device bundle). Closes the "kept un-checked example" smell (029 #app->body): a reader copies hello only after the
+// is the device bundle). Closes the "kept un-checked example" smell: a reader copies hello only after the
 // gate has validated the pattern. addEventListener IS supported surface (the positive fixture exercises it too).
 const helloTs = tsc("tsconfig.screen-hello.json");
 const helloCss = lintCssFile("screens/hello/screen.css", allow);

@@ -8,7 +8,7 @@
 // Spec for the bespoke font-handle cache — OUR bookkeeping, litehtml-free, via a recording ITextMeasurer.
 // Asserts dedup (same font params -> same handle, one ResolveFont), distinct fonts -> distinct handles,
 // and measurement dispatch through the handle. The measured width is the measurer's (vendor) value and is
-// NOT asserted. Authored, not run this sprint.
+// NOT asserted.
 
 namespace
 {

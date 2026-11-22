@@ -14,10 +14,9 @@ namespace Cathode
 // lives HERE (not in either leaf engine). It is the Layout-CONSTRUCTION prerequisite: CreateLiteHtmlLayoutEngine
 // requires an ITextMeasurer&, even to lay out a no-text document.
 //
-// SLICE 1: WIRED, not text-exercised. ResolveFont/GetFontMetrics let Layout construct + set up the default
-// font; MeasureWidth shapes real text but is not exercised by the non-text proof (its discriminating proof is
-// slice 2). A SINGLE injected default font backs every ResolveFont — the face-name -> font CATALOG is deferred
-// (no text is rendered yet); the PixelSize IS respected so metrics scale.
+// ResolveFont/GetFontMetrics let Layout construct + set up the default font; MeasureWidth shapes real text.
+// A SINGLE injected default font backs every ResolveFont — there is NO face-name -> font CATALOG (the Face,
+// Weight and italic arguments are ignored); the PixelSize IS respected so metrics scale.
 class FShaperTextMeasurer final : public ITextMeasurer
 {
 public:
@@ -29,7 +28,7 @@ public:
 	virtual float MeasureWidth(const FString& Text, FLayoutFontRef Font) override;
 	virtual void GetFontMetrics(FLayoutFontRef Font, float& OutAscent, float& OutDescent, float& OutHeight) override;
 
-	// The raster-side shaping service (slice 2) — the SAME-BYTES ANCHOR. This adapter is SHARED between the
+	// The raster-side shaping service — the SAME-BYTES ANCHOR. This adapter is SHARED between the
 	// document backer (Layout measures via ITextMeasurer) and the render-target backer (the mapper shapes for the
 	// raster), so the FLayoutFontRef Layout resolved maps to the SAME FFontHandle + bytes the shaper shapes and
 	// the Rasterizer draws — one font end-to-end. ShapeText resolves the ref + shapes via the same HarfBuzz shaper

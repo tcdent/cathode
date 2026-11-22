@@ -7,17 +7,17 @@
 namespace Cathode
 {
 
-// 029 #24 — a single-writer / single-reader LOCK-FREE triple-buffer that replaces the egress's per-frame HolderLock
-// CONTENTION. The HolderLock was already CORRECT (028 Q4: the deep-copy is consistent-by-construction); this removes the
-// lock, it is NOT a correctness fix. Three value slots + one atomic index ([bits 1+: ready slot][bit 0: new-flag]).
+// A single-writer / single-reader LOCK-FREE triple-buffer for the egress's per-frame worker -> game-thread handoff. A
+// lock around the deep-copied frame would be equally CORRECT; this exists to remove the per-frame lock CONTENTION, not
+// for correctness. Three value slots + one atomic index ([bits 1+: ready slot][bit 0: new-flag]).
 //
 // PUBLISH (writer/worker): fill the writer slot, then RELEASE-exchange the index. The slot writes HAPPEN-BEFORE the
 // release-store. ACQUIRE (reader/game): ACQUIRE-load the index; if a fresh value, exchange-CLAIM it. The slot read
-// HAPPENS-AFTER the acquire-load. The release/acquire pair establishes the SAME happens-before edge the FScopeLock did, so
+// HAPPENS-AFTER the acquire-load. The release/acquire pair establishes the SAME happens-before edge a scope lock would, so
 // the reader observes a published value WHOLE (every field of T together) or not at all — a TORN read is impossible BY
-// CONSTRUCTION of the fence ordering (the Q4 lesson: prove concurrency by the fence ORDERING, not a stress race). Keeps
-// only the LATEST published value — the writer recycles the un-acquired slot, so intermediate values are dropped (exactly
-// the old FindOrAdd-overwrite semantics). Single-writer / single-reader ONLY.
+// CONSTRUCTION of the fence ordering (concurrency is proven by the fence ORDERING, not a stress race). Keeps
+// only the LATEST published value — the writer recycles the un-acquired slot, so intermediate values are dropped (latest-wins
+// overwrite semantics). Single-writer / single-reader ONLY.
 template <typename T>
 class FTripleBuffer
 {

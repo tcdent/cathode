@@ -19,7 +19,7 @@ namespace Cathode
 
 // Pixel format of the CPU bitmap, in our terms; mapped to a Blend2D BLFormat in the impl.
 //
-// DECIDED (human): the surface format is PremultipliedBGRA8 — sRGB-ENCODED BGRA8. The Rasterizer blends
+// DECIDED: the surface format is PremultipliedBGRA8 — sRGB-ENCODED BGRA8. The Rasterizer blends
 // in sRGB (Blend2D default, not forced linear) and emits these sRGB bytes so the output lines up with an
 // adjacent UTexture2D flagged sRGB=true on an unlit/emissive material (encode/decode match; the scene
 // does not relight the screen). PremultipliedBGRA8 is the default surface format.
@@ -45,8 +45,8 @@ struct FBitmapData
 };
 
 // The OUTPUT SEAM: on a frame-ready, the Rasterizer hands a produced CPU bitmap (the published front
-// buffer) plus the dirty rectangles to this integration point. Future Surfaces / Texture Egress consume
-// it — uploading the dirty sub-rects into the surface's texture (lining up with the 002 frame-ready
+// buffer) plus the dirty rectangles to this integration point. Surfaces / Texture Egress consume
+// it — uploading the dirty sub-rects into the surface's texture (lining up with the CathodeRuntime frame-ready
 // path). Generalizable and evolvable; Core-only — no CathodeRuntime coupling. Default unset until those
 // components wire it.
 using FFrameReadySeam = TFunction<void(const FBitmapData& Bitmap, const TArray<FIntRect>& DirtyRects)>;
@@ -62,7 +62,7 @@ struct FRasterGlyph
 	float Y = 0.0f;
 };
 
-// A positioned glyph run from Text & Fonts — the INPUT SEAM for text (the fields GREW here, sprint 022). It is
+// A positioned glyph run from Text & Fonts — the INPUT SEAM for text. It is
 // ENGINE-NEUTRAL: it carries the font BYTES + the Rasterizer's own glyph type, so the Rasterizer needs NO
 // CathodeText dep (the bytes + ids are INJECTED, not a dependency — the leaf-preserving design).
 //
@@ -94,7 +94,7 @@ enum class EGradientQuality : uint8
 	Dither,
 };
 
-// Dirty-region granularity — our-bespoke (applied by the dirty-region tracker, Slice 3).
+// Dirty-region granularity — our-bespoke (applied by the dirty-region tracker).
 enum class EDirtyRegionGranularity : uint8
 {
 	PerRect,       // track each dirty rect independently (least overdraw)
@@ -102,45 +102,45 @@ enum class EDirtyRegionGranularity : uint8
 };
 
 // Rendering configuration — the tunable knobs, read when a draw session begins. ALL knobs are DECIDED
-// (the human's tuning set) and exposed here at top level for easy later re-tuning; none are left
+// and exposed here at top level for easy later re-tuning; none are left
 // undecided. No baked fidelity guesses — each value is a decision or a deliberate Blend2D/arch default.
 struct FRasterConfig
 {
-	// DECIDED (human): grayscale analytic anti-aliasing, never subpixel, no supersampling — Blend2D's
+	// DECIDED: grayscale analytic anti-aliasing, never subpixel, no supersampling — Blend2D's
 	// default text/vector quality (the 4K AA bar is met by true-outline grayscale AA, not supersampling).
 	// true = AA on (the only path); an aliased retro-CRT look, if ever needed, is a separate mechanism,
 	// not this flag (BLRenderingQuality has only ANTIALIAS today).
 	bool bAntiAlias = true;
 
-	// DECIDED (human): no supersampling.
+	// DECIDED: no supersampling.
 	bool bSupersample = false;
 
-	// DECIDED (human): fractional glyph positioning — do NOT snap glyph origins to the pixel grid.
+	// DECIDED: fractional glyph positioning — do NOT snap glyph origins to the pixel grid.
 	bool bFractionalGlyphPositioning = true;
 
-	// DECIDED (human): glyph outlines are rasterized true (no hinting / no grid-fit). Hinting POLICY is
+	// DECIDED: glyph outlines are rasterized true (no hinting / no grid-fit). Hinting POLICY is
 	// owned by Text & Fonts (shaping); the Rasterizer simply does not grid-fit the outlines it is given.
 	bool bGridFitGlyphs = false;
 
-	// DECIDED (human): blend in sRGB space (Blend2D default) — do NOT force linear blending. Pairs with
+	// DECIDED: blend in sRGB space (Blend2D default) — do NOT force linear blending. Pairs with
 	// the sRGB-encoded BGRA8 output and the adjacent UTexture2D sRGB=true + unlit/emissive material.
 	bool bBlendInLinearSpace = false;
 
-	// DECIDED (human = Blend2D default): content-image scaling quality.
+	// DECIDED (Blend2D default): content-image scaling quality.
 	EImageScalingQuality ImageScalingQuality = EImageScalingQuality::Bilinear;
 
-	// DECIDED (human = Blend2D default): gradient rendering quality.
+	// DECIDED (Blend2D default): gradient rendering quality.
 	EGradientQuality GradientQuality = EGradientQuality::Smooth;
 
-	// DECIDED (human = arch default): double-buffering (front/back). Two buffers.
+	// DECIDED (architecture default): double-buffering (front/back). Two buffers.
 	uint8 BufferCount = 2;
 
-	// DECIDED (human = sensible default): dirty-region granularity (Slice 3 applies it).
+	// DECIDED (sensible default): dirty-region granularity (the dirty-region tracker applies it).
 	EDirtyRegionGranularity DirtyRegionGranularity = EDirtyRegionGranularity::PerRect;
 
-	// DECIDED (human, RQ1 CLOSED): single-threaded — Blend2D renders SYNCHRONOUSLY on our worker thread
+	// DECIDED: single-threaded — Blend2D renders SYNCHRONOUSLY on our worker thread
 	// with NO own thread pool. 0 = synchronous (maps to BLContextCreateInfo.thread_count = 0); aligns
-	// with the 002 single-dedicated-worker model. Exposed for tuning, but the decision is single-thread.
+	// with the CathodeRuntime single-dedicated-worker model. Exposed for tuning, but the decision is single-thread.
 	uint32 BackendThreadCount = 0;
 };
 
@@ -232,7 +232,7 @@ public:
 // rasterizer swaps this implementation.
 CATHODERASTERIZER_API TUniquePtr<IRasterBackend> CreateBlend2DBackend();
 
-// The per-surface frame PRODUCER seam (sprint 023): the minimal public surface over the bespoke
+// The per-surface frame PRODUCER seam: the minimal public surface over the bespoke
 // FSurfaceRasterizer (the double-buffer + dirty-region + draw-dispatch producer) so the integration
 // composition root can CONSTRUCT and DRIVE one surface's producer WITHOUT the concrete class or its
 // buffering/dirty internals (FDoubleBuffer/FDirtyRegion stay Private) leaking into the public API — the
@@ -260,20 +260,20 @@ public:
 // FSurfaceRasterizer (and its FDoubleBuffer/FDirtyRegion) stay Private.
 CATHODERASTERIZER_API TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRasterBackend& Backend, int32 Width, int32 Height, const FRasterConfig& Config);
 
-// Decode an encoded image's INTRINSIC dimensions from its raw bytes (the 003 decode-for-size), via Blend2D's
+// Decode an encoded image's INTRINSIC dimensions from its raw bytes (decode-for-size), via Blend2D's
 // image decoder. Returns true + the real WxH for a decodable image; false + 0x0 for empty/undecodable input.
-// Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this at integration.
+// Blend2D (BL*) stays confined to the impl. CathodeLayout's get_image_size routing calls this.
 CATHODERASTERIZER_API bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidth, int32& OutHeight);
 
-// 029 #4 — decode an encoded image's PIXELS into an owned IRasterBitmap (the ADOPTED decoded image), for the composition's
+// Decode an encoded image's PIXELS into an owned IRasterBitmap (the ADOPTED decoded image), for the composition's
 // DrawImage seam (vs DecodeImageSize, which is size-only + discards). Returns null on null/empty/undecodable input.
 CATHODERASTERIZER_API TUniquePtr<IRasterBitmap> DecodeImage(const uint8* EncodedData, int32 EncodedSize);
 
 #if WITH_DEV_AUTOMATION_TESTS
-// 028 S2 — the AT-THE-RASTER worker-thread marker (test-only): the thread id the Blend2D raster (RasterizeFrame) last
+// The AT-THE-RASTER worker-thread marker (test-only): the thread id the Blend2D raster (RasterizeFrame) last
 // genuinely ran on. Recorded INSIDE the raster (not the relayout seam) so a test reads where the COMPOSITION actually
-// executed — the real worker thread under (b), the game thread under the interim. 0 = no raster has run yet. This
-// closes the spike's seam-marker caveat (a raster dispatched off the seam's thread would record THAT thread here).
+// executed — the worker thread when the composition runs off the game thread, the game thread otherwise. 0 = no
+// raster has run yet. (A raster dispatched off the seam's thread records THAT thread here.)
 CATHODERASTERIZER_API uint32 GetLastRasterThreadId();
 #endif
 

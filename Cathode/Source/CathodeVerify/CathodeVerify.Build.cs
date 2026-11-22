@@ -7,7 +7,7 @@ public class CathodeVerify : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// The runtime-verification faculty's in-engine home (sprint 011 [b]) — a Layer-5 runtime capability
+		// The runtime-verification faculty's in-engine home — a Layer-5 runtime capability
 		// (one-module-per-component). It DRIVES the faculty JS in a Cathode runtime and reports the structured
 		// self-report; depends on CathodeRuntime for the runtime + Evaluate (and, under automation, the
 		// FScopedTestRuntime seam that yields the real production runtime on the test thread). The introspection
@@ -19,7 +19,7 @@ public class CathodeVerify : ModuleRules
 			"CathodeRuntime",
 		});
 
-		// Private: Json parses the faculty's self-report for the gate assertions; Projects (IPluginManager)
+		// Private: Json parses the faculty's self-report for the test assertions; Projects (IPluginManager)
 		// resolves the faculty JS files relative to the plugin dir at runtime.
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
@@ -27,8 +27,8 @@ public class CathodeVerify : ModuleRules
 			"Projects",
 		});
 
-		// TEST-ONLY conditional deps (sprint 012 slice 1, the 011<->012 lockstep proof): the lockstep test installs
-		// the DOM node class in the test runtime to feed the 011 faculty a REAL descriptor (GetDomNodeDescriptorJson,
+		// TEST-ONLY conditional deps (the faculty<->descriptor lockstep proof): the lockstep test installs
+		// the DOM node class in the test runtime to feed the faculty a REAL descriptor (GetDomNodeDescriptorJson,
 		// from CathodeDom) and a real installed-proto probe — built via the registry (CreateNativeClassRegistry, from
 		// CathodeBinding). These are the ONLY couplings and they are automation-test-only — the include is
 		// WITH_DEV_AUTOMATION_TESTS-gated and the production faculty (CathodeVerifyModule.cpp) stays DOM-agnostic.

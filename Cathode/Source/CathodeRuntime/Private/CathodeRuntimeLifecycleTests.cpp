@@ -9,8 +9,7 @@
 // Specs for Runtime Core's BESPOKE lifecycle logic — the single-instance guard and the ordered
 // teardown. They drive the real production path (CreateJsRuntime + the guard + the destructor) and
 // assert OBSERVABLE behaviour, never vendor passthrough (we do not test that JS_NewRuntime/JS_FreeRuntime
-// themselves work — quickjs-ng owns that). Authored, not run this sprint; they pass by construction
-// when the execution sprint runs them.
+// themselves work — quickjs-ng owns that).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeRuntimeSingleInstanceTest,

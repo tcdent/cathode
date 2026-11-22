@@ -5,11 +5,11 @@
 #include "Misc/AutomationTest.h"
 
 // Thin dedicated proof for the component's DEFINING behavior — the event-driven readiness relay — exercised
-// DIRECTLY through FSurface::RenderAndRelay in isolation (not via the registry's DriveAll, which Slice 3
-// already proved for the emit-on-change / correct-Id / buffer-ref-by-identity / rect-count path). This adds
-// only the genuine residual: the isolated production path, the invalid-handle guard, multi-rect payload
+// DIRECTLY through FSurface::RenderAndRelay in isolation (not via the registry's DriveAll, which the registry tests
+// cover for the emit-on-change / correct-Id / buffer-ref-by-identity / rect-count path). This adds
+// only what that leaves: the isolated production path, the invalid-handle guard, multi-rect payload
 // carry-through, and buffer-ref identity STABLE across successive frames. Carries-it structural (opaque
-// handles, identity only — never pixels). Authored, not run this sprint.
+// handles, identity only — never pixels).
 
 namespace
 {

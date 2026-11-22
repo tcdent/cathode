@@ -10,9 +10,9 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 snapshot-returns — the OBJECT-RETURN DOM surface, JS-AUTHORED-proto types minted in C++ (the NodeList
+// Snapshot-returns — the OBJECT-RETURN DOM surface, JS-AUTHORED-proto types minted in C++ (the NodeList
 // pattern; NOT table-bound, so NOT lockstep cases — verified by instanceof + spec surface + NO-superset):
-//   - Element.attributes -> NamedNodeMap SNAPSHOT of MINIMAL { name, value } items (browse-design #8 ruling: no Attr class).
+//   - Element.attributes -> NamedNodeMap SNAPSHOT of MINIMAL { name, value } items (no Attr class).
 //   - Element.getBoundingClientRect() -> DOMRect VALUE from the REAL layout box (proven against the real captured box).
 
 namespace
@@ -113,7 +113,7 @@ bool FCathodeDomNamedNodeMapTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Preact-exact: for(i<length) x[attributes[i].name]=attributes[i].value"),
 		EvalBool("(function(){ var x={}; for(var i=0;i<__el.attributes.length;i++){ x[__el.attributes[i].name]=__el.attributes[i].value; } return x.id==='hero' && x['data-x']==='42' && x['class']==='card big'; })()"));
 
-	// SNAPSHOT (#8): a CAPTURED NamedNodeMap is unchanged by a later setAttribute; a re-read reflects it.
+	// SNAPSHOT: a CAPTURED NamedNodeMap is unchanged by a later setAttribute; a re-read reflects it.
 	TestTrue(TEXT("SNAPSHOT: captured NamedNodeMap unchanged after a later setAttribute; re-read grows"),
 		EvalBool("(function(){ var cap=__el.attributes; var before=cap.length; __el.setAttribute('data-y','9'); var stillCap=cap.length; var reread=__el.attributes.length; return before===3 && stillCap===3 && reread===4; })()"));
 

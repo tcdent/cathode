@@ -8,7 +8,7 @@
 // Specs for the result cache + the dual-consumer single-shape — OUR bookkeeping, by SHAPE-CALL-COUNT.
 // A recording inner shaper counts how many times it actually shapes; its returned FShapedRun is SCRIPTED
 // OPAQUE INPUT (not asserted as shaping output). The specs assert: a repeat same-key request does not
-// re-shape; a different key does; and one shape serves both consumers. Authored, not run this sprint.
+// re-shape; a different key does; and one shape serves both consumers.
 
 namespace
 {

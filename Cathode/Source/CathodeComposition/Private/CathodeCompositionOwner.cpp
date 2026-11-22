@@ -1,7 +1,7 @@
 #include "CathodeCompositionOwner.h"
 
 #include "CathodeComposition.h"        // GetDefaultResourceRoot
-#include "CathodeCompositionShared.h"  // 028 S6 — MakeCompositionSurfaceRegistrationShared (the shared-engine variant)
+#include "CathodeCompositionShared.h"  // MakeCompositionSurfaceRegistrationShared (the shared-engine variant)
 #include "CathodeShaperTextMeasurer.h" // FShaperTextMeasurer (the measurer the shared engine + rasterizer share)
 #include "CathodeEgress.h"             // ITextureEgress, CreateTextureEgress, FSurfaceReadinessSeam
 #include "CathodeRuntimeModule.h"      // FCathodeRuntimeModule (Install/Drain/PostWorkerJob)
@@ -9,9 +9,9 @@
 #include "CathodeJsRuntime.h"          // ICathodeJsRuntime, Evaluate, EEvalKind
 #include "CathodeBinding.h"            // INativeClassRegistry, CreateNativeClassRegistry
 #include "CathodeDom.h"                // FDomDocument, CreateDomDocument
-#include "CathodeGameBridge.h"         // 029 #28 — ICathodeGameBridge, CreateStubGameBridge, InstallGameBridgeAsGlobal
+#include "CathodeGameBridge.h"         // ICathodeGameBridge, CreateStubGameBridge, InstallGameBridgeAsGlobal
 #include "CathodeLayout.h"             // ILayoutEngine, CreateLiteHtmlLayoutEngine
-#include "CathodeSelector.h"           // ISelectorService, CreateSelectorService (012 matcher — querySelector for the mutation)
+#include "CathodeSelector.h"           // ISelectorService, CreateSelectorService (the selector matcher — querySelector for the mutation)
 #include "CathodeResolver.h"           // IBundleSource, IResourceResolver, CreateUEFileBundleSource, CreateResourceResolver
 #include "CathodeSurfaces.h"           // ISurfaceRegistry, CreateSurfaceRegistry, FSurfaceRegistration, FSurfaceReadiness
 
@@ -32,11 +32,11 @@ namespace
 	}
 }
 
-// 029 #27 — ONE surface's worker-side state. PER-SURFACE: its own ILayoutEngine (stateful per-document — holds the bound
+// ONE surface's worker-side state. PER-SURFACE: its own ILayoutEngine (stateful per-document — holds the bound
 // source + dirty controller + litehtml render tree), its own FDomDocument, its worker-assigned FSurfaceId, its bundle, and
 // its pending mutation. Member ORDER is a lifetime contract: Engine precedes Document (the doc renders off it). Held by
 // TUniquePtr in the owner array (FCriticalSection is non-movable).
-// 030 S1-P2 — a worker-posted keydown (the canonical e.key/e.code token), queued by DispatchKeyToSurface, dispatched in the
+// A worker-posted keydown (the canonical e.key/e.code token), queued by DispatchKeyToSurface, dispatched in the
 // seam at the surface's focused element / body, bubbling to its document.
 struct FPendingKey
 {
@@ -54,11 +54,11 @@ struct FPerSurfaceState
 	TUniquePtr<FDomDocument> Document;   // per-surface (its own root + DOM tree)
 	FSurfaceId Surface;                  // worker-assigned at Register
 	FCriticalSection MutationLock;       // guards PendingMutation + PendingKeys (set game-thread, drained worker-side)
-	FString PendingMutation;             // a worker-side JS mutation (018 API) to eval next tick (test-queued)
-	TArray<FPendingKey> PendingKeys;     // 030 S1-P2 — worker-posted keydowns to dispatch next tick (production)
+	FString PendingMutation;             // a worker-side JS mutation (the DOM API) to eval next tick (test-queued)
+	TArray<FPendingKey> PendingKeys;     // worker-posted keydowns to dispatch next tick (production)
 };
 
-// The worker-side composition state — built ON the worker (first seam call). 029 #27: the founding's "one runtime, one global
+// The worker-side composition state — built ON the worker (first seam call). "One runtime, one global
 // object, many surfaces". SHARED (one): the runtime [passed in], the binding registry, the game.* singleton (every surface
 // reads the one world), the surface registry (holds N), the stateless shaper adapter, and the bundle source/resolver.
 // PER-SURFACE (N): the array below. Member ORDER: Adapter precedes the engines (each holds it by ref); Resolver precedes them
@@ -70,10 +70,10 @@ struct FOwnerWorkerState
 	TUniquePtr<IBundleSource> BundleSource;
 	TUniquePtr<IResourceResolver> Resolver;
 	TUniquePtr<INativeClassRegistry> BindingRegistry;
-	TUniquePtr<ISelectorService> Selector;    // 012 matcher — querySelector for the mutation; the docs hold it by ptr
-	TUniquePtr<ICathodeGameBridge> GameBridge; // 029 #28 — the game.* singleton backing (injected or the stub); installed ONCE
+	TUniquePtr<ISelectorService> Selector;    // the selector matcher — querySelector for the mutation; the docs hold it by ptr
+	TUniquePtr<ICathodeGameBridge> GameBridge; // the game.* singleton backing (injected or the stub); installed ONCE
 	TUniquePtr<ISurfaceRegistry> SurfaceRegistry;
-	TArray<TUniquePtr<FPerSurfaceState>> Surfaces; // 029 #27 — the per-surface docs/engines/ids
+	TArray<TUniquePtr<FPerSurfaceState>> Surfaces; // the per-surface docs/engines/ids
 	TAtomic<int32> BuildCount{ 0 };           // the seam build runs ONCE total (==1; v2 is a dirty-mark re-compose)
 	bool bInitialized = false;
 };
@@ -116,7 +116,7 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 	TSharedPtr<FOwnerWorkerState> StateRef = State;
 
 	// THE PRODUCTION SEAM (runs on the WORKER each tick): build (once) the SHARED runtime/registry/game.* + each surface's
-	// FDomDocument over its OWN engine, repoint globalThis.document to it (M1) + eval its bundle; then each tick, eval any
+	// FDomDocument over its OWN engine, repoint globalThis.document to it + eval its bundle; then each tick, eval any
 	// queued per-surface mutation (-> MarkNodeDirty on THAT surface's engine) + DriveAll re-composes the dirty surfaces.
 	FSurfaceRelayoutSeam Seam = [StateRef, EgressSeam](ICathodeJsRuntime& Runtime, TArray<FHostOutboundMessage>& OutFrameReady)
 	{
@@ -130,8 +130,8 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 			S.Resolver = S.BundleSource.IsValid() ? CreateResourceResolver(*S.BundleSource) : nullptr;
 			S.Selector = CreateSelectorService();
 
-			// 029 #28/#27 — install game.* ONCE as a DOCUMENTED-KNOWN global (the SHARED singleton every surface reads). Use
-			// the INJECTED backing (the sim's real bridge later, or a test bridge now) or default to the production stub.
+			// Install game.* ONCE as a DOCUMENTED-KNOWN global (the SHARED singleton every surface reads). Use
+			// the INJECTED backing (a host's real bridge, or a test bridge) or default to the production stub.
 			if (!S.GameBridge.IsValid()) { S.GameBridge = CreateStubGameBridge(); }
 			if (JSContext* GameCtx = static_cast<JSContext*>(Runtime.GetNativeContextHandle()))
 			{
@@ -154,7 +154,7 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 					: nullptr;
 				if (!PS.Document.IsValid()) { continue; }
 
-				// M1 — repoint globalThis.document to THIS surface's doc, then eval its bundle: the bundle reads `document` as
+				// Repoint globalThis.document to THIS surface's doc, then eval its bundle: the bundle reads `document` as
 				// a free global (re-resolved per op) -> mounts to THIS doc's body. game.* stays the shared singleton (untouched).
 				PS.Document->InstallAsGlobal();
 				FString BundleStr;
@@ -188,7 +188,7 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 			S.bInitialized = true;
 		}
 
-		// 028 S6 / 029 #27 — ride the live wire: eval each surface's queued mutation. Repoint globalThis.document to THAT
+		// Ride the live wire: eval each surface's queued mutation. Repoint globalThis.document to THAT
 		// surface's doc first so the mutation's querySelector resolves against it -> setAttribute -> MarkDirty -> THAT
 		// surface's engine MarkNodeDirty -> the DriveAll below re-composes it (v2). game.* is shared, so a mutation reading
 		// game.tickCount sees the SAME host-set value on every surface.
@@ -206,12 +206,12 @@ void FCompositionSurfaceOwner::Install(const TArray<FCompositionSurfaceSpec>& Sp
 			}
 			if ((!Mutation.IsEmpty() || Keys.Num() > 0) && PS.Document.IsValid())
 			{
-				PS.Document->InstallAsGlobal(); // M1 — point `document` at THIS surface before its mutation / key delivery
+				PS.Document->InstallAsGlobal(); // point `document` at THIS surface before its mutation / key delivery
 				if (!Mutation.IsEmpty())
 				{
 					Runtime.Evaluate(Mutation, TEXT("<s6-mutation>"), EEvalKind::Global);
 				}
-				// 030 S1-P2 — deliver each worker-posted keydown at the focused element (re-resolved per key, since a handler
+				// Deliver each worker-posted keydown at the focused element (re-resolved per key, since a handler
 				// may move focus), falling back to <body> then the root, bubbling up to document.addEventListener('keydown').
 				for (const FPendingKey& K : Keys)
 				{
@@ -255,7 +255,7 @@ int32 FCompositionSurfaceOwner::Pump()
 	}
 	if (Egress.IsValid())
 	{
-		Egress->PumpGameThreadUploads(); // 029 #27 — drains ALL per-surface triple-buffers
+		Egress->PumpGameThreadUploads(); // drains ALL per-surface triple-buffers
 	}
 	return Drained;
 }
@@ -299,7 +299,7 @@ void FCompositionSurfaceOwner::Dispose()
 
 void FCompositionSurfaceOwner::DispatchKeyToSurface(FSurfaceId Surface, const FString& Key, const FString& Code)
 {
-	// 030 S1-P2 — the production input-delivery primitive. Queue a keydown on the matching surface (PS.Surface is
+	// The production input-delivery primitive. Queue a keydown on the matching surface (PS.Surface is
 	// worker-assigned at Register, stable after the build), then WAKE the worker: the next seam tick repoints
 	// globalThis.document to that surface, delivers the keydown at its focused element / body, and it bubbles to
 	// document.addEventListener('keydown'). NOT an inline dispatch — it rides the worker-affine seam (the doc is worker-owned).
@@ -323,7 +323,7 @@ void FCompositionSurfaceOwner::DispatchKeyToSurface(FSurfaceId Surface, const FS
 
 void FCompositionSurfaceOwner::DesignateActiveSurface(FSurfaceId Surface)
 {
-	// 031 S2 — the host designates which surface receives delivered intents (the active input target). The owner is
+	// The host designates which surface receives delivered intents (the active input target). The owner is
 	// N-surface; one is active at a time (components-input-routing.md: route to the ACTIVE surface).
 	ActiveSurface = Surface;
 }
@@ -335,9 +335,9 @@ void FCompositionSurfaceOwner::ReleaseActiveSurface()
 
 void FCompositionSurfaceOwner::DeliverIntent(ECathodeInputIntent Intent)
 {
-	// 031 S2 — THE CATHODE-OWNED INTENT LAYER (the inversion): map the SEMANTIC intent -> the canonical DOM key (Cathode owns
+	// THE CATHODE-OWNED INTENT LAYER (the inversion): map the SEMANTIC intent -> the canonical DOM key (Cathode owns
 	// the map) -> the ACTIVE surface's worker-posted keydown. The host delivers an intent; Cathode maps + routes it. No-op if
-	// no active surface (or an out-of-range intent). The raw DispatchKeyToSurface stays public beneath this (B-i both).
+	// no active surface (or an out-of-range intent). The raw DispatchKeyToSurface stays public beneath this.
 	if (!ActiveSurface.IsValid()) { return; }
 	const FString Key = CathodeIntentToKey(Intent);
 	if (Key.IsEmpty()) { return; }
@@ -361,7 +361,7 @@ void FCompositionSurfaceOwner::ForceReacquireForTest(int32 SurfaceIndex)
 		if (S.SurfaceRegistry.IsValid() && PS.Document.IsValid())
 		{
 			S.SurfaceRegistry->Unregister(PS.Surface);
-			// 027 realloc uses a FRESH-engine surface (the non-shared variant): a new engine re-feeds the CURRENT doc -> a
+			// The realloc uses a FRESH-engine surface (the non-shared variant): a new engine re-feeds the CURRENT doc -> a
 			// NEW texture. (No mutation here, so the fresh engine is correct — a shared-engine re-register would find the
 			// engine clean post-v1 -> no ops -> a null texture.)
 			FSurfaceRegistration Reg = MakeCompositionSurfaceRegistration(

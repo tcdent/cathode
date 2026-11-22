@@ -7,7 +7,7 @@
 namespace Cathode
 {
 
-// The console message level (sprint 012 S4) — console.log / warn / error map to these.
+// The console message level — console.log / warn / error map to these.
 enum class EConsoleLevel : uint8
 {
 	Log,
@@ -26,7 +26,7 @@ public:
 	/** Route an uncaught JS error out. Must not throw or propagate to the parent. */
 	virtual void ReportError(const FJsError& Error) = 0;
 
-	/** Route a console.{log,warn,error} message out (sprint 012 S4 — the OnInstallConsole seam target).
+	/** Route a console.{log,warn,error} message out (the OnInstallConsole seam target).
 	 *  ADDITIVE + default no-op: this COMPLETES the console channel the install seam always implied; it does
 	 *  NOT touch ReportError. The default no-op keeps existing sinks compiling, but a sink that leaves it
 	 *  defaulted silently DROPS console output — so any sink that surfaces console (the production

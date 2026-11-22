@@ -8,11 +8,11 @@ namespace Cathode
 
 namespace
 {
-// The PRODUCTION UE-asset read backend (sprint 019): a root-relative bundle path -> REAL file bytes via FFileHelper,
+// The PRODUCTION UE-asset read backend: a root-relative bundle path -> REAL file bytes via FFileHelper,
 // rooted at a SUPPLIED (REQUIRED) RootDir. The FFontRegistry CreateFontRegistry->LoadFileToArray precedent
 // (CathodeText/Private/CathodeFontRegistry.cpp:43-50 — the only production "read file bytes" code in Cathode). NO
 // baked default-root: the configured root is the ctor input; the production default-root factory + the UFS-staging
-// config + the cooked-pak read validation are the COUPLED integration item (Deferred #3/#5). Private to this TU;
+// config + the cooked-pak read validation are the COUPLED integration item (COVERAGE.md Deferred #3/#5). Private to this TU;
 // only the factory is exposed. Couples-to-none (Core/FFileHelper only — no vendor, no sibling).
 class FUEFileBundleSource final : public IBundleSource
 {

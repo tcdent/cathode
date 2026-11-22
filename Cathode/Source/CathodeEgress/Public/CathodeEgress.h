@@ -6,14 +6,14 @@
 
 class UTexture2D;
 
-// Cathode Texture Egress (sprint 024) — the SOLE RHI touchpoint. It subscribes to CathodeSurfaces' readiness
+// Cathode Texture Egress — the SOLE RHI touchpoint. It subscribes to CathodeSurfaces' readiness
 // relay (FSurfaceReadinessSeam), owns one UTexture2D per surface, and on each change COPIES the surface's dirty
-// bytes (the 1a neutral view) and uploads them to the GPU on the render thread. It never reads a vendor type:
+// bytes (the neutral view) and uploads them to the GPU on the render thread. It never reads a vendor type:
 // it consumes only the neutral FSurfaceBufferRef (Pixels/Stride/dims/format).
 //
 // ALTITUDE: subscribe, create-the-texture, copy, upload — NOT a texture-streaming system, NOT a material/sampler
-// layer (the device-spawn caller binds the UTexture2D to its material; that wiring is integration). Slice 1b is
-// the first FULL-TEXTURE upload; the dirty-rect regional upload is slice 2.
+// layer (the device-spawn caller binds the UTexture2D to its material; that wiring is integration). The upload is
+// REGIONAL: only the reported dirty rects (the whole texture when none are reported).
 
 namespace Cathode
 {
@@ -25,14 +25,14 @@ class ITextureEgress
 public:
 	virtual ~ITextureEgress() = default;
 
-	// The readiness seam to hand to ISurfaceRegistry::DriveAll. 028 S2 thread-split — this is the WORKER-side EMIT:
+	// The readiness seam to hand to ISurfaceRegistry::DriveAll. The egress is thread-split — this is the WORKER-side EMIT:
 	// on each surface CHANGE it COPIES the dirty bytes at the callback (the borrow is valid only here) and STORES the
-	// owned copy in a thread-safe per-surface holder (the stubbed double-buffer). It does ZERO UObject work — texture
+	// owned copy in a thread-safe per-surface holder (a lock-free triple-buffer). It does ZERO UObject work — texture
 	// creation + the RHI upload are DEFERRED to PumpGameThreadUploads() on the game thread. Safe to drive from the
 	// worker thread (no UObject / no RHI off the game thread).
 	virtual FSurfaceReadinessSeam GetSeam() = 0;
 
-	// 028 S2 — the GAME-THREAD upload half: for each surface with pending copied bytes (from GetSeam's worker-emit),
+	// The GAME-THREAD upload half: for each surface with pending copied bytes (from GetSeam's worker-emit),
 	// create/find its UTexture2D (CreateTransient/UpdateResource — UObject, game-thread only) and marshal the upload
 	// onto the render thread (the existing RHIUpdateTexture2D). MUST run on the game thread. The host drains the
 	// worker's frame-ready outbound and calls this to pump the uploads.

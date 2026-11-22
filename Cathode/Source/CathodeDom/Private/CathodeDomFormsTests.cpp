@@ -10,10 +10,10 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 forms — value/checked LIVE state (the dirty-value model). value/checked are the LIVE input state,
+// Forms — value/checked LIVE state (the dirty-value model). value/checked are the LIVE input state,
 // DISTINCT from the value/checked ATTRIBUTES (= defaultValue/defaultChecked). The proof is the FOUR-STEP
 // discriminating sequence (a naive round-trip is insufficient; an always-live field fails steps 1-2, an
-// always-attribute/slice-3 reflection fails steps 3-4) + the serialization leak test (the live value must NOT
+// always-attribute reflection fails steps 3-4) + the serialization leak test (the live value must NOT
 // reach the layout-feed markup — SerializeNode emits the attribute defaults).
 
 namespace

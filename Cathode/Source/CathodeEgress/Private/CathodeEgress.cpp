@@ -9,13 +9,13 @@
 #include "UObject/StrongObjectPtr.h"
 #include "PixelFormat.h"
 
-#include "CathodeTripleBuffer.h" // 029 #24 — the lock-free triple-buffer (the published-index release/acquire fence pairing)
+#include "CathodeTripleBuffer.h" // the lock-free triple-buffer (the published-index release/acquire fence pairing)
 
 namespace Cathode
 {
 namespace
 {
-	// Map the neutral surface format to the UE pixel format the UTexture2D is created with. THIS is the 1b
+	// Map the neutral surface format to the UE pixel format the UTexture2D is created with. THIS is the
 	// format-map bind: a wrong choice swaps channels IN THE TEXTURE, which only the on-GPU readback can see (the
 	// source bytes stay [B,G,R,A] regardless). PremultipliedBGRA8 / OpaqueBGRA8 are both BGRA8 byte layout ->
 	// PF_B8G8R8A8 (sRGB flagged separately); Alpha8 -> PF_A8.
@@ -38,7 +38,7 @@ namespace
 		return (Format == ESurfacePixelFormat::Alpha8) ? 1 : 4;
 	}
 
-	// One assembled upload per dirty rect (slice 2, the dirty-rect REGIONAL upload — uniform TIGHT, one copy path):
+	// One assembled upload per dirty rect (the dirty-rect REGIONAL upload — uniform TIGHT, one copy path):
 	// a TIGHT command-owned copy of ONLY that rect's pixels (read from the STRIDED source — step source rows by the
 	// view's Stride, offset by the rect origin — into a no-padding buffer) + the matching FUpdateTextureRegion2D
 	// (DestX/DestY = the rect origin, SrcX/SrcY = 0 since the tight buffer STARTS at the rect, Width/Height = the
@@ -73,7 +73,7 @@ namespace
 			Assembled.Bytes.SetNumUninitialized(TightPitch * RectH);
 			// Copy ONLY the rect's rows from the STRIDED source into the tight buffer: step the source by Stride,
 			// offset MinX*Bpp within each row; write contiguous tight rows. A wrong read-stride misaligns the rows
-			// from a padded source -> the readback mismatches (the relocated padded-stride discriminator).
+			// from a padded source -> the readback mismatches (the padded-stride discriminator).
 			for (int32 Row = 0; Row < RectH; ++Row)
 			{
 				const uint8* SrcRow = Source + static_cast<int64>(MinY + Row) * Stride + static_cast<int64>(MinX) * Bpp;
@@ -102,7 +102,7 @@ namespace
 	}
 
 	// The PRODUCTION uploader: the real RHIUpdateTexture2D. Runs on the render thread (the egress invokes it inside
-	// its ENQUEUE_RENDER_COMMAND). The de-risked slice-0 RHI path.
+	// its ENQUEUE_RENDER_COMMAND).
 	void ProductionUpload(const FEgressUpload& Upload)
 	{
 		if (Upload.Texture != nullptr)
@@ -119,19 +119,19 @@ namespace
 		int32 Height = 0;
 	};
 
-	// 028 S2 — a per-surface PENDING frame: the worker-emit's owned tight copies (the stubbed double-buffer cross),
+	// A per-surface PENDING frame: the worker-emit's owned tight copies (what crosses the triple-buffer),
 	// held until the game-thread pump creates the texture + uploads. PURE CPU bytes — NO UObject, safe off the game thread.
 	struct FPendingFrame
 	{
-		FSurfaceId Surface;  // 029 #24 — the surface this frame is for (rides the slot; the game-thread upload keys Textures on it)
+		FSurfaceId Surface;  // the surface this frame is for (rides the slot; the game-thread upload keys Textures on it)
 		TArray<FAssembledRegion> Uploads;
 		int32 Width = 0;
 		int32 Height = 0;
 		ESurfacePixelFormat Format = ESurfacePixelFormat::PremultipliedBGRA8;
 	};
 
-	// 029 #24 — the egress holds a single-surface lock-free FTripleBuffer<FPendingFrame> (CathodeTripleBuffer.h): the worker
-	// publishes the latest frame, the game thread acquires it, with no per-frame HolderLock. #27 fans out to a per-surface map.
+	// The egress holds a per-surface map of lock-free FTripleBuffer<FPendingFrame> (CathodeTripleBuffer.h): the worker
+	// publishes a surface's latest frame, the game thread acquires it, with no per-frame lock on the data handoff.
 	class FTextureEgress final : public ITextureEgress
 	{
 	public:
@@ -140,20 +140,20 @@ namespace
 		{
 		}
 
-		// 028 S2 — the WORKER-side emit (safe off the game thread): copy + store, ZERO UObject.
+		// The WORKER-side emit (safe off the game thread): copy + store, ZERO UObject.
 		virtual FSurfaceReadinessSeam GetSeam() override
 		{
 			return [this](const FSurfaceReadiness& Readiness) { WorkerEmit(Readiness); };
 		}
 
-		// 028 S2 — the GAME-THREAD upload half: for each surface with pending copied bytes, create/find its texture
+		// The GAME-THREAD upload half: for each surface with pending copied bytes, create/find its texture
 		// (UObject) + marshal the render-thread upload from the stored copies.
 		virtual void PumpGameThreadUploads() override
 		{
-			// 029 #27 — snapshot the per-surface triple-buffers under the brief STRUCTURE lock (the worker may FindOrAdd a new
+			// Snapshot the per-surface triple-buffers under the brief STRUCTURE lock (the worker may FindOrAdd a new
 			// surface concurrently — the lock makes the snapshot safe vs a bucket rehash), then drain each LOCK-FREE OUTSIDE the
-			// lock. The TSharedPtr snapshot refs keep the buffers alive even if a surface is Released mid-drain. #24 preserved:
-			// the per-frame data handoff (Acquire) is the lock-free atomic; the lock is only the cheap map-snapshot.
+			// lock. The TSharedPtr snapshot refs keep the buffers alive even if a surface is Released mid-drain.
+			// The per-frame data handoff (Acquire) is the lock-free atomic; the lock is only the cheap map-snapshot.
 			TArray<TSharedPtr<FTripleBuffer<FPendingFrame>, ESPMode::ThreadSafe>> SurfaceBuffers;
 			{
 				FScopeLock Lock(&FramesLock);
@@ -179,12 +179,12 @@ namespace
 					if (NewTexture == nullptr)
 					{
 						Textures.Remove(Surface);
-						continue; // 029 #27 — skip this surface, drain the rest
+						continue; // skip this surface, drain the rest
 					}
-					// 029 #27 — CLEAR the texture on create: zero the mip BEFORE UpdateResource so the create uploads a CLEAN
+					// CLEAR the texture on create: zero the mip BEFORE UpdateResource so the create uploads a CLEAN
 					// (0) texture. The dirty-rect upload then writes ONLY the rendered rects, leaving the MARGIN deterministic-0
-					// — vs the uninitialized CreateTransient GPU memory (= the prior test's residual) that drove the #30 out-box
-					// ORDER-SENSITIVITY (the egress-readback ISOLATION fix; lets the #30 floor restore 0.80 -> 0.85).
+					// — vs the uninitialized CreateTransient GPU memory (leftover from whatever used it before), which makes a
+					// readback of the margin ORDER-SENSITIVE across tests.
 					if (FTexturePlatformData* PlatformData = NewTexture->GetPlatformData())
 					{
 						if (PlatformData->Mips.Num() > 0)
@@ -207,7 +207,7 @@ namespace
 				FTextureResource* Resource = Tex.Texture->GetResource();
 				if (Resource == nullptr)
 				{
-					continue; // 029 #27 — skip this surface, drain the rest
+					continue; // skip this surface, drain the rest
 				}
 
 				FEgressUploader UploaderForCommand = Uploader;
@@ -240,7 +240,7 @@ namespace
 		virtual void Release(FSurfaceId Surface) override
 		{
 			Textures.Remove(Surface); // game-thread — drops the TStrongObjectPtr -> the texture is GC-collectable.
-			// 029 #27 — also drop this surface's triple-buffer under the STRUCTURE lock. A TSharedPtr ref still held by an
+			// Also drop this surface's triple-buffer under the STRUCTURE lock. A TSharedPtr ref still held by an
 			// in-flight worker publish or a game-thread snapshot keeps the buffer alive until that ref releases (no dangle);
 			// the map entry is gone, so no future pump acquires it.
 			{
@@ -250,7 +250,7 @@ namespace
 		}
 
 	private:
-		// WORKER-side emit (028 S2): COPY the dirty bytes (the borrow is valid only synchronously — copy HERE) into an
+		// WORKER-side emit: COPY the dirty bytes (the borrow is valid only synchronously — copy HERE) into an
 		// owned buffer + STORE in the per-surface holder. ZERO UObject / ZERO RHI -> safe on the worker thread. The
 		// game-thread PumpGameThreadUploads() does the texture creation + upload from the stored copy.
 		void WorkerEmit(const FSurfaceReadiness& Readiness)
@@ -270,9 +270,9 @@ namespace
 				return;
 			}
 
-			// 029 #24/#27 — the deep-copy (above) is done; build the frame. Fetch (or lazily create) THIS surface's
+			// The deep-copy (above) is done; build the frame. Fetch (or lazily create) THIS surface's
 			// triple-buffer under the brief STRUCTURE lock (the worker is the sole map-ADDER — a new surface's first publish),
-			// then publish LOCK-FREE on the held ref OUTSIDE the lock (the #24 atomic: a slot move + a release-exchange). The
+			// then publish LOCK-FREE on the held ref OUTSIDE the lock (the triple-buffer atomic: a slot move + a release-exchange). The
 			// TSharedPtr ref keeps the buffer alive through the publish even if the game thread Removes the surface meanwhile.
 			FPendingFrame Pending;
 			Pending.Surface = Readiness.Surface;
@@ -291,14 +291,14 @@ namespace
 				}
 				TripleBuf = Slot;
 			}
-			TripleBuf->Publish(MoveTemp(Pending)); // LOCK-FREE (the #24 atomic), outside the structure lock
+			TripleBuf->Publish(MoveTemp(Pending)); // LOCK-FREE (the triple-buffer atomic), outside the structure lock
 		}
 
 		FEgressUploader Uploader;
 		TMap<FSurfaceId, FEgressTexture> Textures;     // GAME-thread — the UObject textures
-		// 029 #27 (FORK B) — the per-surface lock-free triple-buffers. The per-frame DATA handoff stays LOCK-FREE: each
-		// FTripleBuffer's publish/acquire is the #24 atomic, untouched. FramesLock guards ONLY the MAP STRUCTURE (FindOrAdd /
-		// GenerateValueArray / Remove) — a cheap pointer-fetch, NOT the per-frame deep-copy contention #24 removed — because
+		// The per-surface lock-free triple-buffers. The per-frame DATA handoff stays LOCK-FREE: each
+		// FTripleBuffer's publish/acquire is atomic. FramesLock guards ONLY the MAP STRUCTURE (FindOrAdd /
+		// GenerateValueArray / Remove) — a cheap pointer-fetch, NOT a per-frame deep-copy contention — because
 		// the worker's FindOrAdd (a new surface's first publish) can REHASH the bucket array CONCURRENT with the game thread's
 		// snapshot/find (UE TMap is unsafe under concurrent read+add; Find(X)-after-add(X) is ordered by the outbound release
 		// edge, but Find(X) still overlaps add(Y)). A lock is robust for ANY surface count (vs Reserve's hidden capacity bound).

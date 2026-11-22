@@ -1,4 +1,4 @@
-// The CSS-selector matcher service (sprint 012 selectors) — litehtml-backed PARSE + a live-tree structural MATCH.
+// The CSS-selector matcher service — litehtml-backed PARSE + a live-tree structural MATCH.
 //
 // litehtml owns parsing ONLY (css_selector::parse — so the supported selector SET is litehtml's, never fabricated);
 // the match is reimplemented over IMatchableNode (the LIVE retained DOM tree), reproducing html_tag::select's

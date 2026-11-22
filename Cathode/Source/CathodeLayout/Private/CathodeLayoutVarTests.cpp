@@ -4,10 +4,10 @@
 
 #include "Misc/AutomationTest.h"
 
-// 013 slice 2 — var() FEASIBILITY proof (the armed-tripwire slice). Drives the REAL litehtml engine
+// var() FEASIBILITY proof. Drives the REAL litehtml engine
 // (CreateLiteHtmlLayoutEngine) on an inline custom-property + var() and asserts litehtml RESOLVES var(--w) -> the
-// custom value, observed through the EXISTING computed-box read (width:var(--w) -> the box width) — NO slice-4
-// getComputedStyle/QueryComputedValue and NO slice-3 <style> ingress; inline --custom in the canonical 'style'
+// custom value, observed through the computed-box read (width:var(--w) -> the box width) — NO
+// getComputedStyle/QueryComputedValue and NO <style> ingress; inline --custom in the canonical 'style'
 // attribute, driving litehtml's own cascade (incl subst_vars) directly.
 //
 // ORACLE — RELATIONAL, never a hand-typed pixel: the var()-driven element's width === a sibling's DIRECT width:50px,
@@ -16,7 +16,7 @@
 // the var() width DIVERGES from the 50px control and the equality FAILS. A green that can't tell resolved from
 // unresolved proves nothing; the control gap is built to expose a stub.
 //
-// FORK-1 FIREWALL: this lives CathodeLayout-side (litehtml-private); CathodeDom is not involved -> no CathodeDom->litehtml link.
+// FIREWALL: this lives CathodeLayout-side (litehtml-private); CathodeDom is not involved -> no CathodeDom->litehtml link.
 
 namespace
 {

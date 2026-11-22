@@ -10,7 +10,7 @@ namespace
 // state. Surfaces are owned here (TUniquePtr); Unregister and teardown free them (and, transitively, their
 // document + render-target handles) — no leak. Ids are monotonic so an unregistered id is never reused
 // (stable addressing for the readiness relay). The class is private to this TU; only CreateSurfaceRegistry
-// is exposed (mirrors 005's engine factory).
+// is exposed (mirrors CathodeLayout's engine factory).
 class FSurfaceRegistry final : public ISurfaceRegistry
 {
 public:

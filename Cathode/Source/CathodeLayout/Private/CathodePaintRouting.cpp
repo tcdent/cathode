@@ -27,7 +27,7 @@ void EmitDrawImage(TArray<FLayoutPaintOp>& Sink, const FBox2f& DestRect, const F
 	Op.Kind = ELayoutPaintOpKind::DrawImage;
 	Op.Rect = DestRect;
 	Op.ImageSource = Source;
-	Op.ImageBytes = Bytes; // 029 #4 — the layout-resolved bytes ride the op (the composition decodes+draws, no re-resolve)
+	Op.ImageBytes = Bytes; // the layout-resolved bytes ride the op (the composition decodes+draws, no re-resolve)
 	Sink.Add(MoveTemp(Op));
 }
 
@@ -85,7 +85,7 @@ void DecomposeBorder(TArray<FLayoutPaintOp>& Sink, const FBorderStroke& Border)
 
 	if (bStyled || HasAnyRadius(Border.Radii))
 	{
-		// Any styled side or any corner radius -> the neutral StrokeBorder op (Rasterizer draw = 003 #3).
+		// Any styled side or any corner radius -> the neutral StrokeBorder op (Rasterizer draw = CathodeRasterizer COVERAGE.md #3).
 		FLayoutPaintOp Op;
 		Op.Kind = ELayoutPaintOpKind::StrokeBorder;
 		Op.Border = Border;

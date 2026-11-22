@@ -10,11 +10,11 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 slice 5 — the document subsystem. Every oracle reaches the document THROUGH globalThis.document
+// The document subsystem. Every oracle reaches the document THROUGH globalThis.document
 // (what InstallAsGlobal SETS), NOT a C++ side-handle — so the proof covers InstallAsGlobal's wrap AND set-global
 // (if set-global were broken, globalThis.document is undefined and the oracle throws/fails). InstallAsGlobal is
 // PRODUCTION CathodeDom code -> would-it-pass-if-test-only = NO; only the OnInstallDocument seam AUTO-invocation
-// (per-surface, gap-doc'd) is held. The gc_mark proof is added per the lead's ruling on its discriminating form.
+// (per-surface) is not covered here.
 
 namespace
 {
@@ -71,7 +71,7 @@ bool FCathodeDomDocumentTest::RunTest(const FString& Parameters)
 	Doc->InstallAsGlobal();
 	TestTrue(TEXT("document is installed as a global object"), EvalBool(Context, "typeof document === 'object' && document !== null"));
 
-	// Expose the root + a target element so author JS can build the tree (documentElement/body are deferred).
+	// Expose the root + a target element so author JS can build the tree.
 	FJsValue RootW = Doc->GetWrapperForNode(Doc->GetRootNodeId());
 	FJsValue ElW = Doc->CreateElement(TEXT("div"));
 	JSValue Global = JS_GetGlobalObject(Context);
@@ -79,9 +79,9 @@ bool FCathodeDomDocumentTest::RunTest(const FString& Parameters)
 	JS_SetPropertyStr(Context, Global, "__el", JS_DupValue(Context, ElW.GetValue()));
 	JS_FreeValue(Context, Global);
 
-	// --- getElementById END-TO-END === through the attribute store (review #1) ---
-	// el.id = x (the slice-3 REFLECTED property -> writes the id ATTRIBUTE); append; document.getElementById(x)
-	// === the SAME wrapper (S2 marshaler). REQUIRE === (identity, not resolves-to-the-right-node).
+	// --- getElementById END-TO-END === through the attribute store ---
+	// el.id = x (the REFLECTED property -> writes the id ATTRIBUTE); append; document.getElementById(x)
+	// === the SAME wrapper (the object-return marshaler). REQUIRE === (identity, not resolves-to-the-right-node).
 	EvalGlobal(Context, "__root.appendChild(__el); __el.id = 'x';");
 	TestTrue(TEXT("getElementById(reflected el.id) === the element (identity, via globalThis.document)"),
 		EvalBool(Context, "document.getElementById('x') === __el"));
@@ -105,14 +105,12 @@ bool FCathodeDomDocumentTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 slice 5 — the DISPOSE-RECLAIM discriminating test (replaces the vacuous gc_mark survival test).
-// MECHANISM ATTRIBUTION: the reclaim mechanism is EXISTING — 008's FDomDocument::Dispose (drops RootWrapper) +
-// the node gc_mark/T4 (reclaims unrooted intra-tree cycles). Slice 5 did NOT invent it. But slice 5's
-// getElementById + the running engine make 008's DEFERRED reclaim VALIDATION-PASS expressible for the first time
-// (FindNode-as-the-index-witness), so this test DISCHARGES that deferred reclaim proof: T4 proved gc-VISIBILITY
-// (a cycle is collectable); actual reclaim THROUGH Dispose was never tested. (Bonus: a real end-to-end reclaim
-// observed de-risks the quickjs.c-not-vendored caveat.) document.gc_mark is intentionally ABSENT — see the
-// lifetime note in CathodeDom/COVERAGE.md (carry-not-rediscover: it returns when the event API is bound to JS).
+// The DISPOSE-RECLAIM discriminating test.
+// THE MECHANISM: FDomDocument::Dispose (drops RootWrapper) + the node gc_mark (reclaims unrooted intra-tree
+// cycles). The gc_mark test proves gc-VISIBILITY (a cycle is collectable); this test proves actual reclaim THROUGH
+// Dispose, with FindNode as the index witness. (A real end-to-end reclaim observed also de-risks the
+// quickjs.c-not-vendored caveat.) document.gc_mark is intentionally ABSENT — see the
+// lifetime note in CathodeDom/COVERAGE.md (it returns when the event API is bound to JS).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomDocumentDisposeReclaimTest,
 	"Cathode.Dom.Document.DisposeReclaim",
@@ -159,7 +157,7 @@ bool FCathodeDomDocumentDisposeReclaimTest::RunTest(const FString& Parameters)
 		Doc->FindNode(TargetId) != nullptr);
 
 	// THE RECLAIM HALF: Dispose() drops RootWrapper (runtime alive) -> the root is unrooted (acyclic cascade) ->
-	// the target's cycle is unreachable -> JS_RunGC reclaims it (node gc_mark/T4). The reclaimed node finalizes
+	// the target's cycle is unreachable -> JS_RunGC reclaims it (node gc_mark). The reclaimed node finalizes
 	// -> ~FDomNode -> UnregisterNode -> it leaves the index.
 	Doc->Dispose();
 	JS_RunGC(Rt);
@@ -169,10 +167,10 @@ bool FCathodeDomDocumentDisposeReclaimTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 028 S1 — the body-seed (the tcdent mount contract, locked 2026-06-22). A FRESH FDomDocument's CTOR seeds
+// The body-seed (the mount contract). A FRESH FDomDocument's CTOR seeds
 // documentElement > [head, body] — the THREE nodes ONLY (no root div / #app / config). document.body/head resolve as
 // the mount/structure targets; an appendChild into body lands on the real retained tree. Every assertion is DIRECT
-// off the source-of-truth FDomNode tree (Model-A: the children ARE the wrapper refs), never a mediated
+// off the source-of-truth FDomNode tree (the children ARE the wrapper refs), never a mediated
 // querySelector/getComputedStyle/JS read-back (the direct-vs-indirect discipline).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomBodySeedTest,

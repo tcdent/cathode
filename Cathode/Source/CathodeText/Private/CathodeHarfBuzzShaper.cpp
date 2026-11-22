@@ -7,9 +7,8 @@
 #include "Containers/StringConv.h"
 
 // HarfBuzz — the text shaper. Every hb_* token is confined to this translation unit; swapping shapers
-// means reimplementing this file and the factory, nothing else. The include path is wired by the
-// execution-approval sprint's build (the headers are vendored under vendor/lib/cathode/harfbuzz/src,
-// built from source then); no build runs this sprint.
+// means reimplementing this file and the factory, nothing else. The include path is wired in
+// CathodeText.Build.cs (the headers are vendored under Source/ThirdParty/harfbuzz/include).
 THIRD_PARTY_INCLUDES_START
 #include "hb.h"
 #include "hb-ot.h"
@@ -23,7 +22,7 @@ namespace
 
 // The HarfBuzz-backed shaper. Builds hb_font from the byte store's bytes for a handle (same bytes ->
 // same face -> same glyph-id space as the Rasterizer's BLFont), shapes, and assembles our FShapedRun
-// glyphs via the bespoke (hb_*-free) assembly. Metrics/Extents are Slice 4.
+// glyphs via the bespoke (hb_*-free) assembly, then derives the run Metrics + Extents.
 class FHarfBuzzShaper final : public ITextShaper
 {
 public:
@@ -102,7 +101,7 @@ public:
 		Result.Glyphs = AssembleGlyphs(Raw, PixelsPerUnit);
 
 		// Vertical extents: read the font's horizontal extents (vendor) and scale to px (our scale), then
-		// derive our metrics (width = sum of advances) + run bounding box (closes 003 #2).
+		// derive our metrics (width = sum of advances) + run bounding box (CathodeRasterizer COVERAGE.md #2).
 		hb_font_extents_t HbExtents{};
 		hb_font_get_h_extents(Font, &HbExtents);
 		const float Ascent = HbExtents.ascender * PixelsPerUnit;   // above baseline (positive)

@@ -1,4 +1,4 @@
-// Cathode surface walk — the in-engine runtime-verification faculty's DOM snapshot mechanism (sprint 011 [b]).
+// Cathode surface walk — the in-engine runtime-verification faculty's DOM snapshot mechanism.
 //
 // AUTHORED for Cathode's own verification intention (NOT lifted from any external harness): produce a
 // structured, deterministic snapshot of the rendered DOM — the element tree, each node's box geometry, and the
@@ -19,7 +19,7 @@
   // The computed-style CAPTURE SET — Cathode's own choice of which properties to snapshot for verification,
   // grouped by the concern each serves. This is capture-scope (what to record), a DISTINCT concern from the
   // CSS capability-contract (what litehtml supports — Cathode's own litehtml-grounded declaration, authored
-  // separately on the roadmap). Longhands are used where getComputedStyle resolves shorthands to them.
+  // separately in Authoring/). Longhands are used where getComputedStyle resolves shorthands to them.
   var STYLE_CAPTURE = [
     // flex layout (container + item)
     "display", "flex-direction", "flex-wrap", "flex-grow", "flex-shrink", "flex-basis",

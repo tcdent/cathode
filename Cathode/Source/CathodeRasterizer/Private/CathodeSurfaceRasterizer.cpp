@@ -11,7 +11,7 @@ namespace Cathode
 {
 
 #if WITH_DEV_AUTOMATION_TESTS
-// 028 S2 — the AT-THE-RASTER worker-thread marker (test-only): set INSIDE RasterizeFrame to the thread the Blend2D
+// The AT-THE-RASTER worker-thread marker (test-only): set INSIDE RasterizeFrame to the thread the Blend2D
 // raster genuinely runs on. GetLastRasterThreadId() reads it back (declared in CathodeRaster.h).
 namespace { TAtomic<uint32> GLastRasterThreadId{ 0 }; }
 uint32 GetLastRasterThreadId() { return GLastRasterThreadId.Load(); }
@@ -70,13 +70,14 @@ bool FSurfaceRasterizer::RasterizeFrame(const TArray<FPaintOp>& Ops)
 	if (Context.IsValid())
 	{
 #if WITH_DEV_AUTOMATION_TESTS
-		// 028 S2 at-the-raster marker: record the thread the Blend2D raster GENUINELY runs on (the real worker thread
-		// under (b); the game thread under the interim). Set-iff-the-raster-runs (so a no-compose leaves the prior/0).
+		// At-the-raster marker: record the thread the Blend2D raster GENUINELY runs on (the worker thread when the
+		// composition runs off the game thread; the game thread otherwise). Set-iff-the-raster-runs (so a no-compose
+		// leaves the prior/0).
 		GLastRasterThreadId = FPlatformTLS::GetCurrentThreadId();
 #endif
 		// RASTERIZE DIRTY REGIONS ONLY: clip to each dirty rect and redraw the ops within it, so only the
 		// changed sub-rectangles are re-rasterized — never the whole surface. Routes through the SAME
-		// DispatchPaintOps as Slice 4 (no fork).
+		// DispatchPaintOps entry as every other paint path (no fork).
 		for (const FIntRect& Dirty : DirtyRegion.GetRedrawRects())
 		{
 			Context->ClipToRect(ToBox2f(Dirty));
@@ -92,7 +93,7 @@ bool FSurfaceRasterizer::RasterizeFrame(const TArray<FPaintOp>& Ops)
 		return false; // no real change published -> no frame-ready
 	}
 
-	// OUTPUT SEAM: produce the published front-buffer bitmap + dirty rects and hand them off to (future)
+	// OUTPUT SEAM: produce the published front-buffer bitmap + dirty rects and hand them off to
 	// Surfaces / Texture Egress.
 	if (OnFrameReady)
 	{
@@ -108,7 +109,7 @@ bool FSurfaceRasterizer::RasterizeFrame(const TArray<FPaintOp>& Ops)
 	return true;
 }
 
-// The public producer factory (sprint 023) — the single out-of-module construction point. The concrete
+// The public producer factory — the single out-of-module construction point. The concrete
 // FSurfaceRasterizer (+ its FDoubleBuffer/FDirtyRegion) stay Private; the composition root gets only the
 // ISurfaceProducer behavior, the IRasterBackend/CreateBlend2DBackend idiom one layer up.
 TUniquePtr<ISurfaceProducer> CreateSurfaceRasterizer(IRasterBackend& Backend, int32 Width, int32 Height, const FRasterConfig& Config)

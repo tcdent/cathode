@@ -7,12 +7,11 @@
 #include "Containers/StringConv.h"
 #include "Interfaces/IPluginManager.h"
 
-// 019 slice 1 — the PRODUCTION read-mechanism IBundleSource (CreateUEFileBundleSource): a GENUINE FFileHelper disk
-// read of a committed fixture (NOT the in-memory FMemoryBundleSource). The gap (COVERAGE Deferred #3): no production
-// IBundleSource reads real bytes today.
+// The PRODUCTION read-mechanism IBundleSource (CreateUEFileBundleSource): a GENUINE FFileHelper disk
+// read of a committed fixture (NOT the in-memory FMemoryBundleSource) — see COVERAGE.md Deferred #3.
 //   - byte-EXACT: OutBytes == a HARDCODED distinct marker authored HERE -- NON-circular (NOT a 2nd FFileHelper read /
 //     re-seed, which would match its own wrong interpretation); NOT Contains (a Contains passes a partial/over-read).
-//   - STABLE FIXTURE BYTES (the WINDOWS-build-box trap): the fixture is a SINGLE-LINE, NO-trailing-newline, ASCII
+//   - STABLE FIXTURE BYTES (the Windows-checkout trap): the fixture is a SINGLE-LINE, NO-trailing-newline, ASCII
 //     marker (35 bytes) -> NO CRLF/LF/BOM ambiguity (git autocrlf could otherwise check out LF-as-CRLF -> a CORRECT
 //     read false-REDs); a scoped .gitattributes marks probe.txt -text (verbatim checkout). The content is
 //     NON-echoable from the bundle path ('probe.txt').
@@ -86,16 +85,16 @@ bool FCathodeResolverFileSourceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 019 slice 2 — THE RESOLVER OVER THE PRODUCTION BACKEND (the goal: "real asset bytes load THROUGH the resolver"
-// end-to-end). Test-only (CreateResourceResolver + CreateUEFileBundleSource both reused/committed — no new production
-// code). Slice 1 proved Read directly; slice 2 proves the RESOLVER routes a URL through the PRODUCTION backend to real
+// THE RESOLVER OVER THE PRODUCTION BACKEND (the goal: "real asset bytes load THROUGH the resolver"
+// end-to-end). Test-only (CreateResourceResolver + CreateUEFileBundleSource both reused — no extra production
+// code). The test above proves Read directly; this one proves the RESOLVER routes a URL through the PRODUCTION backend to real
 // bytes: ResolveBytes(url, baseUrl) -> ResolveUrlPath normalizes the url to the root-relative path -> the production
 // FFileHelper Read -> the real fixture bytes. byte-EXACT against the SAME hardcoded marker (non-circular, full-array ==),
 // through the production source (NOT the in-memory FMemoryBundleSource).
 // The URL is NON-TRIVIAL (genuinely exercises ResolveUrlPath, CathodeResolver.cpp:48-61 — NOT an identity pass-through):
 // "../probe.txt" vs base "sub/index.html" -> BaseDir="sub/" -> "sub/../probe.txt" -> CollapseSegments -> "probe.txt".
 // A resolver skipping base-resolution -> "../probe.txt" (wrong) -> miss -> RED; skipping the ".." collapse ->
-// "sub/../probe.txt" (wrong) -> miss -> RED. URL != resolved path (a genuine normalization, not slice-1's backend job).
+// "sub/../probe.txt" (wrong) -> miss -> RED. URL != resolved path (a genuine normalization, not the backend's job).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeResolverOverProductionTest,

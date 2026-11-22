@@ -5,15 +5,15 @@
 
 #include "Misc/AutomationTest.h"
 
-// 016 slice 1 — real Evaluate (JS_Eval, Global) against the REAL engine (CreateJsRuntime, NOT the recording mock).
+// Real Evaluate (JS_Eval, Global) against the REAL engine (CreateJsRuntime, NOT the recording mock).
 // FEvalResult carries NO value, so every proof is THROW-ON-SUCCESS: bThrew==TRUE carrying a read-back value the engine
-// COMPUTED (a bThrew==false assertion is VACUOUS — the stub returns bThrew=false for everything, including the check eval).
-// The COMPUTED-throw "42" (String(6*7); 42 is NOT a substring of the source) is the key proof + the fresh-binary marker:
-// a stale STUB binary returns bThrew=false -> the assert FAILS (RED); green => the real engine evaluated it.
+// COMPUTED (a bThrew==false assertion is VACUOUS — a stubbed Evaluate returns bThrew=false for everything, including the check eval).
+// The COMPUTED-throw "42" (String(6*7); 42 is NOT a substring of the source) is the key proof:
+// a stubbed Evaluate returns bThrew=false -> the assert FAILS (RED); green => the real engine evaluated it.
 //
-// MESSAGE FORM (grounded): TakePendingError reads JS_ToCString(exception) = the Error's toString ("Error: <message>"),
+// MESSAGE FORM: TakePendingError reads JS_ToCString(exception) = the Error's toString ("Error: <message>"),
 // NOT the bare .message — so the proofs assert Message.Contains(<computed value>), which still bites the stub (empty) AND
-// an echo (carries the SOURCE, e.g. "String(6*7)", never "42"). Flagged to the lead; TakePendingError is reused as-is.
+// an echo (carries the SOURCE, e.g. "String(6*7)", never "42").
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeRuntimeEvalTest,

@@ -1,6 +1,6 @@
 #include "CathodeBinding.h"
 
-// quickjs-ng — confined to this TU. Include path wired at the execution-approval sprint; no build this sprint.
+// quickjs-ng — confined to this TU.
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -31,7 +31,7 @@ FJsValue FCallableHandle::Call(JSValueConst ThisVal, TArrayView<const JSValue> A
 	// TODO-PREBUILD(signature): JS_Call(ctx, func_obj, this_obj, argc, argv) (quickjs.h:995). argv is
 	// JSValueConst* — whether JSValueConst aliases JSValue (and thus the const_cast below is exact) depends
 	// on the -ng build config (the const-checker variant). A thrown call returns JS_EXCEPTION, retrievable
-	// via 002's TakePendingError; the returned value is a new reference FJsValue takes ownership of.
+	// via CathodeRuntime's TakePendingError; the returned value is a new reference FJsValue takes ownership of.
 	JSValue Result = JS_Call(Context, Function.GetValue(), ThisVal,
 		Args.Num(), const_cast<JSValue*>(Args.GetData()));
 

@@ -3,7 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "ExampleGameBridge.h"          // CathodeExample::FExampleGameBridge — the reference host bridge under test
 #include "CathodeCompositionOwner.h"    // FCompositionSurfaceOwner / FCompositionSurfaceSpec — the registration point
-#include "CathodeSurfaces.h"            // 031 S2 — ECathodeInputIntent (the Cathode-owned intent vocabulary)
+#include "CathodeSurfaces.h"            // ECathodeInputIntent (the Cathode-owned intent vocabulary)
 #include "CathodeRuntimeModule.h"       // RestartWorkerForTesting (IN-SUITE)
 
 #include "Modules/ModuleManager.h"
@@ -17,16 +17,15 @@
 #include "RHICommandList.h"
 #include "RHIResources.h"
 
-// 031 SLICE 1 — THE game.* BRIDGE EXAMPLE PROOF (mutate-and-observe + the stub-swap discriminator). The reference host
+// THE game.* BRIDGE EXAMPLE PROOF (mutate-and-observe + the stub-swap discriminator). The reference host
 // FExampleGameBridge is REGISTERED into Cathode via the injecting Install; an author screen READS game.* (game.tickCount +
 // game.getEntityName) and renders it; the proof asserts the SCREEN reflects THIS host's live state. The stub-swap bite: a
 // DIFFERENT bridge value yields a DIFFERENT rendered result — a hardcoded/constant render passes a single-value check but REDs
 // the swap.
 //
-// NOTE (SLICE 1 scope): the screen here is the TEST-only INLINE bundle (FCompositionSurfaceSpec.InlineBundleJs). The faithful
-// SHIPPABLE reference screen is an AUTHORED .ts -> the 025 gate -> .iife.js read via BundlePath — the recommended integrator
-// path, flagged as the SLICE-1 authored-screen follow-on (it needs the Node gate + content staging, heavier than this C++
-// registration slice). The registration mechanism (the bridge + the injecting Install + the game.* projection) is faithful;
+// NOTE: the screen here is the TEST-only INLINE bundle (FCompositionSurfaceSpec.InlineBundleJs). The recommended integrator
+// path is an AUTHORED .ts -> the authoring gate -> .iife.js read via BundlePath; that needs the Node toolchain + content
+// staging, which this C++ registration proof does not exercise. The registration mechanism (the bridge + the injecting Install + the game.* projection) is faithful;
 // the inline screen is the proof's observation harness.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeExampleGameBridgeProofTest,
@@ -162,7 +161,7 @@ bool FCathodeExampleGameBridgeProofTest::RunTest(const FString& Parameters)
 #endif
 }
 
-// 031 SLICE 2 — THE INPUT-INTENT INVERSION PROOF (Cathode owns the contract). The example HOST delivers SEMANTIC intents into
+// THE INPUT-INTENT INVERSION PROOF (Cathode owns the contract). The example HOST delivers SEMANTIC intents into
 // Cathode (Owner.DesignateActiveSurface + Owner.DeliverIntent) — NOT a host port, NOT raw keys. Cathode owns the intent->key
 // map (CathodeIntentToKey) + routes to the active surface; the six intents fire the surface document keydown with the six
 // CANONICAL e.keys. The per-intent-map discriminator: each intent maps to its OWN canonical key (a constant/wrong map -> the

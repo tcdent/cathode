@@ -6,7 +6,7 @@
 
 // Specs for the BESPOKE URL-namespace logic + resolution over a neutral in-memory IBundleSource (INPUT
 // isolation — no real FS / UE asset). Assert OUR bookkeeping: normalization results + resolve hit/miss.
-// ZERO real-FS / real-UE-asset / real-decoded-bytes assertions. Authored, not run this sprint.
+// ZERO real-FS / real-UE-asset / real-decoded-bytes assertions.
 
 namespace
 {

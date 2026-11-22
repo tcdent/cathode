@@ -10,7 +10,7 @@
 // the shaper's hb_shape (and the shaped positions/ids/advances it produces) are vendor value, NEVER
 // asserted. The raw glyphs here are SCRIPTED OPAQUE INPUT (standing in for the vendor output); the specs
 // assert OUR mapping + scaling + cumulative-position math on them, not the input values as "the shaping
-// output". Authored, not run this sprint.
+// output".
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeTextFeatureMappingTest,

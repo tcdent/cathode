@@ -9,7 +9,7 @@ namespace Cathode
 
 bool MarshalAttributeValue(JSContext* Context, JSValueConst Value, FString& OutString)
 {
-	// Compose 007's bounded marshaling: classify, then convert the scalar vocabulary; reject everything else.
+	// Compose CathodeBinding's bounded marshaling: classify, then convert the scalar vocabulary; reject everything else.
 	switch (ClassifyJsValue(Context, Value))
 	{
 	case EJsValueKind::String:
@@ -22,7 +22,7 @@ bool MarshalAttributeValue(JSContext* Context, JSValueConst Value, FString& OutS
 		{
 			return false;
 		}
-		// Approximate; exact JS Number->String formatting is a validation-pass refinement.
+		// Approximate; exact JS Number->String formatting is not implemented.
 		OutString = FString::SanitizeFloat(Number);
 		return true;
 	}

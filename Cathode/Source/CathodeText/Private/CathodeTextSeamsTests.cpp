@@ -8,7 +8,7 @@
 // Specs for the measurement + glyph-run seams — both genuinely PRODUCED + populated off the ONE shaped
 // result (no stub/empty, no double-shape). A recording shaper supplies a scripted FShapedRun (opaque
 // input); the specs assert the seams extract its fields, and that ONE shape feeds BOTH seams. Never the
-// shaped positions as shaping output. Authored, not run this sprint.
+// shaped positions as shaping output.
 
 namespace
 {

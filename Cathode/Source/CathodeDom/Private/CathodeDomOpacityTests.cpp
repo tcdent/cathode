@@ -10,11 +10,11 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 014 slice 2 — opacity VALUE SIDE (CathodeComputed). litehtml does NOT parse opacity, so getComputedStyle sources it
+// opacity VALUE SIDE (CathodeComputed). litehtml does NOT parse opacity, so getComputedStyle sources it
 // Cathode-side by parsing the element's OWN inline value ON-DEMAND in QueryComputedValue. CSS computed-value rule =
 // clamp(<number> | <percentage>, [0,1]) serialized as a plain number; opacity does NOT inherit + initial = 1 -> UNSET = '1'.
-// NO rendering (the Blend2D group-compositing pipeline is integration-deferred). Proven on the 013 harness (REAL litehtml
-// engine + stub measurer + getComputedStyle). DISCRIMINATING, RELATIONAL:
+// NO rendering assertion here (value side only). Proven on the REAL litehtml
+// engine + stub measurer + getComputedStyle. DISCRIMINATING, RELATIONAL:
 //  - clamp/normalize (specified != computed -> parse-traced, not an echo): 1.5->'1', -0.2->'0', .5->'0.5', 90%->'0.9'.
 //  - unset -> '1' (the CSS initial; opacity does NOT inherit).
 //  - NON-INHERITANCE non-vacuous (SAME parent+child): (a) parent opacity:0.5 -> '0.5' (the parse WORKS) AND (b) child with
@@ -23,7 +23,7 @@ THIRD_PARTY_INCLUDES_END
 //    BY CONSTRUCTION (litehtml discards opacity + the parse reads El's OWN attr only) -- it CANNOT fail today. It is non-
 //    vacuous ONLY because the inline cases above show the parse DOES read inline values, so '1' here means own-inline-only,
 //    not a broken parse. It bites a FUTURE wrongly-added cascade/<style> read (the honest analog of letter-spacing's
-//    deferred-inheritance tripwire). The cascaded/stylesheet opacity is deferred with the rasterizer build-how.
+//    unimplemented-inheritance tripwire). Cascaded/stylesheet opacity is not implemented.
 
 namespace
 {

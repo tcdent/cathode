@@ -96,7 +96,7 @@ void FCathodeTick::DrainMicrotasks()
 		}
 	}
 
-	// 029 #18 — the drain is empty: the SETTLED boundary. Report the genuinely-unhandled author-JS rejections (the
+	// The drain is empty: the SETTLED boundary. Report the genuinely-unhandled author-JS rejections (the
 	// tracker's deferred survivors — is_handled=false, never-later-handled) to the diagnostic sink + clear. A later-caught
 	// rejection was already removed by the tracker's is_handled=true edge before now, so it does NOT surface here.
 	Runtime.ReportUnhandledRejections();
@@ -107,15 +107,15 @@ void FCathodeTick::RelayoutAndEmitFrames(double NowSeconds)
 	(void)NowSeconds;
 
 	// Delegated: the web-engine / Surfaces components do the actual relayout/raster. Runtime Core only
-	// sequences the call and emits whatever frame-ready notifications come back. Unset until those
-	// components are wired (Slice/sprint of their own) -> nothing to emit.
+	// sequences the call and emits whatever frame-ready notifications come back. Unset until the
+	// surface-load owner installs it -> nothing to emit.
 	if (!Relayout)
 	{
 		return;
 	}
 
 	TArray<FHostOutboundMessage> FrameReady;
-	Relayout(Runtime, FrameReady); // 028 S3 — pass the worker's runtime so the seam can build a real FDomDocument on the worker
+	Relayout(Runtime, FrameReady); // pass the worker's runtime so the seam can build a real FDomDocument on the worker
 	for (FHostOutboundMessage& Message : FrameReady)
 	{
 		Outbound.Enqueue(MoveTemp(Message)); // Runtime Core emits frame-ready outbound.

@@ -10,9 +10,9 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Sprint 012 DOM-completion remainder — the focus model (focus/blur/activeElement over the document's FocusedNodeId,
-// STATE-ONLY), the document accessors (body/documentElement), and namespaceURI (the slice-5 ns come-due reversal).
-// This CLOSES DOM-completion. Load-bearing: blur is ELEMENT-SCOPED (no-op if not the active element) + the ns
+// DOM-completion remainder — the focus model (focus/blur/activeElement over the document's FocusedNodeId,
+// STATE-ONLY), the document accessors (body/documentElement), and namespaceURI.
+// Load-bearing: blur is ELEMENT-SCOPED (no-op if not the active element) + the ns
 // set-site completeness (every element mint funnels through CreateElementNS, the single store site).
 
 namespace
@@ -102,7 +102,7 @@ bool FCathodeDomFocusTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ===== Document accessors — body / documentElement (S2 identity) =====
+// ===== Document accessors — body / documentElement (=== identity) =====
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomDocAccessorsTest,
 	"Cathode.Dom.Completion.DocumentAccessors",
@@ -135,7 +135,7 @@ bool FCathodeDomDocAccessorsTest::RunTest(const FString& Parameters)
 
 	// documentElement === the <html> root (RootWrapper = CreateElement('html')).
 	TestTrue(TEXT("document.documentElement === the <html> root"), EvalBool("document.documentElement === __html"));
-	// 028 body-seed: a fresh doc now SEEDS <body> (the mount contract), so document.body is the SEEDED element
+	// Body-seed: a fresh doc SEEDS <body> (the mount contract), so document.body is the SEEDED element
 	// (non-null) on a fresh doc — not null. document.body === the seeded <body> (identity), then the no-body
 	// accessor path preserved (remove the body -> null).
 	const FDomNodeId SeededBodyId = Doc->FindBody();
@@ -154,7 +154,7 @@ bool FCathodeDomDocAccessorsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// ===== namespaceURI — the come-due reversal; set-site completeness (every element mint stores the ns) =====
+// ===== namespaceURI — set-site completeness (every element mint stores the ns) =====
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomNamespaceTest,
 	"Cathode.Dom.Completion.NamespaceURI",
@@ -184,7 +184,7 @@ bool FCathodeDomNamespaceTest::RunTest(const FString& Parameters)
 	// createElement defaults to the HTML ns (the store site, via CreateElementNS).
 	TestTrue(TEXT("createElement('div').namespaceURI === the HTML ns"),
 		EvalBool("document.createElement('div').namespaceURI === 'http://www.w3.org/1999/xhtml'"));
-	// createElementNS STORES + reads back the passed ns (the slice-5 reversal — was accepted-but-dropped).
+	// createElementNS STORES + reads back the passed ns (an accepted-but-dropped ns FAILS).
 	TestTrue(TEXT("createElementNS(svg ns,'svg').namespaceURI === that ns (the come-due reversal)"),
 		EvalBool("document.createElementNS('http://www.w3.org/2000/svg','svg').namespaceURI === 'http://www.w3.org/2000/svg'"));
 	// A TEXT node has a null namespaceURI.

@@ -15,7 +15,7 @@ FShaperTextMeasurer::FShaperTextMeasurer(const FString& FontFilePath)
 
 FLayoutFontRef FShaperTextMeasurer::ResolveFont(const FString& /*Face*/, int32 PixelSize, int32 /*Weight*/, bool /*bItalic*/)
 {
-	// Slice 1: a single injected default font for any face (the catalog is deferred — no text rendered yet).
+	// A single injected default font for any face (there is no face-name -> font catalog).
 	// The PixelSize is respected so the measured metrics scale with the requested size.
 	FResolvedFont Entry;
 	Entry.Handle = DefaultFont;

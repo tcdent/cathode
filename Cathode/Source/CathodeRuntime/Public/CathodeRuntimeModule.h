@@ -3,7 +3,7 @@
 #include "Modules/ModuleInterface.h"
 #include "Templates/UniquePtr.h"
 
-#include "CathodeRuntimeSeam.h" // FSurfaceRelayoutSeam, FHostOutboundMessage (028 S2)
+#include "CathodeRuntimeSeam.h" // FSurfaceRelayoutSeam, FHostOutboundMessage
 
 namespace Cathode
 {
@@ -16,7 +16,7 @@ class FCathodeRuntimeWorker;
  * Owns the lifetime of the Cathode runtime worker (the single quickjs-ng runtime + its worker thread).
  * The module creates AND starts the worker on load (auto-start) and tears it down on unload, so the
  * ordered startup sequence — including the linked-native game-state attach — runs at module load rather
- * than lazily. The delegated components (surfaces, host bridge, DOM) are future sprints.
+ * than lazily. The delegated components (surfaces, host bridge, DOM) live in their own modules.
  */
 class FCathodeRuntimeModule final : public IModuleInterface
 {
@@ -27,8 +27,8 @@ public:
 	virtual void ShutdownModule() override;
 
 	/**
-	 * 028 S2 — the public seam-install + drain API (the worker is Private; this is the only production-reachable path
-	 * to it). The surface-load owner (CathodeComposition, S5) — and the S2 gate test — INSTALL the Phase-5 relayout
+	 * The public seam-install + drain API (the worker is Private; this is the only production-reachable path
+	 * to it). The surface-load owner (CathodeComposition) — and the real-worker tests — INSTALL the Phase-5 relayout
 	 * seam onto the auto-started worker, so the composition (litehtml + HarfBuzz + Blend2D) runs on the worker thread;
 	 * the game thread DRAINS the worker's frame-ready outbound to pump the egress upload half. Both forward to the
 	 * worker; no-op / 0 if no worker is live. Reach the module via
@@ -38,7 +38,7 @@ public:
 	CATHODERUNTIME_API int32 DrainOutbound(TArray<Cathode::FHostOutboundMessage>& Out);
 
 	/**
-	 * 028 S5 — post an arbitrary job onto the worker's inbound FIFO (run ON the worker thread, between ticks). The
+	 * Post an arbitrary job onto the worker's inbound FIFO (run ON the worker thread, between ticks). The
 	 * surface-load owner posts the per-surface FDomDocument::Dispose here at teardown — Dispose makes quickjs C-API
 	 * calls so it MUST run on the worker (the same FIFO mechanism InstallSurfaceRelayoutSeam uses for the seam-set).
 	 * No-op if no worker is live.
@@ -47,7 +47,7 @@ public:
 
 #if WITH_DEV_AUTOMATION_TESTS
 	/**
-	 * TEST-ONLY (sprint 011, finding-#1 unblock). Release the auto-started worker + its runtime so an
+	 * TEST-ONLY. Release the auto-started worker + its runtime so an
 	 * automation test can own the runtime lifecycle on its OWN thread (single-thread affinity). It runs the
 	 * EXACT production teardown via the shared TeardownWorker() helper below — no test-specific teardown that
 	 * could diverge from production. IDEMPOTENT. Auto-start (StartupModule) is UNCHANGED — this only RELEASES
@@ -57,14 +57,13 @@ public:
 	 */
 	void StopRuntimeForTesting();
 
-	// 028 S2 (#4) — restore the auto-started worker for an IN-SUITE real-worker test (the gate / the 026-via-worker
-	// gate-sweep). Earlier FScopedTestRuntime tests RELEASE the auto-started singleton (and do not re-start it — "a
+	// Restore the auto-started worker for an IN-SUITE real-worker test. Earlier FScopedTestRuntime tests RELEASE the auto-started singleton (and do not re-start it — "a
 	// fresh launch re-auto-starts", but the suite doesn't fresh-launch between tests), so by an in-suite real-worker
-	// test's turn NO worker is running -> the gate's condition-wait times out. RestartWorkerForTesting re-creates +
+	// test's turn NO worker is running -> the test's condition-wait times out. RestartWorkerForTesting re-creates +
 	// Starts the worker IF released (the single-instance claim is FREE post-release — the SAME path as the auto-start);
 	// restore-IF-released (no double-start when the worker is live, e.g. isolated). The PRODUCTION auto-start
-	// (StartupModule, tcdent's human-ruled gamma) is UNTOUCHED — this is a test-only RESTORE. IsWorkerRunningForTesting
-	// pins the release hypothesis (false in-suite, true isolated). CATHODERUNTIME_API: called cross-module by the device gate test.
+	// (StartupModule) is UNTOUCHED — this is a test-only RESTORE. IsWorkerRunningForTesting
+	// reports whether a worker is live (false in-suite after a release, true isolated). CATHODERUNTIME_API: called cross-module by the real-worker tests.
 	CATHODERUNTIME_API bool IsWorkerRunningForTesting() const;
 	CATHODERUNTIME_API void RestartWorkerForTesting();
 #endif

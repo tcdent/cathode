@@ -10,9 +10,9 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Specs for attribute/property access + the 007-backed value marshaling. Drive the C++ methods directly;
+// Specs for attribute/property access + the CathodeBinding-backed value marshaling. Drive the C++ methods directly;
 // assert OUR bookkeeping (round-trips, dirty-marks, converted values, exotic rejection). ZERO GC-internal /
-// refcount / real-layout assertions. Authored, not run this sprint.
+// refcount / real-layout assertions.
 
 namespace
 {
@@ -61,7 +61,7 @@ bool FCathodeDomAttributeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("getAttribute on a missing attr returns false"), El->GetAttribute(TEXT("missing"), Out));
 
 	// 'value' (get): reflects the value attribute (= defaultValue) when NOT dirtied — the forms dirty-value model.
-	// GetValue() now returns the live-or-default FString; the full live-vs-attribute behavior is in CathodeDomFormsTests.
+	// GetValue() returns the live-or-default FString; the full live-vs-attribute behavior is in CathodeDomFormsTests.
 	El->SetAttribute(TEXT("value"), TEXT("hello"));
 	TestEqual(TEXT("value getter reflects the value attribute (defaultValue) when not dirtied"), El->GetValue(), FString(TEXT("hello")));
 

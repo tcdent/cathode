@@ -1,4 +1,4 @@
-// Cathode CSS-selector matching — the SWAP-BOUNDARY interface (sprint 012 selectors).
+// Cathode CSS-selector matching — the SWAP-BOUNDARY interface.
 //
 // litehtml owns CSS-selector PARSING (css_selector::parse — no selector-set drift); the MATCH runs over the LIVE
 // retained DOM tree, NOT litehtml's per-layout throwaway element tree. This header is NEUTRAL by contract: it

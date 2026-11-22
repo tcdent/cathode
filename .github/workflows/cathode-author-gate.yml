@@ -1,12 +1,10 @@
-# 029 #29 — the Cathode author-build gate in CI (the repo's FIRST GitHub Actions workflow). Runs the self-contained
-# Authoring/ Node gate (tsc DOM/JS + css-tree CSS + esbuild IIFE) on every push/PR that touches Authoring/. `npm run gate`
-# EXIT-CODE-BITES: it exits non-zero on a banned authorship (a banned web API in a screen's .ts, an unsupported CSS
-# property in its .css, or the standing negative screens/banned/ not being rejected) -> this CI step goes RED. NOT a
-# clean-only CI.
+# The Cathode author-build gate in CI. Runs the self-contained Authoring/ Node gate (tsc DOM/JS + css-tree CSS +
+# esbuild IIFE) on every push/PR that touches Authoring/. `npm run gate` exits non-zero on a banned authorship (a banned
+# web API in a screen's .ts, an unsupported CSS property in its .css, or the standing negative screens/banned/ not being
+# rejected), which fails this workflow.
 #
-# SCOPE: the Node author-gate ONLY. The UE C++ automation suite is NOT runnable here — `make test` (game/Makefile:269-272)
-# assumes a RUNNING UnrealEditor reachable over MCP on a Windows box + a licensed UE install; a stock GitHub runner has
-# neither. Running the UE suite in CI is a separate, self-hosted-runner effort (a follow-on), deliberately NOT bundled here.
+# SCOPE: the Node author-gate ONLY. The UE C++ automation suite is not runnable here: it needs a Windows machine with a
+# licensed UE install, which a stock GitHub runner does not have. Running it in CI is a separate, self-hosted-runner effort.
 name: Cathode Author Gate
 
 on:
@@ -30,9 +28,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      # `npm ci` installs the committed lockfile (typescript + esbuild + css-tree); the box has no Node, so this is the
-      # dev-machine/CI channel the gate was designed for.
+      # `npm ci` installs the committed lockfile (typescript + esbuild + css-tree).
       - run: npm ci
-      # The gate. Exit 0 = PASS; non-zero = a banned authorship -> this step (and the CI) goes RED. The standing
+      # The gate. Exit 0 = PASS; non-zero = a banned authorship -> this step fails. The standing
       # screens/banned/ negative keeps the bite live: if the gate ever stops rejecting it, the gate exits non-zero here.
       - run: npm run gate

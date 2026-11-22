@@ -10,18 +10,18 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Specs for the Model A node-class + retained tree. Drive the REAL engine (like 007) and assert OUR
+// Specs for the node-class + retained tree. Drive the REAL engine (like the CathodeBinding tests) and assert OUR
 // bookkeeping — the wrapper-governed index (FindNode), the gc_mark visiting held child refs (our counting
 // mark func), and the finalizer de-registering + the FreeRT cascade reclaiming a sole-held child (index
-// bookkeeping, never GC internals). 007's observe hooks are private to CathodeBinding, so we count via our
-// own JS_MarkFunc + the index. Authored, not run this sprint.
+// bookkeeping, never GC internals). The binding observe hooks are private to CathodeBinding, so we count via our
+// own JS_MarkFunc + the index.
 
 namespace
 {
 using namespace Cathode;
 
-// A recording layout engine — the document only stores it this slice (no layout driven yet). Avoids pulling
-// in 005's real litehtml engine + a text measurer.
+// A recording layout engine — the document only stores it (no layout driven in these tests). Avoids pulling
+// in CathodeLayout's real litehtml engine + a text measurer.
 class FStubLayoutEngine final : public ILayoutEngine
 {
 public:

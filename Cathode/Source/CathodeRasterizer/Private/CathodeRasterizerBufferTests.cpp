@@ -9,7 +9,7 @@
 // Specs for the Rasterizer's BESPOKE bookkeeping: double-buffer state and pixel-format math. They drive
 // OUR logic through a RECORDING backend (no Blend2D, no pixels) and assert bookkeeping — buffer swap,
 // draw-targets-back, frame-ready-only-on-change, dims=surface, format/stride math. ZERO pixel/color
-// assertions; vendor rasterization is NOT tested. Authored, not run this sprint.
+// assertions; vendor rasterization is NOT tested.
 
 namespace
 {
@@ -62,7 +62,7 @@ public:
 
 	virtual TUniquePtr<IRasterContext> BeginContext(IRasterBitmap&, const FRasterConfig&) override
 	{
-		return nullptr; // draw session is Slice 4
+		return nullptr; // the draw session is not exercised by these specs
 	}
 };
 } // namespace

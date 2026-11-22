@@ -10,12 +10,12 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 013 slice 4 — the GATE-FLIP proof: getComputedStyle returns litehtml's REAL resolved values (QueryComputedValue); an
-// empty value (correct in 012/slice-1) is now a DEFECT. Each of the 17 litehtml-computed props carries its OWN
+// getComputedStyle returns litehtml's REAL resolved values (QueryComputedValue); an
+// empty value is a DEFECT. Each of the 17 litehtml-computed props carries its OWN
 // DISCRIMINATING specified!=computed fixture (so a wrong-source/echo read fails, not just the stub); opacity reads its
-// OWN-INLINE value (CathodeComputed, 014 slice 2 — was the lone empty boundary in 013/slice-1); font-family is RELATIONAL-TO-CAPTURE (a unique controlled face
+// OWN-INLINE value (CathodeComputed); font-family is RELATIONAL-TO-CAPTURE (a unique controlled face
 // round-trips input->Container-capture->read-back, env-independent -- no system font, the stub measurer does no matching).
-// Drives the REAL litehtml engine over a real FDomDocument; FORK-1: getComputedStyle is CathodeDom-side over the
+// Drives the REAL litehtml engine over a real FDomDocument; getComputedStyle is CathodeDom-side over the
 // engine-free FResolvedStyle (FString) seam.
 
 namespace
@@ -71,7 +71,7 @@ bool FCathodeDomComputedStyleTest::RunTest(const FString& Parameters)
 	const FJsValue A = MakeEl(Cont, TEXT("width:50%;height:50%"));                                                   // box + display/position/top/left
 	const FJsValue B = MakeEl(Cont, TEXT("margin:7px;padding:7px;border:2px solid black"));                          // box-model edges (css() absolute)
 	const FJsValue C = MakeEl(Cont, TEXT("color:#ff0000;background-color:#00ff00;text-align:center;visibility:hidden;opacity:0.5")); // color/enum/opacity
-	const FJsValue D = MakeEl(Cont, TEXT("font-size:1.5em;line-height:1.5;font-weight:bold;font-family:cathodeprobeface")); // font (b1)
+	const FJsValue D = MakeEl(Cont, TEXT("font-size:1.5em;line-height:1.5;font-weight:bold;font-family:cathodeprobeface")); // font
 
 	JSValue Global = JS_GetGlobalObject(Context);
 	JS_SetPropertyStr(Context, Global, "__a", JS_DupValue(Context, A.GetValue()));
@@ -80,7 +80,7 @@ bool FCathodeDomComputedStyleTest::RunTest(const FString& Parameters)
 	JS_SetPropertyStr(Context, Global, "__d", JS_DupValue(Context, D.GetValue()));
 	JS_FreeValue(Context, Global);
 
-	Doc->Relayout(800); // populate each node's FResolvedStyle from the REAL QueryComputedValue (the gate flip)
+	Doc->Relayout(800); // populate each node's FResolvedStyle from the REAL QueryComputedValue
 
 	auto Gcs = [&](const char* Expr) -> bool
 	{
@@ -109,8 +109,7 @@ bool FCathodeDomComputedStyleTest::RunTest(const FString& Parameters)
 	// ENUMS -> litehtml's computed keyword (not the echoed attr).
 	TestTrue(TEXT("text-align: center -> 'center'"), Gcs("getComputedStyle(__c)['text-align'] === 'center'"));
 	TestTrue(TEXT("visibility: hidden -> 'hidden'"), Gcs("getComputedStyle(__c)['visibility'] === 'hidden'"));
-	// OPACITY -> '0.5' (014 slice 2 FLIP: was '' build-how-pending; now CathodeComputed parses __c's OWN opacity:0.5).
-	// THE FRESH-BINARY MARKER for slice 2 — a STALE binary returns '' here and FAILS (the behavior flip, not a name-set change).
+	// OPACITY -> '0.5' (CathodeComputed parses __c's OWN opacity:0.5; an unimplemented read returns '' here and FAILS).
 	TestTrue(TEXT("opacity: 0.5 -> '0.5' (CathodeComputed own-inline; 014 slice 2 flip from '')"), Gcs("getComputedStyle(__c)['opacity'] === '0.5'"));
 	// FONT -> resolved px / numeric; font-family relational-to-capture (round-trip, env-independent).
 	TestTrue(TEXT("font-size: 1.5em of 16px -> '24px' (resolved px)"), Gcs("getComputedStyle(__d)['font-size'] === '24px'"));

@@ -12,8 +12,8 @@ THIRD_PARTY_INCLUDES_END
 
 // Specs for the bounded structural API + dirty-mark on mutation. Drive the C++ DOM methods DIRECTLY (the
 // engine interface is the surface — no JS-method registration). Assert OUR bookkeeping: the tree structure
-// via the tree reads, the reference-drop, and that EACH mutation fires 005's MarkNodeDirty (recorded by the
-// stub layout engine). ZERO GC-internal / refcount / real-layout assertions. Authored, not run this sprint.
+// via the tree reads, the reference-drop, and that EACH mutation fires CathodeLayout's MarkNodeDirty (recorded by the
+// stub layout engine). ZERO GC-internal / refcount / real-layout assertions.
 
 namespace
 {
@@ -119,7 +119,7 @@ bool FCathodeDomDirtyMarkTest::RunTest(const FString& Parameters)
 	FDomNode* Parent = Doc->NodeFromWrapper(ParentW);
 	const FDomNodeId ParentId = IdOf(*Doc, ParentW);
 
-	// 028 body-seed: the ctor seeded head+body (2 AppendChild Structure dirty-marks at construction). createElement
+	// Body-seed: the ctor seeded head+body (2 AppendChild Structure dirty-marks at construction). createElement
 	// above does NOT dirty-mark, so the only marks present are the seed's — clear them so this test measures ONLY its
 	// own mutations below.
 	Layout.DirtyMarks.Reset();

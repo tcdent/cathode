@@ -2,7 +2,7 @@
 
 #include "Containers/StringConv.h"
 
-// quickjs-ng — confined to this TU. Include path wired at the execution-approval sprint; no build this sprint.
+// quickjs-ng — confined to this TU.
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END

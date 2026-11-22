@@ -25,11 +25,11 @@ public:
 
 	bool IsValid() const { return DoubleBuffer.IsValid(); }
 
-	/** Wire the output seam future Surfaces / Texture Egress consume (the produced bitmap + dirty rects). */
+	/** Wire the output seam Surfaces / Texture Egress consume (the produced bitmap + dirty rects). */
 	virtual void SetFrameReadySeam(FFrameReadySeam Seam) override { OnFrameReady = MoveTemp(Seam); }
 
 	/** Rasterize one frame from the input ops. Returns true iff a frame was produced + handed off (a real
-	 *  change occurred). Routes through the SAME DispatchPaintOps as Slice 4 — no re-implementation. */
+	 *  change occurred). Routes through the SAME DispatchPaintOps entry — no re-implementation. */
 	virtual bool RasterizeFrame(const TArray<FPaintOp>& Ops) override;
 
 	const FRasterConfig& GetConfig() const { return Config; }

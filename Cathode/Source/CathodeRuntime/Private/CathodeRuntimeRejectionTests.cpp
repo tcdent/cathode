@@ -11,7 +11,7 @@
 
 #include "Misc/AutomationTest.h"
 
-// 029 #18 — author-JS unhandled-rejection -> host Sink: the discriminating pair. The host promise-rejection tracker
+// Author-JS unhandled-rejection -> host Sink: the discriminating pair. The host promise-rejection tracker
 // (JS_SetHostPromiseRejectionTracker, fire-decision on the is_handled BOOL — NOT JS_ExecutePendingJob's tri-state return,
 // the wrong channel: a throwing-but-CAUGHT .then returns 1/Executed) routes a GENUINELY-unhandled rejection to the
 // diagnostic sink, DEFERRED to the tick's drain-to-empty (the settled boundary). The pair: a genuinely-unhandled rejection
@@ -73,7 +73,7 @@ bool FCathodeUnhandledRejectionTest::RunTest(const FString& Parameters)
 		TEXT("<rejection-test>"), EEvalKind::Global);
 	TestFalse(TEXT("[029-#18] the setup script itself does not throw"), R.bThrew);
 
-	// Drive the PRODUCTION drain (FCathodeTick::Tick -> DrainMicrotasks, which now calls ReportUnhandledRejections at the
+	// Drive the PRODUCTION drain (FCathodeTick::Tick -> DrainMicrotasks, which calls ReportUnhandledRejections at the
 	// settled boundary). The drain settles every continuation (the later .catch RUNS) BEFORE the report -> the later-caught
 	// is removed (is_handled=true) before its rejection could surface.
 	FCathodeTick Tick(Runtime.Get(), Clock, Affinity, Inbound, Outbound, Scheduler, NoRelayout, &Sink);

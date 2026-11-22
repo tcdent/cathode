@@ -7,7 +7,7 @@
 
 // Specs for the Rasterizer's dirty-region tracking — entirely OUR logic, no vendor, no pixels. They drive
 // the real FDirtyRegion and assert the set/merge/clamp/empty-after-flush invariants directly (design
-// invariants). Authored, not run this sprint.
+// invariants).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeRasterizerDirtyCoalesceTest,

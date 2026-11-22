@@ -14,8 +14,7 @@
 // Specs for Runtime Core's BESPOKE safety logic: the interrupt-budget ABORT POLICY and the error-
 // routing path. These are STABILITY / parent-isolation guards for trusted code (no attack surface) —
 // the tests assert the abort DECISION and the routing OUTCOME, not vendor enforcement (the engine
-// actually interrupting / enforcing memory/stack is the execution sprint's behavioural proof).
-// Authored, not run this sprint.
+// actually interrupting / enforcing memory/stack is not asserted here).
 
 namespace
 {

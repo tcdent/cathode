@@ -2,8 +2,7 @@
 
 #include "CathodeBindingTestHooks.h"
 
-// quickjs-ng — confined to this TU (and the other CathodeBinding impls). The include path is wired by the
-// execution-approval sprint's build; no build runs this sprint.
+// quickjs-ng — confined to this TU (and the other CathodeBinding impls).
 THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
@@ -133,7 +132,7 @@ JSValue FJsValue::Release()
 void FJsValue::Mark(JSRuntime* Runtime, JS_MarkFunc* MarkFunc) const
 {
 	// gc_mark visibility: let the collector traverse this held ref so a cross-heap cycle can be reclaimed
-	// (Model A). Marking does not transfer or release ownership.
+	// (JS-refcount-governed lifetime). Marking does not transfer or release ownership.
 	// TODO-PREBUILD(signature): JS_MarkValue(rt, val, mark_func) (quickjs.h:511); JS_MarkFunc (quickjs.h:510).
 	if (Context != nullptr)
 	{

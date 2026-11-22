@@ -13,9 +13,9 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 // Specs for FJsValue's BESPOKE refcount-RAII semantics (copy dups, move transfers, scope frees, Release
-// hands off). Like 002's lifecycle tests they drive the REAL engine (CreateJsRuntime + a real ref-counted
+// hands off). Like CathodeRuntime's lifecycle tests they drive the REAL engine (CreateJsRuntime + a real ref-counted
 // JSValue) and assert OUR bookkeeping — the dup/free CALL COUNTS via the observe hooks — NEVER quickjs-ng's
-// internal refcount (vendor GC state). Authored, not run this sprint; pass by construction at execution.
+// internal refcount (vendor GC state).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeBindingJsValueRaiiTest,

@@ -8,7 +8,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 
-// 025 S2 — the CSS allow-list codegen driver + guards (Model A, OFF litehtml — same shape as the S1 .d.ts). The
+// The CSS allow-list codegen driver + guards (OFF litehtml — same shape as the .d.ts codegen). The
 // regenerate writes BOTH css-allow-list.toml (build/linter) AND CathodeCssAllowListGenerated.cpp (the baked runtime
 // array); the coherence asserts committed==regen for BOTH; the +2/-7 guards are the ENGINE SUBTRACTION (bound to
 // ParseLitehtmlPropertyNames — non-circular), since the coherence alone does NOT catch a wrong exclusion.
@@ -28,9 +28,8 @@ namespace
 	FString CssAllowListCppPath()  { const FString D = PluginBaseDir(); return D.IsEmpty() ? FString() : (D / TEXT("Source/CathodeDom/Private/CathodeCssAllowListGenerated.cpp")); }
 	FString CssPropertiesHPath()   { const FString D = PluginBaseDir(); return D.IsEmpty() ? FString() : (D / TEXT("Source/ThirdParty/litehtml/include/litehtml/css_properties.h")); }
 
-	// Extract css_properties.h computed-member identifiers (m_<name>). RELOCATED from CathodeDomCssCapabilityTests at 025 S3
-	// (the mirror retired): the member set CROSS-CHECKS the 3 parse-but-not-computed exclusions (font-variant/counter-reset/
-	// counter-increment) stay member-LESS — a litehtml-RECLASSIFICATION trigger (NOT covered by the -7 guard, which only
+	// Extract css_properties.h computed-member identifiers (m_<name>). The member set CROSS-CHECKS that the 3
+	// parse-but-not-computed exclusions (font-variant/counter-reset/counter-increment) stay member-LESS — a litehtml-RECLASSIFICATION trigger (NOT covered by the -7 guard, which only
 	// proves they're real litehtml NAMES). A member DECLARATION is "<type> m_<name>;" (token followed by ';', not '(').
 	void ParseCssPropertyMembers(const FString& Header, TSet<FString>& Out)
 	{
@@ -84,7 +83,7 @@ bool FCathodeCssAllowListCoherenceTest::RunTest(const FString& Parameters)
 	{
 		FString Committed;
 		if (!FFileHelper::LoadFileToString(Committed, *Path)) { AddError(FString::Printf(TEXT("[025-S2] could not read committed %s"), *Path)); return; }
-		Committed.ReplaceInline(TEXT("\r\n"), TEXT("\n")); // git autocrlf on the box -> compare content, not EOL
+		Committed.ReplaceInline(TEXT("\r\n"), TEXT("\n")); // git autocrlf on Win64 -> compare content, not EOL
 		const bool bMatch = Committed.Equals(Regen, ESearchCase::CaseSensitive);
 		AddInfo(FString::Printf(TEXT("[025-S2] coherence %s: committed=%d regen=%d match=%d"), Label, Committed.Len(), Regen.Len(), bMatch ? 1 : 0));
 		TestTrue(FString::Printf(TEXT("[025-S2] the committed %s == the regeneration off litehtml (a string_id.h add/remove flows through; a stale commit REDs)"), Label), bMatch);
@@ -132,7 +131,7 @@ bool FCathodeCssAllowListGuardsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// --- THE BAKED RUNTIME SET == the projection (the committed .cpp's array == litehtml -7 +2; S3 reads this baked set) ---
+// --- THE BAKED RUNTIME SET == the projection (the committed .cpp's array == litehtml -7 +2; IsDeclaredCssProperty reads this baked set) ---
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCathodeCssAllowListRuntimeSetTest, "Cathode.Authoring.CssAllowList.RuntimeSet",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FCathodeCssAllowListRuntimeSetTest::RunTest(const FString& Parameters)
@@ -148,10 +147,10 @@ bool FCathodeCssAllowListRuntimeSetTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// --- THE EXCLUSION MEMBER CROSS-CHECK (RELOCATED from the 013 capability coherence test at 025 S3, mirror retired) ---
+// --- THE EXCLUSION MEMBER CROSS-CHECK ---
 // The 3 parse-but-not-computed exclusions (font-variant, counter-reset, counter-increment) are REAL litehtml parse names
 // (the -7 guard proves that) but must stay MEMBER-LESS in css_properties.h — if litehtml ever adds a computed member for
-// one, its exclusion needs reclassification review. css_properties.h-based, mirror-independent (survives the S3 retire).
+// one, its exclusion needs reclassification review. css_properties.h-based.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCathodeCssAllowListExclusionMembersTest, "Cathode.Authoring.CssAllowList.ExclusionMembers",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FCathodeCssAllowListExclusionMembersTest::RunTest(const FString& Parameters)

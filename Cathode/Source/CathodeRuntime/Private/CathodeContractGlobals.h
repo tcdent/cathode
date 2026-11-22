@@ -16,7 +16,7 @@ class ICathodeClock;
 class FGlobalEnvironment;
 class FInterruptBudget;
 
-// Sprint 012 slice 4 — the standard globals (console + timers/rAF) binding.
+// The standard globals (console + timers/rAF) binding.
 //
 // The C++ backings the bare global thunks recover AT CALL TIME via JS_GetContextOpaque — globals have no
 // 'this' object to carry an opaque, so the context opaque is the channel (the globals analog of the DOM's
@@ -59,8 +59,8 @@ struct FContractStartupDeps
 	FCathodeScheduler* Scheduler = nullptr;
 };
 
-// THE ONE production startup-steps construction (011 postmortem #3 forward-seam, now due): the worker's Run()
-// AND the slice-4 reachability test build their FRuntimeStartup steps via THIS — never a forked
+// THE ONE production startup-steps construction: the worker's Run()
+// AND the globals reachability test build their FRuntimeStartup steps via THIS — never a forked
 // re-implementation. The AssembleGlobals step runs AssembleContractGlobals on the live context, so a test
 // that drives these steps drives the PRODUCTION install (would-it-pass-if-the-install-were-test-only = NO).
 FRuntimeStartup::FSteps BuildContractStartupSteps(FContractStartupDeps Deps);

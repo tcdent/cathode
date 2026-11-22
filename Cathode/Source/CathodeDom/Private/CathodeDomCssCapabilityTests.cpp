@@ -2,7 +2,7 @@
 
 #include "CathodeDom.h"
 #include "CathodeCssCapability.h"
-#include "CathodeCssAllowList.h" // 025 S2 — the moved enumeration (ParseLitehtmlPropertyNames, CssAuditedExclusions, CssCathodeComputed); single-sourced here, no longer duplicated below
+#include "CathodeCssAllowList.h" // the single-sourced enumeration (ParseLitehtmlPropertyNames, CssAuditedExclusions, CssCathodeComputed)
 #include "CathodeJsRuntime.h"
 #include "CathodeRuntimeTesting.h"
 
@@ -16,13 +16,11 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 // The CSS capability declaration's BEHAVIOR-PRESERVATION proof + the element.style ACCEPT-AND-IGNORE proof.
-// 025 S3: the hand-authored mirror is RETIRED; IsDeclaredCssProperty now reads the BAKED engine-derived set
-// (CathodeCssAllowListGenerated, litehtml -7 +2). The former mirror-coherence tests (Coherence + CompletenessBites) are
-// retired — their litehtml-coherence is SUBSUMED by S2's CathodeCssAllowListTests (committed==regen + the +2/-7 guards),
-// and the member cross-check relocated there. What remains here:
-//  - BehaviorPreservation: IsDeclaredCssProperty (now baked-backed) accepts EXACTLY the litehtml -7 +2 set, property-by-
-//    property (every 110 accepted; the 7 + a never-name rejected; the +2/-7 edges; CaseSensitive preserved). The old
-//    mirror == that same set (S2's committed coherence), so the re-point is behavior-identical.
+// IsDeclaredCssProperty reads the BAKED engine-derived set (CathodeCssAllowListGenerated, litehtml -7 +2). The
+// litehtml-coherence of that baked set (committed==regen + the +2/-7 guards) and the exclusion member cross-check live
+// in CathodeCssAllowListTests. Here:
+//  - BehaviorPreservation: IsDeclaredCssProperty (baked-backed) accepts EXACTLY the litehtml -7 +2 set, property-by-
+//    property (every 110 accepted; the 7 + a never-name rejected; the +2/-7 edges; CaseSensitive preserved).
 //  - Validation: the element.style accept-and-ignore drives IsDeclaredCssProperty through the REAL JS path (the live proof).
 
 namespace
@@ -48,33 +46,23 @@ FString CathodePluginDir()
 	return Plugin.IsValid() ? Plugin->GetBaseDir() : FString();
 }
 
-// ParseManifestCssNames + ParseLitehtmlPropertyNames retired/moved at 025 S2: the manifest is retired (Model B), and
-// ParseLitehtmlPropertyNames now lives in CathodeCssAllowList (the production codegen home, included above) — single-sourced.
-
-// ParseCssPropertyMembers + the 3-parse-but-not-computed member cross-check RELOCATED to CathodeCssAllowListTests at
-// 025 S3 (the exclusions' new home) — it's css_properties.h-based, mirror-independent; it survives the mirror retire there.
-
-// CssAuditedExclusions moved to CathodeCssAllowList at 025 S2 (the production codegen home, included above) — single-sourced.
-
-// THE INVERTED ORACLE: present = string_id.h:163-295 parse-names MINUS the audited exclusions (calls the moved
-// ParseLitehtmlPropertyNames + CssAuditedExclusions). This is the 108-name Present oracle (NO +2) — kept test-local
-// because it checks the mirror's Present PARTITION (108), distinct from the codegen's full allow-list set (110 = 108 + 2).
+// THE INVERTED ORACLE: present = string_id.h:163-295 parse-names MINUS the audited exclusions (calls CathodeCssAllowList's
+// ParseLitehtmlPropertyNames + CssAuditedExclusions, the production codegen home). This is the 108-name Present oracle
+// (NO +2), distinct from the codegen's full allow-list set (110 = 108 + 2).
 void DeriveCssPresentSet(const FString& StringIdH, TSet<FString>& Out)
 {
 	ParseLitehtmlPropertyNames(StringIdH, Out);
 	for (const FString& Ex : CssAuditedExclusions()) { Out.Remove(Ex); }
 }
 
-// The 2 forward-declared non-litehtml props (opacity, letter-spacing) moved to CathodeCssAllowList at 025 S2 as
-// CssCathodeComputed (the production codegen home, included above) — single-sourced; the test references it below.
+// The 2 non-litehtml props (opacity, letter-spacing) are CathodeCssAllowList's CssCathodeComputed (single-sourced).
 } // namespace
 
-// ===== BEHAVIOR PRESERVATION (025 S3): IsDeclaredCssProperty now reads the BAKED engine-derived set (mirror retired).
+// ===== BEHAVIOR PRESERVATION: IsDeclaredCssProperty reads the BAKED engine-derived set.
 // Re-derive litehtml -7 +2 IN the test (build-time, string_id.h present -- NOT a runtime re-parse; PRODUCTION reads the
 // baked accessor) and assert IsDeclaredCssProperty accepts EXACTLY that set PROPERTY-BY-PROPERTY (every 110 accepted; the
 // 7 + a never-name rejected; the +2/-7 edges; CaseSensitive preserved). SET-equality, NOT count==110 -- a different 110
-// would fail the per-name checks. The old mirror == that same set (S2's committed coherence), so the re-point is
-// behavior-identical (the SOURCE moved mirror->baked, the accepted SET did not). =====
+// would fail the per-name checks. =====
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeCssCapabilityBehaviorPreservationTest,
 	"Cathode.Css.Capability.BehaviorPreservation",
@@ -91,7 +79,7 @@ bool FCathodeCssCapabilityBehaviorPreservationTest::RunTest(const FString& Param
 	if (!FFileHelper::LoadFileToString(StringIdH, *StringIdPath)) { AddError(FString::Printf(TEXT("could not read %s"), *StringIdPath)); return false; }
 
 	// The reference set == litehtml -7 (DeriveCssPresentSet) + the 2 cathode_computed = litehtml -7 +2 (110). The SAME
-	// projection the S2 codegen bakes (CathodeCssAllowListGenerated) and the SAME set the retired mirror held.
+	// projection the codegen bakes (CathodeCssAllowListGenerated).
 	TSet<FString> Expected;
 	DeriveCssPresentSet(StringIdH, Expected);                         // litehtml - 7 = 108
 	for (const FString& C : CssCathodeComputed()) { Expected.Add(C); } // + 2 = 110
@@ -112,7 +100,7 @@ bool FCathodeCssCapabilityBehaviorPreservationTest::RunTest(const FString& Param
 		TestFalse(FString::Printf(TEXT("[025-S3] excluded '%s' is REJECTED by IsDeclaredCssProperty"), *Ex), IsDeclaredCssProperty(Ex));
 	}
 
-	// THE EXPLICIT EDGES -- the two a raw-set re-point would silently change, plus member/non-member controls:
+	// THE EXPLICIT EDGES -- the two a raw litehtml-name set would get wrong, plus member/non-member controls:
 	TestTrue(TEXT("[025-S3] +2 edge: 'opacity' ACCEPTED (cathode_computed -- NOT a litehtml parse name)"), IsDeclaredCssProperty(TEXT("opacity")));
 	TestTrue(TEXT("[025-S3] +2 edge: 'letter-spacing' ACCEPTED (cathode_computed)"), IsDeclaredCssProperty(TEXT("letter-spacing")));
 	TestTrue(TEXT("[025-S3] member: 'color' ACCEPTED (a litehtml parse name)"), IsDeclaredCssProperty(TEXT("color")));
@@ -121,17 +109,17 @@ bool FCathodeCssCapabilityBehaviorPreservationTest::RunTest(const FString& Param
 	TestFalse(TEXT("[025-S3] non-member: 'grid-template-columns' REJECTED (never a litehtml parse name)"), IsDeclaredCssProperty(TEXT("grid-template-columns")));
 	TestFalse(TEXT("[025-S3] non-member: 'foobar' REJECTED (not a property)"), IsDeclaredCssProperty(TEXT("foobar")));
 
-	// CASE-SENSITIVITY preserved (the re-point kept ESearchCase::CaseSensitive; a TSet<FString> default would FLIP to
-	// IgnoreCase): an UPPERCASED declared name is NOT accepted -- exactly as the old mirror's CaseSensitive scan.
+	// CASE-SENSITIVITY (the lookup is ESearchCase::CaseSensitive; a TSet<FString> default would FLIP to
+	// IgnoreCase): an UPPERCASED declared name is NOT accepted.
 	TestFalse(TEXT("[025-S3] case-sensitive: 'COLOR' is NOT accepted (CaseSensitive preserved -- not flipped to IgnoreCase)"), IsDeclaredCssProperty(TEXT("COLOR")));
 
-	// EVIDENCE (AddInfo prints on PASS — the per-point proof in the log, like S1/S2; the assertions above are the gate).
+	// EVIDENCE (AddInfo prints on PASS — the per-point proof in the log; the assertions above are the test).
 	AddInfo(FString::Printf(TEXT("[025-S3] behavior-preservation PROVEN: %d/%d declared names ACCEPTED property-by-property; all %d audited exclusions REJECTED; edges OK (opacity+letter-spacing ACCEPTED, color+display ACCEPTED, font-variant+grid-template-columns+foobar REJECTED, 'COLOR' REJECTED [CaseSensitive]) -- baked set == the retired mirror's accepted set"),
 		Accepted, Expected.Num(), CssAuditedExclusions().Num()));
 	return true;
 }
 
-// ===== element.style ACCEPT-AND-IGNORE (fork-3): unsupported write does NOT reach the canonical 'style' attribute =====
+// ===== element.style ACCEPT-AND-IGNORE: unsupported write does NOT reach the canonical 'style' attribute =====
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeCssCapabilityValidationTest,
 	"Cathode.Css.Capability.Validation",
@@ -172,7 +160,7 @@ bool FCathodeCssCapabilityValidationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("setProperty('grid-gap',...) (unsupported) is DROPPED — absent from the style attribute"),
 		EvalBool("(function(){ __el.style.setProperty('grid-gap','10px'); return (__el.getAttribute('style')||'').indexOf('grid')<0; })()"));
 
-	// CUSTOM properties (--x, the var() theming) stay ACCEPTED (not regressed by the gate).
+	// CUSTOM properties (--x, the var() theming) stay ACCEPTED (not dropped by the declared-name filter).
 	TestTrue(TEXT("custom property '--brand' is accepted (var() theming) — reaches the style attribute"),
 		EvalBool("(function(){ __el.style.setProperty('--brand','#0af'); return (__el.getAttribute('style')||'').indexOf('--brand')>=0; })()"));
 
@@ -180,10 +168,10 @@ bool FCathodeCssCapabilityValidationTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("cssText filters unsupported: 'color:red;grid-area:x' keeps color, drops grid"),
 		EvalBool("(function(){ __el.style.cssText='color:red;grid-area:foo'; var s=__el.getAttribute('style')||''; return s.indexOf('color')>=0 && s.indexOf('grid')<0; })()"));
 
-	// SELF-GUARD — the BREAKING GEOMETRY (review): a cssText with MULTIPLE declared props INCLUDING font-size. The prior
-	// cssText case (color+grid-area, one declared/one unsupported) structurally could NOT see a declared prop dropped or
-	// re-serialized; the multi-declared-incl-font-size cell lived only in 012's ElementStyle. Now it is IN the slice's own proof.
-	// (5a) all-declared multi-prop round-trips VERBATIM — color AND font-size both survive, exact serialization (the cell that broke).
+	// SELF-GUARD — the BREAKING GEOMETRY: a cssText with MULTIPLE declared props INCLUDING font-size. The
+	// cssText case above (color+grid-area, one declared/one unsupported) structurally can NOT see a declared prop dropped or
+	// re-serialized.
+	// (5a) all-declared multi-prop round-trips VERBATIM — color AND font-size both survive, exact serialization.
 	TestTrue(TEXT("cssText multi-declared incl font-size round-trips VERBATIM (color AND font-size survive, exact bytes)"),
 		EvalBool("(function(){ __el.style.cssText='color:red;font-size:12px'; return __el.getAttribute('style')==='color:red;font-size:12px' && __el.style.color==='red' && __el.style.fontSize==='12px'; })()"));
 	// (5b) mixed: declared (color+font-size) + custom (--brand) KEPT, unsupported (grid-area) FILTERED — declared admitted, drop preserved.

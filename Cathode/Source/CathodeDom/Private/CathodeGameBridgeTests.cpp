@@ -34,10 +34,10 @@ public:
 };
 } // namespace
 
-// 029 #28 — the game.* HOST BRIDGE reachability + stub-swap proof. InstallGameBridgeAsGlobal is the PRODUCTION install
+// The game.* HOST BRIDGE reachability + stub-swap proof. InstallGameBridgeAsGlobal is the PRODUCTION install
 // function the composer calls (CathodeCompositionOwner, beside FDomDocument::InstallAsGlobal); this drives it directly on a
 // real runtime (the document-precedent test shape — DOM tests call Doc->InstallAsGlobal() directly too). The codegen
-// coherence (Cathode.Authoring.Dts.Coherence/.Guards, now extended to game) proves the OTHER half: the .d.ts game.* ==
+// coherence (Cathode.Authoring.Dts.Coherence/.Guards, which cover game) proves the OTHER half: the .d.ts game.* ==
 // the GGameMembers table the install reads -> reachability == .d.ts BY CONSTRUCTION (one table, no second list).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeGameBridgeReachabilityTest,
@@ -69,7 +69,7 @@ bool FCathodeGameBridgeReachabilityTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("[029-#28] STUB-SWAP: game.tickCount now reads the SWAPPED backing (99, not the stub's 42)"), EvalInt(Ctx, "game.tickCount === 99 ? 1 : 0"), 1);
 	TestEqual(TEXT("[029-#28] STUB-SWAP: game.getEntityName now reads the SWAPPED backing ('swapped:x', not 'stub:x')"), EvalInt(Ctx, "game.getEntityName('x') === 'swapped:x' ? 1 : 0"), 1);
 	// The discriminator: a bridge hardcoded to the stub stays 42/'stub:x' here. The flip to 99/'swapped:x' proves the
-	// install binds the HANDED-IN backing -> "the bridge works when a real object is handed to it" (the sim wires in later).
+	// install binds the HANDED-IN backing -> "the bridge works when a real object is handed to it".
 
 	AddInfo(TEXT("[029-#28] game.* host bridge: reachable on the live context, both member kinds bound to the backing, stub-swappable"));
 	return true;

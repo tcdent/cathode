@@ -6,7 +6,7 @@ namespace Cathode
 {
 
 /**
- * The LINK-TIME build-id of CathodeRuntime itself (sprint 011 coherence-hardening), read from
+ * The LINK-TIME build-id of CathodeRuntime itself, read from
  * CathodeRuntime.dll's own loaded PE image (PE TimeDateStamp + CodeView PDB GUID) — it advances on ANY relink
  * of CathodeRuntime. Emitted in the [CATHODE-BUILD-SIGNATURE] marker at plugin load as CathodeRuntime's
  * per-load signature. Reads this module's own image regardless of the caller (the FROM_ADDRESS is the function
@@ -15,7 +15,7 @@ namespace Cathode
 CATHODERUNTIME_API FString CathodeLinkTimeBuildId();
 
 /**
- * The CROSS-MODULE aggregate coherence anchor ([c]-prep hardening): a LIVE read, at call time, of EVERY
+ * The CROSS-MODULE aggregate coherence anchor: a LIVE read, at call time, of EVERY
  * currently-loaded Cathode* module's PE link-id (same per-module mechanism as CathodeLinkTimeBuildId), folded
  * (sorted by module name) into one string `Name=link:..;...`. A relink of ANY Cathode module changes its
  * segment, so the aggregate advances — closing the cross-module gap the single-module build-id leaves (it

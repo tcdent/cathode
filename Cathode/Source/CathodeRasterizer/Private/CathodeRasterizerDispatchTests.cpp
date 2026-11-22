@@ -7,10 +7,10 @@
 
 // Specs for the Rasterizer's draw-DISPATCH — OUR routing logic. They drive the REAL production
 // DispatchPaintOps (the same entry the live paint path calls) with a RECORDING context substituting the
-// OUTPUT sink, and feed real draw-ops + glyph-runs through it. This CLOSES the input-seam invocation-trace
-// held open since Slice 1: the production dispatch genuinely CONSUMES the input seam and routes each op to
+// OUTPUT sink, and feed real draw-ops + glyph-runs through it. This is the input-seam invocation-trace:
+// the production dispatch genuinely CONSUMES the input seam and routes each op to
 // the backend with our-computed params. No forked/parallel dispatch. We assert WHICH call fired and WHAT
-// geometry/color/origin WE forwarded (dispatch args) — NEVER a rendered/readback pixel. Authored, not run.
+// geometry/color/origin WE forwarded (dispatch args) — NEVER a rendered/readback pixel.
 
 namespace
 {

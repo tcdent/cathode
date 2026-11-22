@@ -10,15 +10,15 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 
-// 025 S1 — the .d.ts codegen driver + guards. Two distinct roles (FORK driver-home (a)):
+// The .d.ts codegen driver + guards. Two distinct roles:
 //  - REGENERATE (the DRIVER): writes lib.cathode.d.ts from GenerateAuthoringDts() — gated to regenerate-mode (the
-//    CATHODE_REGEN_DTS env var), so a normal suite run does NOT overwrite the committed file. Run on-demand to update.
+//    cathode.RegenDts cvar), so a normal suite run does NOT overwrite the committed file. Run on-demand to update.
 //  - COHERENCE (the GUARD): asserts the COMMITTED lib.cathode.d.ts == GenerateAuthoringDts() (the SAME projection off
 //    the PRODUCTION tables) — every suite run; a binding add/remove flows through, a stale commit REDs.
 //  - GUARDS: the 3 hand-section guards (globals names / Iface-coverage / referenced-type-resolve).
-// 025 S1 — the regenerate-mode gate is a CVAR (env sets it via execute_script before the regenerate run); an env var
-// was infeasible (env's editor-launch path injects none). Default 0 -> a normal suite run is a no-op (the coherence
-// guard is NOT masked); set `cathode.RegenDts 1` to write.
+// The regenerate-mode gate is a CVAR (settable from a running editor before the regenerate run, where an environment
+// variable is not). Default 0 -> a normal suite run is a no-op (the coherence guard is NOT masked); set
+// `cathode.RegenDts 1` to write.
 static TAutoConsoleVariable<int32> CVarRegenDts(TEXT("cathode.RegenDts"), 0,
 	TEXT("025 S1: set 1 + run Cathode.Authoring.Dts.Regenerate to write lib.cathode.d.ts from the binding tables."));
 
@@ -40,11 +40,11 @@ namespace
 		GetDomDocumentBoundMembersForCodegen(M, C);      for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
 		GetDomEventBoundMembersForCodegen(M, C);         for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
 		GetDomKeyboardEventBoundMembersForCodegen(M, C); for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
-		GetGameBoundMembersForCodegen(M, C);             for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); } // 029 #28
+		GetGameBoundMembersForCodegen(M, C);             for (int32 i = 0; i < C; ++i) { OutIfaces.Add(ANSI_TO_TCHAR(M[i].Iface)); }
 	}
 }
 
-// --- THE DRIVER (regenerate-mode; writes the file only when CATHODE_REGEN_DTS is set) ---
+// --- THE DRIVER (regenerate-mode; writes the file only when cathode.RegenDts=1) ---
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCathodeAuthoringDtsRegenerateTest, "Cathode.Authoring.Dts.Regenerate",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FCathodeAuthoringDtsRegenerateTest::RunTest(const FString& Parameters)
@@ -72,7 +72,7 @@ bool FCathodeAuthoringDtsCoherenceTest::RunTest(const FString& Parameters)
 	FString Committed;
 	if (!FFileHelper::LoadFileToString(Committed, *Path)) { AddError(FString::Printf(TEXT("[025-S1] could not read the committed %s"), *Path)); return false; }
 	const FString Regenerated = GenerateAuthoringDts();
-	// Normalize CRLF (git autocrlf on the box) so the compare is content-exact, not EOL-sensitive.
+	// Normalize CRLF (git autocrlf on Win64) so the compare is content-exact, not EOL-sensitive.
 	Committed.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
 	const bool bMatch = Committed.Equals(Regenerated, ESearchCase::CaseSensitive);
 	AddInfo(FString::Printf(TEXT("[025-S1] regen-vs-committed: committed=%d chars regen=%d chars match=%d"), Committed.Len(), Regenerated.Len(), bMatch ? 1 : 0));
@@ -95,7 +95,7 @@ bool FCathodeAuthoringDtsGuardsTest::RunTest(const FString& Parameters)
 		TSet<FString> Expected;
 		for (const FString& N : GetContractGlobalNames()) { Expected.Add(N); }
 		Expected.Add(TEXT("document"));
-		Expected.Add(TEXT("game")); // 029 #28 — the documented-known game.* global (InstallGameBridgeAsGlobal, the composer)
+		Expected.Add(TEXT("game")); // the documented-known game.* global (InstallGameBridgeAsGlobal, the composer)
 		TSet<FString> Declared;
 		{
 			TArray<FString> Lines; Dts.ParseIntoArrayLines(Lines);
@@ -174,7 +174,7 @@ bool FCathodeAuthoringDtsGuardsTest::RunTest(const FString& Parameters)
 	GetDomDocumentBoundMembersForCodegen(M, C);      CheckTable(M, C);
 	GetDomEventBoundMembersForCodegen(M, C);         CheckTable(M, C);
 	GetDomKeyboardEventBoundMembersForCodegen(M, C); CheckTable(M, C);
-	GetGameBoundMembersForCodegen(M, C);             CheckTable(M, C); // 029 #28 — the game.* signatures resolve (Game, number, string)
+	GetGameBoundMembersForCodegen(M, C);             CheckTable(M, C); // the game.* signatures resolve (Game, number, string)
 
 	AddInfo(FString::Printf(TEXT("[025-S1] guards: %d FBoundMember Ifaces covered; globals + referenced types resolve"), Ifaces.Num()));
 	return true;

@@ -6,8 +6,8 @@
 
 #include "Misc/AutomationTest.h"
 
-// 013 slice 3 — the FORK-2 raw-text escaping exemption + the path-(i) cascade, proven with the SCOPE load-bearing BOTH
-// ways on the SAME escaping-requiring content (the slice-1 per-matrix lesson):
+// The raw-text escaping exemption + the <style>-rule cascade, proven with the SCOPE load-bearing BOTH
+// ways on the SAME escaping-requiring content:
 //   (b) SCOPE [CathodeDomRawTextScope]: {<style>,<script>} text with '>'/'&' is emitted UN-escaped, while RCDATA
 //       (<textarea>/<title>) AND a normal <div> with the SAME '>'/'&' STAY EscapeHtmlText'd. Asserted on the serialized
 //       string. An OVER-BROAD un-escape (exemption beyond {style,script}) PASSES the cascade but FAILS this.
@@ -15,7 +15,7 @@
 //       keeps the '>' RAW -> litehtml cascades it -> the .c box width === a direct width:50px control (litehtml's own,
 //       relational). WITHOUT the exemption SerializeNode emits '.p &gt; .c' -> invalid selector -> .c unmatched -> auto
 //       -> fills the 200px container -> DIVERGES. The '>' round-trip is load-bearing.
-// FORK-1: the cascade drives litehtml via CathodeLayout's ENGINE (CreateLiteHtmlLayoutEngine) -- no litehtml type in
+// The cascade drives litehtml via CathodeLayout's ENGINE (CreateLiteHtmlLayoutEngine) -- no litehtml type in
 // CathodeDom; CathodeDom -> litehtml stays absent (the engine is CathodeLayout-side, FLayoutResult is Core types).
 
 namespace

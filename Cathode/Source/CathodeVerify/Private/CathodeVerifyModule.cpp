@@ -5,7 +5,7 @@
 void FCathodeVerifyModule::StartupModule()
 {
 	// Passive capability module — no worker thread, no auto-run. The faculty is driven on demand (in a
-	// Cathode runtime) and emits its self-report; the automation gate drives it via the production runtime.
+	// Cathode runtime) and emits its self-report; the automation test drives it via the production runtime.
 	// Nothing to start here.
 }
 

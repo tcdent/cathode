@@ -53,7 +53,7 @@ void FCathodeRuntimeWorker::Shutdown()
 	if (Thread != nullptr)
 	{
 		// Kill(bShouldWait=true) calls Stop() then blocks until Run() returns — so the runtime is torn
-		// down on the worker thread (its ordered teardown from Slice 2) before we delete the thread.
+		// down on the worker thread (its ordered teardown) before we delete the thread.
 		Thread->Kill(/*bShouldWait=*/true);
 		delete Thread;
 		Thread = nullptr;
@@ -73,9 +73,9 @@ uint32 FCathodeRuntimeWorker::Run()
 	// Ordered startup (the doc lifecycle), as the ONE FRuntimeStartup unit the spec also drives. Each step
 	// performs the real work; Startup() fixes the order: create -> budgets -> assemble globals -> load
 	// author JS -> begin ticking.
-	// Build the ordered startup steps via the SHARED construction (011 postmortem #3 forward-seam) — the
-	// slice-4 reachability test drives the SAME builder, so its globals proof runs the PRODUCTION install, not a
-	// fork. Step 3 (AssembleGlobals) now SETS the console/timers install seams + assembles on the live context:
+	// Build the ordered startup steps via the SHARED construction — the
+	// globals reachability test drives the SAME builder, so its globals proof runs the PRODUCTION install, not a
+	// fork. Step 3 (AssembleGlobals) SETS the console/timers install seams + assembles on the live context:
 	// the production wiring that makes console / setTimeout / requestAnimationFrame reachable through the real
 	// runtime, routing into this worker's DiagnosticSink + Scheduler against its ONE Clock.
 	FContractStartupDeps Deps;
@@ -108,7 +108,7 @@ uint32 FCathodeRuntimeWorker::Run()
 		InterruptBudget.BeginExecution(); // open a fresh execution window for this tick's JS
 		Tick.Tick();
 
-		// Event-driven wake (RQ3): idle when nothing is dirty, wake on inbound/timer/raf — not a busy
+		// Event-driven wake: idle when nothing is dirty, wake on inbound/timer/raf — not a busy
 		// fixed interval.
 		double NextTimerDue = 0.0;
 		const bool bHasTimer = Scheduler.TryGetNextTimerDue(NextTimerDue);
@@ -126,11 +126,11 @@ uint32 FCathodeRuntimeWorker::Run()
 		}
 	}
 
-	// Teardown on the worker thread. Release any pending scheduler callbacks FIRST (S4: they may hold dup'd JS
+	// Teardown on the worker thread. Release any pending scheduler callbacks FIRST (they may hold dup'd JS
 	// callback refs, freed on the context) — BEFORE the runtime/context is torn down, so the held refs release
 	// while the context is still alive (no use-after-free / no unfreed-value at JS_FreeRuntime).
 	Scheduler.Reset();
-	// The runtime's ordered teardown (Slice 2) runs on Reset().
+	// The runtime's ordered teardown runs on Reset().
 	Runtime.Reset();
 	return 0;
 }

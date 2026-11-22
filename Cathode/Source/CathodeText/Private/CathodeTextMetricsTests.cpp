@@ -7,8 +7,8 @@
 
 // Specs for the BESPOKE metrics + run-extents derivation — hb_*-free. The glyphs are SCRIPTED OPAQUE
 // INPUT (standing in for the assembled shaper output); the specs assert OUR computed values (width = our
-// sum; bbox = our min/max), like the Slice-3 cumulative-position precedent — never the scripted advances
-// echoed back as "the shaping output". Authored, not run this sprint.
+// sum; bbox = our min/max), like the glyph-assembly cumulative-position specs — never the scripted advances
+// echoed back as "the shaping output".
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeTextMetricsTest,
@@ -39,7 +39,7 @@ bool FCathodeTextMetricsTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("line gap passed through"), FMath::IsNearlyEqual(Metrics.LineGap, 1.0f));
 	}
 
-	// Extents (closes 003 #2): OUR bbox over cumulative positions + advances + vertical extents.
+	// Extents (CathodeRasterizer COVERAGE.md #2): OUR bbox over cumulative positions + advances + vertical extents.
 	{
 		const FBox2f Extents = DeriveExtents(Glyphs, /*Ascent*/ 8.0f, /*Descent*/ 2.0f);
 		// MinX = first glyph X (2); MaxX = last glyph X + advance (10 + 20 = 30); Y = -ascent .. descent.

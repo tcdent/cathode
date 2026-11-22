@@ -18,7 +18,7 @@
 #include "RHICommandList.h"
 #include "RHIResources.h"
 
-// 031 SLICE 3 — THE TARGETABLE DEVICE ACTOR PROOF (the joined S1+S2+S3 chain, Cathode-owned end-to-end). The host's targeting
+// THE TARGETABLE DEVICE ACTOR PROOF (the joined bridge + intent + targetable-actor chain, Cathode-owned end-to-end). The host's targeting
 // resolves the example actor's surface BY Cathode::ICathodeTargetableSurface (GetSurfaceId — NOT by naming the actor), then
 // DesignateActiveSurface + DeliverIntent through the owner -> the surface document keydown fires with the canonical e.keys.
 // Proven DIRECT: resolve the interface + designate + deliver — NO host-specific player-ray stub (the inversion's bite is "the

@@ -1,4 +1,4 @@
-/* screens/hello/screen.css — the screen's standalone stylesheet (PM ruling (a): one .css per screen). Conformant: every
+/* screens/hello/screen.css — the screen's standalone stylesheet (one .css per screen). Conformant: every
    property is in css-allow-list.toml, INCLUDING opacity + letter-spacing (the 2 cathode_computed). The gate lints this
    file directly via css-tree (no extraction). Must lint CLEAN. */
 .greeting {

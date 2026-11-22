@@ -11,11 +11,10 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Specs for the Model A teardown mechanisms — gc_mark visibility, the finalizer freeing the native side,
+// Specs for the JS-refcount-governed teardown mechanisms — gc_mark visibility, the finalizer freeing the native side,
 // and the rt-based release. We assert OUR bookkeeping (mark count, native-dtor count, rt-free count) by
-// invoking our gc_mark / finalizer callbacks DIRECTLY. We do NOT trigger a real GC: actual cycle
-// reclamation / finalizer-fires-on-GC is GC-timed and DEFERRED to the validation-pass. Authored, not run
-// this sprint.
+// invoking our gc_mark / finalizer callbacks DIRECTLY. We do NOT trigger a real GC here: actual cycle
+// reclamation / finalizer-fires-on-GC is GC-timed (covered against a real JS_RunGC by Cathode.Binding.Gc.CycleReclaim).
 
 namespace
 {
@@ -43,7 +42,7 @@ struct FRecordingNative
 	}
 };
 
-// The class's gc_mark: mark both held refs so the collector can traverse the cycle (Model A cycle visibility).
+// The class's gc_mark: mark both held refs so the collector can traverse the cycle (cycle visibility).
 void RecordingGcMark(JSRuntime* Runtime, JSValueConst Value, JS_MarkFunc* MarkFunc)
 {
 	// TODO-PREBUILD(signature): JS_GetAnyOpaque (quickjs.h:1042) — see FinalizeNativeObject.

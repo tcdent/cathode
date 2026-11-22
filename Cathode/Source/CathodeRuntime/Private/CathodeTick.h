@@ -5,7 +5,7 @@
 
 #include "CathodeJsRuntime.h"
 #include "CathodeMessageQueue.h"
-#include "CathodeRuntimeSeam.h" // FSurfaceRelayoutSeam + FHostOutboundMessage (moved to Public, 028 S2)
+#include "CathodeRuntimeSeam.h" // FSurfaceRelayoutSeam + FHostOutboundMessage
 
 namespace Cathode
 {
@@ -15,8 +15,8 @@ class ICathodeDiagnosticSink;
 class FCathodeScheduler;
 class FThreadAffinity;
 
-// FSurfaceRelayoutSeam (the Phase-5 delegation seam) moved to Public/CathodeRuntimeSeam.h (028 S2) so the surface-load
-// owner can install it; Runtime Core still only SEQUENCES the call + EMITS frame-ready.
+// FSurfaceRelayoutSeam (the Phase-5 delegation seam) lives in Public/CathodeRuntimeSeam.h so the surface-load
+// owner can install it; Runtime Core only SEQUENCES the call + EMITS frame-ready.
 
 // The ordered tick — the heart of Runtime Core. There is ONE definition of the phase sequence, here.
 // The worker's Run() loop calls Tick() each iteration; the tick specs call the SAME Tick() directly
@@ -56,7 +56,7 @@ private:
 	ICathodeDiagnosticSink* Sink; // error-routing target; nullable (no sink wired -> faults not routed)
 };
 
-// Idle policy (RQ3, event-driven wake): how long the worker should wait before the next tick.
+// Idle policy (event-driven wake): how long the worker should wait before the next tick.
 //  - animating (pending rAF) -> the frame interval (continuous cadence)
 //  - else a timer pending     -> until the earliest timer is due (clamped >= 0)
 //  - else                     -> negative, meaning "block until an inbound message wakes us"

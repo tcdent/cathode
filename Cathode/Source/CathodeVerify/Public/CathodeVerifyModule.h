@@ -5,11 +5,11 @@
 /**
  * Cathode runtime-verification module (CathodeVerify).
  *
- * The in-engine home of the runtime-verification faculty (sprint 011 [b]):
+ * The in-engine home of the runtime-verification faculty:
  *   (A) surface introspection — enumerate the surface the engine ACTUALLY exposes at runtime and reconcile
  *       it against the declared contract (surface-drift visible);
  *   (B) the capability-verification framework — exercise the real primitives and report whether they work
- *       (the framework here; the 4 come-due proofs are [c]'s to register).
+ *       (the framework + a self-test live here; concrete capability proofs register against it).
  * Output: a structured, machine-readable self-report. Folds in observe/observer.js's surface-walk as the
  * SHARED introspection mechanism — the same walk observation.md's external-parity observer uses, different
  * purpose (internal self-report vs external Chromium parity); the walk is shared, not duplicated.

@@ -1,5 +1,5 @@
 #include "CathodeContractGlobals.h"
-#include "CathodeContractGlobalNames.h" // 025 S1 — the dllexport decl of GetContractGlobalNames (so the def below exports)
+#include "CathodeContractGlobalNames.h" // the dllexport decl of GetContractGlobalNames (so the def below exports)
 
 #include "CathodeClock.h"
 #include "CathodeDiagnostics.h"
@@ -142,7 +142,7 @@ JSValue CancelAnimationFrameThunk(JSContext* Ctx, JSValueConst /*ThisVal*/, int 
 	return JS_UNDEFINED;
 }
 
-// 025 S1 — the SINGLE SOURCE for the CathodeContractGlobals global-level names: the installs below reference these
+// The SINGLE SOURCE for the CathodeContractGlobals global-level names: the installs below reference these
 // entries (the JS_SetPropertyStr global name) and GetContractGlobalNames() exposes them, so the authoring .d.ts globals
 // section + its guard BIND to the actual install set (an add/remove HERE flows through to the codegen + the guard).
 static const char* const GContractGlobalNames[] = { "console", "setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame" };
@@ -170,7 +170,7 @@ void InstallTimers(JSContext* Ctx)
 
 } // namespace
 
-// 025 S1 — the install-set NAME accessor (the single source above). The authoring .d.ts codegen emits one global per
+// The install-set NAME accessor (the single source above). The authoring .d.ts codegen emits one global per
 // name (signatures hand-authored per name); its guard asserts the .d.ts globals == this set — so a CathodeContractGlobals
 // add/remove flows through. (document is installed separately via FDomDocument::InstallAsGlobal — a documented known
 // the codegen adds beside this set, per-surface.)
@@ -199,7 +199,7 @@ void AssembleContractGlobals(void* Context, FGlobalEnvironment& Env, FCathodeGlo
 	// signatures hand the sink/scheduler; the backings are already on the context opaque, so the closures only
 	// install the JS globals on the live context.
 	Env.OnInstallConsole = [Ctx](ICathodeDiagnosticSink&) { InstallConsole(Ctx); };
-	Env.OnInstallRejectionTracker = [&Runtime](ICathodeDiagnosticSink& RejectSink) { Runtime.InstallRejectionTracker(RejectSink); }; // 029 #18
+	Env.OnInstallRejectionTracker = [&Runtime](ICathodeDiagnosticSink& RejectSink) { Runtime.InstallRejectionTracker(RejectSink); };
 	Env.OnInstallTimers = [Ctx](FCathodeScheduler&) { InstallTimers(Ctx); };
 	Env.AssembleGlobals(Sink, Scheduler);
 }
@@ -234,7 +234,7 @@ FRuntimeStartup::FSteps BuildContractStartupSteps(FContractStartupDeps Deps)
 				*Deps.Sink, *Deps.Scheduler, *Deps.Clock);
 		}
 	};
-	Steps.LoadAuthorScript = []() {}; // SEAM: the pre-bundled author JS loader is a future component
+	Steps.LoadAuthorScript = []() {}; // SEAM: no pre-bundled author JS loader is wired (surfaces load their own script)
 	Steps.BeginTicking = []() {};     // startup complete — the worker's tick loop begins after Startup()
 	return Steps;
 }

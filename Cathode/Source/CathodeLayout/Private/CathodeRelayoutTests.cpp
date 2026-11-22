@@ -9,8 +9,7 @@
 // both-path relayout invocation. All litehtml-free: the selection is a pure graph computation on a
 // scripted retained tree; the invocation drives a RECORDING backend that records WHICH subtree was
 // requested (root + width). We assert OUR selection/bookkeeping/request-scope, NEVER litehtml's computed
-// boxes (the layout-output tautology). efficient==full equivalence is the deferred validation-pass proof.
-// Authored, not run this sprint.
+// boxes (the layout-output tautology). efficient==full equivalence is not proven here.
 
 namespace
 {

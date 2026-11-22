@@ -8,7 +8,7 @@
 // recorded bookkeeping (construct/destruct counts, Num(), emitted surface ids/refs), never a presence check
 // and never vendor output. The document + render target are RECORDING/COUNTING sibling impls: the document
 // returns a scripted opaque batch; the target reports a scripted change + a scripted opaque front-buffer ref
-// (the buffer PIXELS are never produced or asserted — carries-it). Authored, not run this sprint.
+// (the buffer PIXELS are never produced or asserted — carries-it).
 
 namespace
 {

@@ -11,16 +11,16 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// 017 slice 1 — the OPAQUE ROUND-TRIP THROUGH REAL JS (the genuine gap: the existing Registry.OpaqueRoundTrip is
-// C++->wrapped->C++; the wrapped object never passes through a real eval). Over 016's real Evaluate: C++ constructs a
+// The OPAQUE ROUND-TRIP THROUGH REAL JS (Registry.OpaqueRoundTrip is
+// C++->wrapped->C++; there the wrapped object never passes through a real eval). Over the real Evaluate: C++ constructs a
 // wrapped instance (CreateWrappedObject, opaque -> a C++-COMPUTED field), sets it as a JS global, real JS HOLDS + RETURNS
 // it (an identity fn), C++ recovers the opaque (the production FNativeObjectHandle::GetOpaque == JS_GetOpaque) == the
 // EXACT original ptr, and reads back the distinct C++-computed field. Evaluate carries no value (the Bridge's seam), so
 // the object round-trips via GLOBALS (C++ sets, real JS moves, C++ reads via the raw context).
 //
-// DISCRIMINATING (the PRIMARY reject = a "constructed OK"/instanceof/bThrew==false-only assertion -- a no-op binding
+// DISCRIMINATING (a "constructed OK"/instanceof/bThrew==false-only assertion is too weak -- a no-op binding
 // constructs a plain object): TWO instances with DISTINCT computed fields each recover their OWN field (a shared/null/stub
-// opaque -> both same -> FAILS). FRESH-PER-RUNTIME class-id (the 012 AV): the chain runs across >=2 SEQUENTIAL runtimes
+// opaque -> both same -> FAILS). FRESH-PER-RUNTIME class-id (the stale-class-id AV): the chain runs across >=2 SEQUENTIAL runtimes
 // (a stale process-global class-id grafts the exotic onto a foreign class on the 2nd+ runtime -> reinterpret -> AV; a
 // first-runtime-only proof masks it). WRONG-CLASS GetOpaque -> NULL (a plain {} -> NULL, no reinterpret/AV).
 
@@ -33,7 +33,7 @@ void NoopFinalizer(JSRuntime* /*Rt*/, JSValueConst /*Val*/) {} // the native is 
 
 int32 ComputeField(int32 Seed) { return Seed * Seed + 1; } // f(seed): distinct per seed, computed C++-side
 
-// 017 slice 2 — the method-access test class K. The FBoundMember `compute` thunk reads the opaque (class-id-checked) AND
+// The method-access test class K. The FBoundMember `compute` thunk reads the opaque (class-id-checked) AND
 // the JS arg, returning arg*field — the GENUINE product. GKComputeClassId is the test-side per-run class-id the thunk
 // reads; it is OVERWRITTEN each runtime registration (-> always the current run's id), and the binding's own class-id
 // stays LOCAL-per-runtime (RegisterClass allocates fresh) — no production static.
@@ -120,7 +120,7 @@ bool FCathodeBindingRoundTripThroughJsTest::RunTest(const FString& Parameters)
 		TestTrue(FString::Printf(TEXT("run %d: GetOpaque on a wrong-class object (plain {}) -> NULL"), Run), HPlain.GetOpaque(ClassId) == nullptr);
 	};
 
-	// >=2 SEQUENTIAL runtimes (FScopedTestRuntime is single-instance): the 012 stale-class-id AV fires on the 2nd+ run.
+	// >=2 SEQUENTIAL runtimes (FScopedTestRuntime is single-instance): the stale-class-id AV fires on the 2nd+ run.
 	for (int32 Run = 0; Run < 2; ++Run)
 	{
 		FScopedTestRuntime Runtime;
@@ -165,11 +165,11 @@ bool FCathodeBindingRoundTripThroughJsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 017 slice 2 — METHOD ACCESS FROM REAL JS (FBoundMember) on the binding's OWN class K, over 016's real Evaluate. C++
+// METHOD ACCESS FROM REAL JS (FBoundMember) on the binding's OWN class K, over the real Evaluate. C++
 // constructs K (CreateWrappedObject, opaque -> field) -> set as a JS global (NO JS constructor; C++-side construct) ->
 // Evaluate("if (o.compute(arg) === expected) throw ...") -> the `compute` thunk reads the opaque (class-id-checked) AND
 // the JS arg, returns arg*field -> the success-triggered throw carries the computed value. THROW-ON-SUCCESS (=== expected
-// -> throw -> bThrew==true + Contains(value); a bThrew==false-only assertion is the PRIMARY reject).
+// -> throw -> bThrew==true + Contains(value); a bThrew==false-only assertion proves nothing).
 //
 // THE BOTH-FACTORS VARIATION (test-the-breaking-geometry on the product): TWO checks with DISTINCT (arg, field) pairs --
 // o1(field=6).compute(7)===42 AND o2(field=10).compute(5)===50 -- bites EVERY degenerate thunk:
@@ -268,13 +268,13 @@ bool FCathodeBindingMethodAccessThroughJsTest::RunTest(const FString& Parameters
 	return true;
 }
 
-// 029 #19 — REAL GC CYCLE RECLAMATION (CathodeBinding; CathodeBinding/COVERAGE.md:94, the 017 follow-on). A SYNTHETIC,
+// REAL GC CYCLE RECLAMATION (CathodeBinding; see CathodeBinding/COVERAGE.md). A SYNTHETIC,
 // safe-gc_mark'd cross-heap cycle — its OWN test wrapper with a valid gc_mark + finalizer (NOT the document model;
-// document.gc_mark STAYS REMOVED, see [[reference_quickjs_gcmark_reclaim_not_survival]] — this is the cycle-reclaim PROOF,
-// not a gc_mark re-add). The reclaim DIRECTION (drop every external handle + release the root + a real JS_RunGC -> the
+// the document class intentionally registers no gc_mark — this is the cycle-reclaim PROOF,
+// not a document gc_mark). The reclaim DIRECTION (drop every external handle + release the root + a real JS_RunGC -> the
 // finalizer FIRES = reclaimed) with a leaks-WITHOUT-release CONTROL (root held -> NOT reclaimed): a gc_mark survival test
 // is vacuous (unmarked native refs over-retain, never premature-collect), so the reclaim direction is the proof and the
-// control is what makes it non-vacuous. Exercises the finalizer's JS_GetAnyOpaque + class-id (the 012 hazard, while live).
+// control is what makes it non-vacuous. Exercises the finalizer's JS_GetAnyOpaque + class-id (the stale-class-id hazard, while live).
 namespace
 {
 using namespace Cathode;

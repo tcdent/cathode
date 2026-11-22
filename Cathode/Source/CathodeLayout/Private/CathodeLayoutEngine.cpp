@@ -4,15 +4,14 @@
 #include "CathodeObservationRead.h"
 #include "CathodePaintRouting.h"
 #include "CathodeRelayout.h"
-#include "CathodeResolver.h"        // sprint 009: IResourceResolver
-#include "CathodeResourceRouting.h" // sprint 009: the litehtml-free container->resolver routing helpers
+#include "CathodeResolver.h"        // IResourceResolver
+#include "CathodeResourceRouting.h" // the litehtml-free container->resolver routing helpers
 
 #include "Containers/StringConv.h"
 
 // litehtml — the layout/CSS engine. Every litehtml::/lt:: token is confined to this translation unit;
 // swapping engines means reimplementing this file and the factory, nothing else. The include path is
-// wired by the execution-approval sprint's build (the headers are vendored under
-// vendor/lib/cathode/litehtml/include, built from source then); no build runs this sprint.
+// wired in CathodeLayout.Build.cs (the headers are vendored under Source/ThirdParty/litehtml/include).
 THIRD_PARTY_INCLUDES_START
 // UE's check()/verify() assertion macros (from CoreMinimal) are function-like and collide with litehtml
 // METHOD names (e.g. litehtml::media_query::check(...)) — the preprocessor expands the macro over the
@@ -65,8 +64,8 @@ FBorderSide ToSide(const litehtml::border& Side)
 
 FCornerRadii ToRadii(const litehtml::border_radiuses& R)
 {
-	// TODO-PREBUILD(struct-field): verify litehtml::border_radiuses field names (top_left_x, top_right_x,
-	// bottom_right_x, bottom_left_x) vs the vendored header.
+	// NOTE: the litehtml::border_radiuses field names (top_left_x, top_right_x, bottom_right_x,
+	// bottom_left_x) follow the vendored header.
 	FCornerRadii Out;
 	Out.TopLeft = static_cast<float>(R.top_left_x);
 	Out.TopRight = static_cast<float>(R.top_right_x);
@@ -75,21 +74,19 @@ FCornerRadii ToRadii(const litehtml::border_radiuses& R)
 	return Out;
 }
 
-// The litehtml document_container — the central callback seam litehtml calls during render. SKELETON
-// (sprint 005 Slice 2): all callbacks exist and ROUTE — text -> the font cache + ITextMeasurer; paint ->
-// the neutral paint-op sink; config -> inputs. The detailed param TRANSLATION (litehtml type -> neutral
-// op params) and border decomposition are Slice 4; here they route with minimal/stubbed params. litehtml
-// appears ONLY in this file.
+// The litehtml document_container — the central callback seam litehtml calls during render. All callbacks
+// ROUTE — text -> the font cache + ITextMeasurer; paint -> the neutral paint-op sink (litehtml type ->
+// neutral op params, incl. border decomposition); config -> inputs. litehtml appears ONLY in this file.
 class FCathodeDocumentContainer final : public litehtml::document_container
 {
 public:
-	// TODO-PREBUILD(override): every document_container method below must EXACTLY match litehtml's
-	// pure-virtual signatures (these are overrides, not new functions) — litehtml has changed several
-	// across versions (create_font, draw_background, set_clip, get_image_size, create_element, ...).
-	// Verify the full interface against the vendored litehtml; any mismatch is a hard compile error.
+	// NOTE: every document_container method below must EXACTLY match litehtml's pure-virtual signatures
+	// (these are overrides, not new functions) — litehtml has changed several across versions
+	// (create_font, draw_background, set_clip, get_image_size, create_element, ...). The interface tracks
+	// the vendored litehtml; any mismatch is a hard compile error.
 	FCathodeDocumentContainer(FLayoutFontCache& InFontCache, TArray<FLayoutPaintOp>& InSink,
 		int32 InClientWidth, int32 InClientHeight, int32 InDpi, const FString& InDefaultFont, int32 InDefaultFontSize,
-		IResourceResolver* InResolver) // sprint 009: the resource resolver (nullable; null == pre-hook stub behavior)
+		IResourceResolver* InResolver) // the resource resolver (nullable; null == every resource callback is a clean miss)
 		: FontCache(InFontCache)
 		, Sink(InSink)
 		, ClientWidth(InClientWidth)
@@ -103,14 +100,14 @@ public:
 
 	// --- Text: route to the font cache + the neutral measurement seam ---
 
-	// TODO-PREBUILD(signature): create_font has varied most across litehtml — the param list (decoration,
-	// the font_metrics* out-param) and the uint_ptr return. Verify exactly vs the vendored header.
+	// NOTE: create_font has varied most across litehtml versions — the param list (decoration, the
+	// font_metrics* out-param) and the uint_ptr return. This form matches the vendored header.
 	litehtml::uint_ptr create_font(const char* faceName, int size, int weight, litehtml::font_style italic,
 		unsigned int /*decoration*/, litehtml::font_metrics* fm) override
 	{
 		const bool bItalic = (italic == litehtml::font_style_italic);
 		const uint64 Handle = FontCache.ResolveFont(UTF8_TO_TCHAR(faceName), size, weight, bItalic);
-		// 013 slice 4 (B/b1): capture {face, weight} keyed by the handle. font-family/font-weight are member-only in
+		// Capture {face, weight} keyed by the handle. font-family/font-weight are member-only in
 		// css_properties (no getter); css().get_font() -> this handle is the only public read path back to them.
 		FontByHandle.Add(static_cast<litehtml::uint_ptr>(Handle), FCapturedFont{ FString(UTF8_TO_TCHAR(faceName)), weight });
 		if (fm != nullptr)
@@ -129,7 +126,7 @@ public:
 		FontCache.ReleaseFont(static_cast<uint64>(hFont));
 	}
 
-	// 013 slice 4 (B/b1): read back the captured face/weight for a font handle (css().get_font()). CathodeLayout-side;
+	// Read back the captured face/weight for a font handle (css().get_font()). CathodeLayout-side;
 	// returns FString/int32 (no litehtml type crosses the FResolvedStyle seam).
 	bool LookupFont(litehtml::uint_ptr Handle, FString& OutFace, int32& OutWeight) const
 	{
@@ -145,15 +142,15 @@ public:
 	void draw_text(litehtml::uint_ptr /*hdc*/, const char* text, litehtml::uint_ptr hFont,
 		litehtml::web_color color, const litehtml::position& pos) override
 	{
-		// Un-shaped: the run + font ref + color + position; the integration sprint shapes it via 004.
+		// Un-shaped: the run + font ref + color + position; the integration layer shapes it via CathodeText.
 		EmitDrawText(Sink, UTF8_TO_TCHAR(text), FontCache.GetRef(static_cast<uint64>(hFont)),
 			ToColor(color), FVector2f(static_cast<float>(pos.x), static_cast<float>(pos.y)), ToBox(pos));
 	}
 
 	// --- Paint: full translation to the neutral paint-op stream ---
 
-	// TODO-PREBUILD(signature): draw_background takes a std::vector<background_paint> in newer litehtml;
-	// older versions passed a single background_paint. Verify vs the vendored header.
+	// NOTE: draw_background takes a std::vector<background_paint> in newer litehtml; older versions
+	// passed a single background_paint. This form matches the vendored header.
 	void draw_background(litehtml::uint_ptr /*hdc*/, const std::vector<litehtml::background_paint>& bg) override
 	{
 		for (const litehtml::background_paint& Layer : bg)
@@ -162,7 +159,7 @@ public:
 			if (!Layer.image.empty())
 			{
 				const FString ImageUrl = UTF8_TO_TCHAR(Layer.image.c_str());
-				EmitDrawImage(Sink, Box, ImageUrl, FindImageBytes(ImageUrl)); // 029 #4 — the layout-resolved bytes ride the op
+				EmitDrawImage(Sink, Box, ImageUrl, FindImageBytes(ImageUrl)); // the layout-resolved bytes ride the op
 			}
 			else
 			{
@@ -190,7 +187,7 @@ public:
 		if (!Marker.image.empty())
 		{
 			const FString MarkerUrl = UTF8_TO_TCHAR(Marker.image.c_str());
-			EmitDrawImage(Sink, ToBox(Marker.pos), MarkerUrl, FindImageBytes(MarkerUrl)); // 029 #4 — carry the resolved bytes
+			EmitDrawImage(Sink, ToBox(Marker.pos), MarkerUrl, FindImageBytes(MarkerUrl)); // carry the resolved bytes
 		}
 		else
 		{
@@ -200,8 +197,8 @@ public:
 
 	void get_image_size(const char* src, const char* baseurl, litehtml::size& sz) override
 	{
-		// sprint 009: route to the resolver (litehtml::string -> FString at the edge); dimensions need a 003
-		// decode (RQ1) -> 0x0 this sprint (RouteImageSize), now via the routing layer not a hardcoded stub.
+		// Route to the resolver (litehtml::string -> FString at the edge); RouteImageSize decodes the resolved
+		// bytes' intrinsic dimensions via CathodeRasterizer (0x0 on a miss / undecodable bytes).
 		int32 Width = 0, Height = 0;
 		RouteImageSize(Resolver, src ? FString(UTF8_TO_TCHAR(src)) : FString(),
 			baseurl ? FString(UTF8_TO_TCHAR(baseurl)) : FString(), Width, Height);
@@ -211,8 +208,8 @@ public:
 
 	void load_image(const char* src, const char* baseurl, bool /*redraw_on_ready*/) override
 	{
-		// 029 #4 — resolve ONCE here (the right boundary — load_image has the baseurl) + CACHE the bytes keyed by url, so
-		// draw_background/draw_list_marker carry them into the op WITHOUT re-resolving (vs the prior resolve-and-discard).
+		// Resolve ONCE here (the right boundary — load_image has the baseurl) + CACHE the bytes keyed by url, so
+		// draw_background/draw_list_marker carry them into the op WITHOUT re-resolving.
 		const FString Url = src ? FString(UTF8_TO_TCHAR(src)) : FString();
 		if (Url.IsEmpty() || ImageCache.Contains(Url)) { return; }
 		TArray<uint8> Bytes;
@@ -247,8 +244,8 @@ public:
 
 	// --- Remaining callbacks: not used by the rendering surface (no-op / default) ---
 
-	// TODO-PREBUILD(signature): set_clip changed across litehtml (older took extra bool valid_x/valid_y
-	// params). Verify the (position, border_radiuses) form vs the vendored header.
+	// NOTE: set_clip changed across litehtml (older took extra bool valid_x/valid_y params). The
+	// (position, border_radiuses) form matches the vendored header.
 	void set_clip(const litehtml::position& Pos, const litehtml::border_radiuses& /*r*/) override { EmitClipPush(Sink, ToBox(Pos)); }
 	void del_clip() override { EmitClipPop(Sink); }
 	void set_caption(const char* /*caption*/) override {}
@@ -259,7 +256,7 @@ public:
 	void transform_text(litehtml::string& /*text*/, litehtml::text_transform /*tt*/) override {}
 	void import_css(litehtml::string& text, const litehtml::string& url, litehtml::string& baseurl) override
 	{
-		// sprint 009: resolve the linked stylesheet via the resolver; on a hit, hand the CSS text to litehtml.
+		// Resolve the linked stylesheet via the resolver; on a hit, hand the CSS text to litehtml.
 		FString Css;
 		if (RouteLinkedCss(Resolver, FString(UTF8_TO_TCHAR(url.c_str())), FString(UTF8_TO_TCHAR(baseurl.c_str())), Css))
 		{
@@ -282,13 +279,13 @@ private:
 	int32 Dpi;
 	int32 DefaultFontSize;
 	FTCHARToUTF8 DefaultFontUtf8; // stable UTF-8 default font name (init from the ctor's InDefaultFont)
-	IResourceResolver* Resolver;  // sprint 009: nullable; the image/CSS resource callbacks route to it
+	IResourceResolver* Resolver;  // nullable; the image/CSS resource callbacks route to it
 
-	// 013 slice 4 (B/b1): handle -> {face, weight} captured at create_font, read back for font-family/font-weight.
+	// handle -> {face, weight} captured at create_font, read back for font-family/font-weight.
 	struct FCapturedFont { FString Face; int32 Weight = 400; };
 	TMap<litehtml::uint_ptr, FCapturedFont> FontByHandle;
 
-	// 029 #4 — url -> resolved image bytes. Populated by load_image (the resolve-once boundary, with the baseurl), read by
+	// url -> resolved image bytes. Populated by load_image (the resolve-once boundary, with the baseurl), read by
 	// draw_background/draw_list_marker (carry into the op). Mirrors the FontByHandle populate-then-read pattern.
 	TMap<FString, TArray<uint8>> ImageCache;
 
@@ -303,7 +300,7 @@ private:
 	}
 };
 
-// 013 slice 4 — getComputedStyle value formatters (CSSOM resolved-value forms per Fork-A). litehtml-confined
+// getComputedStyle value formatters (CSSOM resolved-value forms). litehtml-confined
 // (web_color/css_length/enum -> FString); the FString crosses the FResolvedStyle seam engine-free.
 static FString FmtCssPx(int Px) { return FString::Printf(TEXT("%dpx"), Px); }
 
@@ -320,7 +317,7 @@ static FString FmtCssLength(const litehtml::css_length& L)
 	switch (L.units())
 	{
 	case litehtml::css_units_px:         return FString::Printf(TEXT("%gpx"), L.val());
-	case litehtml::css_units_percentage: return FString::Printf(TEXT("%g%%"), L.val()); // ON-RECORD: %/em return the computed form, not used-px (the used edges are inaccessible)
+	case litehtml::css_units_percentage: return FString::Printf(TEXT("%g%%"), L.val()); // NOTE: %/em return the computed form, not used-px (the used edges are inaccessible)
 	default:                             return FString::Printf(TEXT("%gpx"), L.val());
 	}
 }
@@ -338,9 +335,9 @@ static FString FmtCssEnum(int Value, const char* Strings)
 	return FString(UTF8_TO_TCHAR(litehtml::index_value(Value, Strings).c_str()));
 }
 
-// 014 slice 1 (CathodeComputed) — litehtml does NOT parse letter-spacing, so getComputedStyle sources it Cathode-side:
-// parse the element's OWN inline 'style' attr ON-DEMAND (own-element-only; inheritance + rendering deferred to the
-// litehtml build-how). A LENGTH value -> normalized px: 'letter-spacing:2px' -> '2px'; '0.1em' of font-size 16 -> '1.6px'
+// CathodeComputed — litehtml does NOT parse letter-spacing, so getComputedStyle sources it Cathode-side:
+// parse the element's OWN inline 'style' attr ON-DEMAND (own-element-only; inheritance + rendering are not
+// implemented). A LENGTH value -> normalized px: 'letter-spacing:2px' -> '2px'; '0.1em' of font-size 16 -> '1.6px'
 // (specified '0.1em' != computed '1.6px' -> the parse is load-bearing, not an echo). unset/absent/'normal'/rem/other-unit
 // -> EMPTY (the documented own-inline partial; NOT 'normal'). FontSizePx is litehtml's resolved px (the em base). Engine-
 // free (plain args, no litehtml type); the FString crosses the FResolvedStyle seam, so CathodeDom never sees litehtml.
@@ -359,14 +356,14 @@ static FString ParseOwnInlineLetterSpacing(const char* StyleAttr, int32 FontSize
 		if (Value.EndsWith(TEXT("px")))                                 { return FString::Printf(TEXT("%gpx"), FCString::Atof(*Value.LeftChop(2))); }
 		return FString(); // 'normal'/rem/other unit -> empty (the documented partial covers px/em lengths)
 	}
-	return FString(); // no own letter-spacing declaration -> empty (own-element-only: the unset / deferred-inheritance boundary)
+	return FString(); // no own letter-spacing declaration -> empty (own-element-only: no inheritance)
 }
 
-// 014 slice 2 (CathodeComputed) — opacity is non-litehtml; getComputedStyle sources it Cathode-side: parse the element's
+// CathodeComputed — opacity is non-litehtml; getComputedStyle sources it Cathode-side: parse the element's
 // OWN inline value ON-DEMAND. CSS computed-value rule = clamp(<number> | <percentage>, [0,1]) serialized as a plain number
 // ('0.5'/'1'/'0'; 1.5->'1' & -0.2->'0' clamp; .5->'0.5' normalize; 90%->'0.9'). opacity does NOT inherit + initial = 1, so
 // UNSET -> '1' (the correct CSS computed value; no cascade needed). A cascaded/stylesheet opacity is OWN-INLINE-ONLY here
-// (litehtml discards opacity; we read only El's own attr) — deferred with the rasterizer build-how. Engine-free; FString
+// (litehtml discards opacity; we read only El's own attr) — a stylesheet opacity is not read. Engine-free; FString
 // crosses the FResolvedStyle seam, so CathodeDom never sees litehtml.
 static FString ParseOwnInlineOpacity(const char* StyleAttr)
 {
@@ -400,7 +397,7 @@ class FLiteHtmlRelayoutBackend final : public IRelayoutBackend
 {
 public:
 	FLiteHtmlRelayoutBackend(const ILayoutDocumentSource& InSource, FLayoutFontCache& InFontCache,
-		TArray<FLayoutPaintOp>& InSink, IResourceResolver* InResolver) // sprint 009: pass the resolver to the container
+		TArray<FLayoutPaintOp>& InSink, IResourceResolver* InResolver) // passed to the container
 		: Source(InSource)
 		, Sink(InSink)
 		, Container(InFontCache, InSink, DefaultViewportWidth, DefaultViewportHeight, DefaultDpi,
@@ -424,7 +421,7 @@ public:
 		OffsetPaintOps(TArrayView<FLayoutPaintOp>(Sink.GetData() + Before, Sink.Num() - Before), BoundaryOffset);
 	}
 
-	// Post-render geometry read (T1): resolve our NodeId to litehtml's placed element (via the data-node-id map
+	// Post-render geometry read: resolve our NodeId to litehtml's placed element (via the data-node-id map
 	// built at render) and return litehtml's OWN computed box. ForceInit (zero) for an unknown/unrendered NodeId.
 	FBox2f QueryBox(int32 NodeId) const
 	{
@@ -435,9 +432,9 @@ public:
 		return FBox2f(ForceInit);
 	}
 
-	// 013 slice 4 — the per-property computed-value read (the gate-flip's vendor edge): litehtml's OWN resolved value
-	// for NodeId's element, in the CSSOM Fork-A form. Empty for an unmapped node, opacity (build-how-pending), or the
-	// HELD font-family/font-weight (member-only/no-getter; browse-design B-ruling pending). FString crosses engine-free.
+	// The per-property computed-value read (the vendor edge): litehtml's OWN resolved value for NodeId's element,
+	// in the CSSOM resolved-value form. Empty for an unmapped node or a non-contract property. FString crosses
+	// engine-free.
 	FString QueryComputedValue(int32 NodeId, const FString& Property) const
 	{
 		const litehtml::element::ptr* ElementPtr = NodeElementMap.Find(NodeId);
@@ -466,7 +463,7 @@ public:
 		if (Property == TEXT("font-size"))   { return FmtCssPx(Css.get_font_size()); }
 		if (Property == TEXT("line-height")) { return FmtCssPx(Css.get_line_height()); }
 
-		// BOX-MODEL EDGES — option-(i) css()-COMPUTED (browse-design Fork-A refinement). LIMITATION (on-record):
+		// BOX-MODEL EDGES — css()-COMPUTED. LIMITATION:
 		// %/layout-resolved margin/padding return the COMPUTED form, NOT used-px (the used edges are on litehtml's
 		// PRIVATE render_item, inaccessible via the public API). Correct used px only for ABSOLUTE/default lengths.
 		// Future = expose render_item edges -> 1-line-real to used-px. Do NOT reconstruct used-from-computed.
@@ -474,10 +471,10 @@ public:
 		if (Property == TEXT("padding"))      { const litehtml::css_margins& P = Css.get_padding(); return FmtCssSides(P.top, P.right, P.bottom, P.left); }
 		if (Property == TEXT("border-width")) { const litehtml::css_borders& B = Css.get_borders(); return FmtCssSides(B.top.width, B.right.width, B.bottom.width, B.left.width); }
 
-		// FONT-FAMILY / FONT-WEIGHT — option-(b1): member-only/no-getter in css_properties, read back via the font HANDLE
-		// (css().get_font()) -> the Container's capture map. FIDELITY NOTE (on-record): font-family returns the resolved
+		// FONT-FAMILY / FONT-WEIGHT — member-only/no-getter in css_properties, read back via the font HANDLE
+		// (css().get_font()) -> the Container's capture map. FIDELITY NOTE: font-family returns the resolved
 		// FACE ('Arial'), which may differ from the CSSOM computed-LIST ('Arial, sans-serif') -- the computed-list member
-		// has no public getter; resolved-face proves resolution (fine for slice-4). font-weight is the full-fidelity
+		// has no public getter; resolved-face proves resolution. font-weight is the full-fidelity
 		// resolved NUMERIC ('400'/'700'), no enum mapping.
 		if (Property == TEXT("font-family") || Property == TEXT("font-weight"))
 		{
@@ -489,16 +486,16 @@ public:
 			return FString(); // font not yet resolved (e.g. an element litehtml created no font for) -> empty
 		}
 
-		// letter-spacing (014 slice 1, CathodeComputed) -> litehtml does NOT parse it; source the element's OWN inline
+		// letter-spacing (CathodeComputed) -> litehtml does NOT parse it; source the element's OWN inline
 		// value Cathode-side (NAME-keyed branch, not status-keyed), em resolved against litehtml's computed font-size.
-		// own-element-only: inheritance is deferred to the litehtml build-how (no Cathode-side parent walk).
+		// own-element-only: inheritance is not implemented (no Cathode-side parent walk).
 		if (Property == TEXT("letter-spacing"))
 		{
 			return ParseOwnInlineLetterSpacing(El->get_attr("style"), Css.get_font_size());
 		}
 
-		// opacity (014 slice 2, CathodeComputed) -> non-litehtml; parse the element's OWN inline value Cathode-side
-		// (NAME-keyed), clamp [0,1], unset -> the CSS initial '1' (opacity does NOT inherit). Cascaded + rendering deferred.
+		// opacity (CathodeComputed) -> non-litehtml; parse the element's OWN inline value Cathode-side
+		// (NAME-keyed), clamp [0,1], unset -> the CSS initial '1' (opacity does NOT inherit). Cascaded opacity + rendering are not implemented.
 		if (Property == TEXT("opacity"))
 		{
 			return ParseOwnInlineOpacity(El->get_attr("style"));
@@ -515,24 +512,24 @@ private:
 
 	void Render(const FString& Html, const FString& Css, int32 Width)
 	{
-		// TODO-PREBUILD(signature): verify litehtml::document::createFromString overload — arg types
-		// (const char* vs std::string), the master/user stylesheet params (litehtml::master_css), and that
-		// older litehtml took a litehtml::context instead. High variance across litehtml versions.
+		// NOTE: litehtml::document::createFromString varies across litehtml versions — arg types
+		// (const char* vs std::string), the master/user stylesheet params (litehtml::master_css); older
+		// litehtml took a litehtml::context instead. This form matches the vendored header.
 		litehtml::document::ptr Doc = litehtml::document::createFromString(
 			TCHAR_TO_UTF8(*Html), &Container, litehtml::master_css, TCHAR_TO_UTF8(*Css));
 		if (Doc)
 		{
 			Doc->render(Width);
-			// 029 #33 — pass a VALID full-viewport clip (NOT nullptr). litehtml's ROOT/canvas-background paint path (the
+			// Pass a VALID full-viewport clip (NOT nullptr). litehtml's ROOT/canvas-background paint path (the
 			// html/body background propagated over the viewport) dereferences the clip pointer UNCONDITIONALLY to size the
 			// canvas fill — the ordinary element path (position::does_intersect) is null-guarded, but the root branch is NOT.
 			// A nullptr clip -> EXCEPTION_ACCESS_VIOLATION reading 0x0 the moment a body/html background-color renders
-			// (ordinary gate-allowed CSS). A viewport-sized clip lets the root bg flow into draw_background -> EmitFillRect,
+			// (ordinary, authoring-gate-allowed CSS). A viewport-sized clip lets the root bg flow into draw_background -> EmitFillRect,
 			// DRAWING the color over the viewport (a real fix, not a skip). The clip == get_client_rect (the media/layout viewport).
 			litehtml::position ViewportClip;
 			Container.get_client_rect(ViewportClip); // {0,0,ClientWidth,ClientHeight}
 			Doc->draw(static_cast<litehtml::uint_ptr>(0), 0, 0, &ViewportClip); // fires the container paint callbacks -> sink
-			// RETAIN the laid-out document + (re)build the NodeId<->element map (T1): get_placement() is valid
+			// RETAIN the laid-out document + (re)build the NodeId<->element map: get_placement() is valid
 			// after render(), so post-render geometry queries (QueryBox) resolve our NodeId to litehtml's placed
 			// element via the data-node-id attribute the DOM serializer emits.
 			RenderedDoc = Doc;
@@ -542,8 +539,9 @@ private:
 
 	FVector2f GetBoundaryOffset(int32 /*SubtreeRoot*/) const
 	{
-		// TODO(validation pass): query the boundary element's position in the prior full layout from
-		// litehtml (the vendor edge). The OffsetPaintOps transform that consumes this is built + tested.
+		// TODO: query the boundary element's position in the prior full layout from litehtml (the vendor
+		// edge) — not yet implemented, so the offset is zero. The OffsetPaintOps transform that consumes
+		// this is built + tested.
 		return FVector2f::ZeroVector;
 	}
 
@@ -577,7 +575,7 @@ private:
 	const ILayoutDocumentSource& Source;
 	TArray<FLayoutPaintOp>& Sink;
 	FCathodeDocumentContainer Container;
-	litehtml::document::ptr RenderedDoc;                // retained laid-out document (T1 geometry queries)
+	litehtml::document::ptr RenderedDoc;                // retained laid-out document (geometry queries)
 	TMap<int32, litehtml::element::ptr> NodeElementMap; // NodeId -> placed litehtml element (via data-node-id)
 };
 
@@ -585,7 +583,7 @@ private:
 // (litehtml-free: dirty tracking + affected-subtree selection + the both-path drive) + the litehtml
 // backend. SetDocument wires the source + creates the backend; MarkNodeDirty feeds the controller;
 // Relayout drives the controller (which selects complete vs intelligent and drives the backend) and
-// returns the routed paint ops. The geometry/style read-out is Slice 5.
+// returns the routed paint ops + the per-node geometry/style read-out.
 class FLiteHtmlLayoutEngine final : public ILayoutEngine
 {
 public:
@@ -608,7 +606,7 @@ public:
 
 	void SetResourceResolver(IResourceResolver* InResolver) override
 	{
-		// sprint 009: store the resolver; SetDocument passes it to the backend/container. Call before SetDocument.
+		// Store the resolver; SetDocument passes it to the backend/container. Call before SetDocument.
 		Resolver = InResolver;
 	}
 
@@ -642,14 +640,14 @@ private:
 	FRelayoutController Controller;
 	TUniquePtr<FLiteHtmlRelayoutBackend> Backend;
 	const ILayoutDocumentSource* Source = nullptr;
-	IResourceResolver* Resolver = nullptr; // sprint 009: passed to the backend/container at SetDocument
+	IResourceResolver* Resolver = nullptr; // passed to the backend/container at SetDocument
 
-	// --- Vendor edges: map our NodeId onto litehtml's laid-out element + read its box / computed value.
-	//     Stubbed this sprint (no render runs); the validation pass binds them to the rendered document.
+	// --- Vendor edges: map our NodeId onto litehtml's laid-out element + read its box / computed value
+	//     (via the backend, bound to the rendered document).
 
 	FBox2f QueryNodeBox(int32 NodeId) const
 	{
-		// T1: read litehtml's OWN computed box for NodeId via the backend's data-node-id map (resolved from the
+		// Read litehtml's OWN computed box for NodeId via the backend's data-node-id map (resolved from the
 		// retained, laid-out document). The walk/assembly around this (WalkGeometry) is tested separately.
 		return Backend.IsValid() ? Backend->QueryBox(NodeId) : FBox2f(ForceInit);
 	}
@@ -657,13 +655,13 @@ private:
 	FResolvedStyle QueryNodeStyle(int32 NodeId) const
 	{
 		// The bounded mapping is OURS (queries only the contract property set); the per-property value is the
-		// vendor edge (litehtml's computed cascade) read by the backend (013 slice 4, gate flipped to real values).
+		// vendor edge (litehtml's computed cascade) read by the backend.
 		return MapResolvedStyle([this, NodeId](const FString& Property) { return QueryComputedValue(NodeId, Property); });
 	}
 
 	FString QueryComputedValue(int32 NodeId, const FString& Property) const
 	{
-		// 013 slice 4: delegate to the backend's litehtml-confined per-property read (the empty stub is gone).
+		// Delegate to the backend's litehtml-confined per-property read.
 		return Backend.IsValid() ? Backend->QueryComputedValue(NodeId, Property) : FString();
 	}
 };

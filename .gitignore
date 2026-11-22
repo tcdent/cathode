@@ -1,9 +1,7 @@
 # Cathode — standalone repository ignore rules.
 #
-# Carried forward in INTENT from the source tree (uptime `.gitignore:20-26` + the plugin-local
-# `Authoring/.gitignore`), re-rooted for this repo's layout: the plugin lives at `Cathode/`, not
-# at `game/Plugins/Cathode/`. Rules are path-anchored (leading `/`) exactly as the source's were,
-# so they bind to these locations and nowhere else.
+# The plugin lives at `Cathode/`. Rules are path-anchored (leading `/`) so they bind to these
+# locations and nowhere else.
 
 # --- Vendored third-party library SOURCE (reserved; populated by the plugin's install.sh) ---
 # The 5 upstream libs (quickjs-ng, litehtml, harfbuzz, blend2d, asmjit) are cloned at pinned
@@ -13,16 +11,13 @@
 # --- Cathode vendor-lib BUILD OUTPUTS ---
 # `include/` and `Win64/` under each ThirdParty lib are build artifacts, not source: they are
 # produced by the vendor build from the gitignored `vendor/` sources. Each lib dir keeps a
-# tracked `.gitkeep` (5 of them in the source tree) so the directory shape survives without its
-# contents. Mirrors uptime `.gitignore:25-26`.
+# tracked `.gitkeep` so the directory shape survives without its contents.
 /Cathode/Source/ThirdParty/*/Win64/
 /Cathode/Source/ThirdParty/*/include/
 
 # --- Authoring/ Node toolchain (dev-machine/CI only) ---
 # `node_modules/` and the IIFE build output `dist/` are not committed; package.json +
-# package-lock.json are, for a reproducible `npm ci`. NOTE: the plugin subtree carries its own
-# `Cathode/Authoring/.gitignore` with these same two rules — it arrives with the Slice 2 copy.
-# These root entries are deliberate belt-and-braces so the Slice 2 copy cannot land stray
-# node_modules/dist before that file is in place.
+# package-lock.json are, for a reproducible `npm ci`. The plugin subtree carries its own
+# `Cathode/Authoring/.gitignore` with these same two rules; these root entries are belt-and-braces.
 /Cathode/Authoring/node_modules/
 /Cathode/Authoring/dist/

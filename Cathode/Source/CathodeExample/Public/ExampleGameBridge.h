@@ -7,13 +7,13 @@ namespace CathodeExample
 {
 
 /**
- * FExampleGameBridge — 031 SLICE 1: the REFERENCE host object an integrator registers INTO Cathode's game.* bridge.
+ * FExampleGameBridge — the REFERENCE host object an integrator registers INTO Cathode's game.* bridge.
  *
  * This is the canonical "register a game object into Cathode": a host class implements Cathode::ICathodeGameBridge with its
  * OWN state (here a tick counter + a small entity-name table — a stand-in for a real game's frame clock + named entities),
  * and is handed to FCompositionSurfaceOwner::Install(..., MakeUnique<FExampleGameBridge>()). Cathode then exposes the
  * bridge as the `game.*` global (game.tickCount / game.getEntityName) to author screens — from the single generate-from-
- * interface projection, so the runtime bindings, the .d.ts, and the gate stay in lock-step.
+ * interface projection, so the runtime bindings, the .d.ts, and the authoring gate stay in lock-step.
  *
  * The dependency arrow is game -> Cathode ONLY: this class names a Cathode type (the interface it implements), never the
  * reverse. An integrator copies this shape, swapping the stand-in state for their real game state (a real tick, a real

@@ -1,6 +1,6 @@
 #include "CathodeDom.h"
 
-#include "CathodeBoundMember.h" // sprint 012: the single binding-definition mechanism (install + enumerate)
+#include "CathodeBoundMember.h" // the single binding-definition mechanism (install + enumerate)
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "HAL/PlatformTLS.h"
@@ -22,19 +22,19 @@ FDomDocument::FDomDocument(ICathodeJsRuntime& InRuntime, INativeClassRegistry& I
 	, Context(static_cast<JSContext*>(InRuntime.GetNativeContextHandle()))
 	, NodeClassId(InNodeClassId)
 {
-	// The document OWNS the root (Model A, human ruling): create + hold the root element's wrapper. Disposing
+	// The document OWNS the root (Model A): create + hold the root element's wrapper. Disposing
 	// the document drops this ref -> the tree reclaims by GC.
 	RootWrapper = CreateElement(TEXT("html"));
 	if (const FDomNode* Root = NodeFromWrapper(RootWrapper))
 	{
 		RootNodeId = Root->GetNodeId();
 	}
-	Layout.SetDocument(*this); // the DOM registers itself as 005's layout source (structure + markup)
+	Layout.SetDocument(*this); // the DOM registers itself as CathodeLayout's layout source (structure + markup)
 
-	// 028 S1 — the body-seed (tcdent's mount contract, locked 2026-06-22): seed documentElement > [head, body], the
+	// The body-seed (the mount contract): seed documentElement > [head, body], the
 	// THREE nodes ONLY — no root div, no #app/#root, no config (apps mount into document.body). Seeded AFTER
-	// SetDocument so AppendChild's Structure dirty-mark (CathodeDomNode.cpp:118) has a layout source; head precedes
-	// body (document order). FindBody (CathodeDom.h:298) then resolves document.body — the mount target.
+	// SetDocument so AppendChild's Structure dirty-mark has a layout source; head precedes
+	// body (document order). FindBody then resolves document.body — the mount target.
 	if (FDomNode* Root = NodeFromWrapper(RootWrapper))
 	{
 		Root->AppendChild(CreateElement(TEXT("head")));
@@ -42,14 +42,14 @@ FDomDocument::FDomDocument(ICathodeJsRuntime& InRuntime, INativeClassRegistry& I
 	}
 }
 
-// === TEARDOWN (007's pattern: gc-at-runtime + JS_FreeRuntime fallback) ===
+// === TEARDOWN (CathodeBinding's pattern: gc-at-runtime + JS_FreeRuntime fallback) ===
 //
 // The document OWNS the root (RootWrapper). The NON-OWNING NodeIndex lets node finalizers de-register through
 // a back-ref. Two paths, neither with an ordering requirement:
 //
 //   Dispose() — the RUNTIME RELEASE (runtime alive): drop the root ref -> the root's refcount falls to zero ->
 //   its finalizer fires synchronously -> ~FDomNode de-registers (document alive) + FreeRTs its children ->
-//   the acyclic tree reclaims via the cascade; node<->listener CYCLES reclaim on the next JS_RunGC (S6). This
+//   the acyclic tree reclaims via the cascade; node<->listener CYCLES reclaim on the next JS_RunGC. This
 //   is "dispose the document disposes the tree."
 //
 //   ~FDomDocument — PASSIVE / CONTEXT-FREE (touches NO runtime/context; safe in ANY order):
@@ -90,34 +90,34 @@ void FDomDocument::UnregisterNode(FDomNodeId InNodeId)
 
 void FDomDocument::MarkDirty(FDomNodeId InNodeId, EDirtyKind Kind)
 {
-	// Dirty-mark on mutation (S3): tell 005 to relayout only the affected region. The DOM serializes + drives;
+	// Dirty-mark on mutation: tell CathodeLayout to relayout only the affected region. The DOM serializes + drives;
 	// it does not lay out.
 	Layout.MarkNodeDirty(InNodeId, Kind);
-	if (Kind != EDirtyKind::PaintOnly) { bLayoutDirty = true; } // 013 slice 5: a layout-affecting write -> getComputedStyle must flush
+	if (Kind != EDirtyKind::PaintOnly) { bLayoutDirty = true; } // a layout-affecting write -> getComputedStyle must flush
 }
 
 void FDomDocument::Relayout(int32 AvailableWidth)
 {
-	// Drive 005 + cache the result; the observation reads compose its geometry/style. Real layout output is
-	// 005's (validation-pass) — the DOM only drives + reads.
+	// Drive CathodeLayout + cache the result; the observation reads compose its geometry/style. Layout output is
+	// CathodeLayout's — the DOM only drives + reads.
 	LastLayout = Layout.Relayout(AvailableWidth);
-	LastLayoutWidth = AvailableWidth; // 013 slice 5: remember the width the flush re-relayouts with
+	LastLayoutWidth = AvailableWidth; // remember the width the flush re-relayouts with
 	bLayoutDirty = false;             // the relayout flushed the accumulated dirty
 }
 
 void FDomDocument::FlushLayoutIfDirty()
 {
-	// 013 slice 5 — getComputedStyle's lazy flush: re-run the cascade if an element.style/structure write is pending,
+	// getComputedStyle's lazy flush: re-run the cascade if an element.style/structure write is pending,
 	// so the read reflects the mutation. Reuses the existing FRelayoutController via Relayout(LastLayoutWidth).
 	//
-	// CORRECTNESS of reusing the Controller (browse-design ratified, components-css.md): IsLayoutBoundary is ROOT-ONLY
+	// CORRECTNESS of reusing the Controller (see components-css.md): IsLayoutBoundary is ROOT-ONLY
 	// today, so the Controller does a FULL relayout (every dirty -> root boundary -> Plan.bFull -> RelayoutDocument
 	// re-feeds the whole-doc GetDocumentHtml) -> full-document selector context (a doc-CSS descendant selector whose
 	// ancestor is outside any subtree still matches) AND inherited changes reach every descendant.
 	// REUSE stays correct WHILE BOTH (a) attribute/sibling selectors are OUT (spec-surface.md:104 -> inline writes don't
 	// change selector matching) AND (b) the Controller relayouts FULL (root-only IsLayoutBoundary). EITHER changing --
 	// finer boundaries activating the subtree path, OR attr/sibling selectors added -- and the subtree re-cascade must
-	// FIRST gain full-doc context (GetSubtreeHtml is currently subtree-in-isolation / cascade-unsafe; built for geometry/011).
+	// FIRST gain full-doc context (GetSubtreeHtml is currently subtree-in-isolation / cascade-unsafe; built for geometry/CathodeVerify).
 	// Both are CHANGE-TRIGGERS, not standing.
 	if (bLayoutDirty && LastLayoutWidth > 0)
 	{
@@ -125,7 +125,7 @@ void FDomDocument::FlushLayoutIfDirty()
 	}
 }
 
-// === 005 ILayoutDocumentSource — structure reads (wrapper-governed index) + markup serialization (S5) ===
+// === CathodeLayout's ILayoutDocumentSource — structure reads (wrapper-governed index) + markup serialization ===
 
 int32 FDomDocument::GetRootNode() const
 {
@@ -149,10 +149,10 @@ void FDomDocument::GetChildNodes(int32 NodeId, TArray<int32>& OutChildren) const
 
 bool FDomDocument::IsLayoutBoundary(int32 NodeId) const
 {
-	// Conservative + safe: only the root is a guaranteed boundary. Over-claiming a boundary would make 005
+	// Conservative + safe: only the root is a guaranteed boundary. Over-claiming a boundary would make CathodeLayout
 	// relayout too SMALL a subtree (wrong); under-claiming only relayouts larger (safe). Finer boundary
 	// detection (explicit dims / replaced elements) needs care + is a future refinement — root-only keeps
-	// 005 correct (every dirty walks to the root => a full relayout, the safe baseline).
+	// CathodeLayout correct (every dirty walks to the root => a full relayout, the safe baseline).
 	return NodeId == RootNodeId;
 }
 
@@ -193,7 +193,7 @@ void FDomDocument::SerializeNode(const FDomNode* Node, FString& Out) const
 
 	Out += TEXT("<");
 	Out += Node->TagName;
-	// data-node-id (sprint 011 [c] T1): the correlation handle the layout engine reads back via get_attr to map
+	// data-node-id: the correlation handle the layout engine reads back via get_attr to map
 	// litehtml's placed element to our NodeId for the post-render geometry read. Emitted first, deterministic.
 	Out += FString::Printf(TEXT(" data-node-id=\"%d\""), Node->GetNodeId());
 	// Attributes in sorted-key order for DETERMINISTIC output (HTML attribute order is not semantic).
@@ -210,7 +210,7 @@ void FDomDocument::SerializeNode(const FDomNode* Node, FString& Out) const
 	}
 	Out += TEXT(">");
 
-	// FORK-2 (013 slice 3): <style> and <script> are the HTML RAW-TEXT elements — their text content must round-trip
+	// <style> and <script> are the HTML RAW-TEXT elements — their text content must round-trip
 	// UN-escaped (a '>' in a CSS child selector, or '&', must reach litehtml's parser verbatim; HTML-entity-escaping it
 	// would corrupt the rule). Exactly {<style>, <script>}; RCDATA (<textarea>/<title>) stays escaped (the generic path).
 	// TRUSTED-CONTENT INVARIANT (assert, NOT a runtime guard/sanitize): the raw content must not contain the element's
@@ -282,7 +282,7 @@ FDomNode* FDomDocument::NodeFromWrapper(const FJsValue& Wrapper) const
 	{
 		return nullptr;
 	}
-	// TODO-PREBUILD(signature): JS_GetOpaque(obj, class_id) -> void* (quickjs.h:1040) — see 007.
+	// TODO-PREBUILD(signature): JS_GetOpaque(obj, class_id) -> void* (quickjs.h:1040) — see CathodeBinding.
 	return static_cast<FDomNode*>(JS_GetOpaque(Wrapper.GetValue(), NodeClassId));
 }
 
@@ -303,7 +303,7 @@ const ISelectorService* FDomDocument::GetSelectorService() const
 
 FJsValue FDomDocument::GetWrapperForNode(FDomNodeId InNodeId) const
 {
-	// The node marshaler (S2): resolve a node's EXISTING wrapper via its NON-OWNING borrow (set once at creation) —
+	// The node marshaler: resolve a node's EXISTING wrapper via its NON-OWNING borrow (set once at creation) —
 	// O(1) and complete for root / attached / DETACHED. JS_DupValue gives the caller a NEW OWNING ref to the SAME
 	// JS object (JS identity === preserved) WITHOUT minting a second wrapper; the stored borrow stays non-owning.
 	// SOUND (no read-after-finalize): a node is in NodeIndex only while its wrapper is alive — the finalizer
@@ -326,7 +326,7 @@ static const TCHAR* const HtmlNamespace = TEXT("http://www.w3.org/1999/xhtml");
 
 FJsValue FDomDocument::CreateElement(const FString& TagName)
 {
-	return CreateElementNS(HtmlNamespace, TagName); // createElement defaults to the HTML ns (012 come-due)
+	return CreateElementNS(HtmlNamespace, TagName); // createElement defaults to the HTML ns
 }
 
 FJsValue FDomDocument::CreateElementNS(const FString& Namespace, const FString& QualifiedName)
@@ -334,10 +334,10 @@ FJsValue FDomDocument::CreateElementNS(const FString& Namespace, const FString& 
 	const FDomNodeId Id = NextNodeId++;
 	FDomNode* Node = new FDomNode(*this, Id, EDomNodeType::Element);
 	Node->TagName = QualifiedName;
-	Node->NamespaceURI = Namespace;                               // STORE the ns (the slice-5 come-due reversal)
+	Node->NamespaceURI = Namespace;                               // STORE the ns (backs Node.namespaceURI)
 	NodeIndex.Add(Id, Node);                                       // NON-OWNING index entry
 	FJsValue Wrapper = Registry.CreateWrappedObject(NodeClassId, Node); // OWNING wrapper -> the caller
-	Node->SetWrapperBorrow(Wrapper.GetValue());                   // S2: NON-OWNING reverse-lookup borrow (set once)
+	Node->SetWrapperBorrow(Wrapper.GetValue());                   // NON-OWNING reverse-lookup borrow (set once)
 	return Wrapper;
 }
 
@@ -348,15 +348,15 @@ FJsValue FDomDocument::CreateTextNode(const FString& Data)
 	Node->TextData = Data;
 	NodeIndex.Add(Id, Node);
 	FJsValue Wrapper = Registry.CreateWrappedObject(NodeClassId, Node);
-	Node->SetWrapperBorrow(Wrapper.GetValue());                   // S2: NON-OWNING reverse-lookup borrow (set once)
+	Node->SetWrapperBorrow(Wrapper.GetValue());                   // NON-OWNING reverse-lookup borrow (set once)
 	return Wrapper;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
-// 028 S3 — the WORKER-BUILD marker (test-only): the thread CreateDomDocument (the JS-stack stand-up / the DOM-build
+// The WORKER-BUILD marker (test-only): the thread CreateDomDocument (the JS-stack stand-up / the DOM-build
 // entry) last ran on. Read via GetLastDomBuildThreadId() (decl in CathodeDom.h). Proves the FDomDocument was BUILT on
 // the worker thread (build-thread == raster-thread == the same auto-started worker; != game, != a test-spawned /
-// FScopedTestRuntime thread). Mirrors the S2 at-the-raster marker.
+// FScopedTestRuntime thread). Mirrors the at-the-raster marker (GetLastRasterThreadId).
 static TAtomic<uint32> GLastDomBuildThreadId{ 0 };
 uint32 GetLastDomBuildThreadId() { return GLastDomBuildThreadId.Load(); }
 #endif
@@ -365,19 +365,19 @@ TUniquePtr<FDomDocument> CreateDomDocument(
 	ICathodeJsRuntime& Runtime, INativeClassRegistry& Registry, ILayoutEngine& Layout, const ISelectorService* Selector)
 {
 #if WITH_DEV_AUTOMATION_TESTS
-	GLastDomBuildThreadId = FPlatformTLS::GetCurrentThreadId(); // 028 S3 — record the JS DOM-build thread (the worker)
+	GLastDomBuildThreadId = FPlatformTLS::GetCurrentThreadId(); // record the JS DOM-build thread (the worker)
 #endif
-	// sprint 012 slice 1: RegisterDomNodeClass now also installs the bound members onto the class proto, so it
-	// needs the live JSContext (002's confined context).
+	// RegisterDomNodeClass also installs the bound members onto the class proto, so it
+	// needs the live JSContext (CathodeRuntime's confined context).
 	JSContext* const Context = static_cast<JSContext*>(Runtime.GetNativeContextHandle());
 	const JSClassID NodeClassId = RegisterDomNodeClass(Registry, Context);
-	// sprint 012 slice 5: register the FDomDocument JS class (the 2nd class via the one mechanism) + install its
+	// Register the FDomDocument JS class (the 2nd class via the one mechanism) + install its
 	// members, so the document can be wrapped + exposed as the `document` global (InstallAsGlobal).
 	RegisterDomDocumentClass(Registry, Context);
-	// sprint 012 events: register the Event + KeyboardEvent classes (the dispatch wraps the live FDomEvent in one).
+	// Register the Event + KeyboardEvent classes (the dispatch wraps the live FDomEvent in one).
 	RegisterDomEventClasses(Registry, Context);
 	TUniquePtr<FDomDocument> Document = MakeUnique<FDomDocument>(Runtime, Registry, Layout, NodeClassId);
-	// sprint 012 selectors: install the matcher service (abstract; the litehtml-backed impl lives in CathodeLayout)
+	// Install the matcher service (abstract; the litehtml-backed impl lives in CathodeLayout)
 	// so node/document querySelector resolves. Optional so the non-selector call sites stay null (querySelector unused).
 	if (Selector != nullptr)
 	{
@@ -386,15 +386,15 @@ TUniquePtr<FDomDocument> CreateDomDocument(
 	return Document;
 }
 
-// === Sprint 012 slice 5: the FDomDocument JS class (the 2nd class via the one binding-definition mechanism) ===
+// === The FDomDocument JS class (the 2nd class via the one binding-definition mechanism) ===
 
 namespace
 {
 // The document class id, set at registration; the document member thunks recover the native via it.
 JSClassID GDomDocumentClassId = 0;
 
-// getElementById(id): find the element whose id ATTRIBUTE == id (the slice-3 reflected id) -> its EXISTING
-// wrapper (S2 identity) or null. Find-by-attribute, NOT a node-id/shadow.
+// getElementById(id): find the element whose id ATTRIBUTE == id (the reflected id) -> its EXISTING
+// wrapper (=== identity) or null. Find-by-attribute, NOT a node-id/shadow.
 JSValue DocGetElementByIdThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
 	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
@@ -472,8 +472,7 @@ JSValue DocCreateTextNodeThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, J
 	return Self->CreateTextNode(Data).Release();
 }
 
-// createElementNS(namespace, qualifiedName) -> a real element with the ns STORED (sprint 012 come-due: slice 5
-// accepted-but-dropped the ns "to namespaceURI's arrival"; namespaceURI IS that arrival). Preact calls this
+// createElementNS(namespace, qualifiedName) -> a real element with the ns STORED. Preact calls this
 // universally with the HTML ns; createElement defaults to the HTML ns. The stored ns backs Node.namespaceURI.
 JSValue DocCreateElementNSThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
@@ -483,11 +482,11 @@ JSValue DocCreateElementNSThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, 
 	if (Argc < 2 || !UnmarshalString(Ctx, Argv[1], QualifiedName)) { return JS_ThrowTypeError(Ctx, "expected (namespace, qualifiedName)"); }
 	FString Namespace;
 	if (!JS_IsNull(Argv[0])) { UnmarshalString(Ctx, Argv[0], Namespace); } // string | null; null -> "" -> namespaceURI null
-	return Self->CreateElementNS(Namespace, QualifiedName).Release(); // STORE the ns (the come-due reversal)
+	return Self->CreateElementNS(Namespace, QualifiedName).Release(); // STORE the ns
 }
 
-// body / documentElement / activeElement (Document getters, sprint 012 DOM-completion) — a node id -> its EXISTING
-// wrapper (S2 ===) or JS null. body = the <body> element; documentElement = the <html> root; activeElement = the
+// body / documentElement / activeElement (Document getters) — a node id -> its EXISTING
+// wrapper (===) or JS null. body = the <body> element; documentElement = the <html> root; activeElement = the
 // focused element (initial/cleared -> null).
 JSValue DocNodeIdGetter(JSContext* Ctx, JSValueConst ThisVal, FDomNodeId (FDomDocument::*Resolve)() const)
 {
@@ -502,9 +501,9 @@ JSValue DocBodyGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNod
 JSValue DocDocumentElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetRootNodeId); }
 JSValue DocActiveElementGetterThunk(JSContext* Ctx, JSValueConst ThisVal) { return DocNodeIdGetter(Ctx, ThisVal, &FDomDocument::GetFocusedNode); }
 
-// 030 S1-P1 — the document EventTarget thunks (addEventListener / removeEventListener), recovering FDomDocument* via
+// The document EventTarget thunks (addEventListener / removeEventListener), recovering FDomDocument* via
 // GDomDocumentClassId (mirrors the node EventTarget thunks). The document is the bubble top: a keydown dispatched at a node
-// bubbles up to these listeners -> the ratified `document.addEventListener('keydown', ...)` fires.
+// bubbles up to these listeners -> `document.addEventListener('keydown', ...)` fires.
 JSValue DocAddEventListenerThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JSValueConst* Argv)
 {
 	FDomDocument* Self = static_cast<FDomDocument*>(JS_GetOpaque2(Ctx, ThisVal, GDomDocumentClassId));
@@ -547,7 +546,7 @@ JSValue DocDispatchEventThunk(JSContext* Ctx, JSValueConst ThisVal, int Argc, JS
 }
 
 // THE 2nd binding-definition table — install (InstallBoundMembers) + enumerate (EnumerateBoundMembersJson) BOTH
-// consume it (crit-1, now PER CLASS). Document-iface members; names distinct from the node set (no conflation).
+// consume it (PER CLASS). Document-iface members; names distinct from the node set (no conflation).
 #define CATHODE_BIND_DOC_METHOD(JsName, Iface, Tag, Sig, ThunkFn) \
 	{ JsName, Iface, EBoundMemberKind::Method, Tag, Sig, &ThunkFn, nullptr, nullptr }
 #define CATHODE_BIND_DOC_GETTER(JsName, Iface, Tag, Sig, GetterFn) \
@@ -560,11 +559,11 @@ static const FBoundMember GDomDocumentMembers[] =
 	CATHODE_BIND_DOC_METHOD("createElement",   "Document", "margin",   "(localName: string) -> Element", DocCreateElementThunk),
 	CATHODE_BIND_DOC_METHOD("createTextNode",  "Document", "required", "(data: string) -> Text", DocCreateTextNodeThunk),
 	CATHODE_BIND_DOC_METHOD("createElementNS", "Document", "required", "(namespace: string | null, qualifiedName: string) -> Element", DocCreateElementNSThunk),
-	// Document accessors (sprint 012 DOM-completion): body / documentElement / activeElement (S2-identity getters).
+	// Document accessors: body / documentElement / activeElement (===-identity getters).
 	CATHODE_BIND_DOC_GETTER("body",            "Document", "margin", "Element | null", DocBodyGetterThunk),
 	CATHODE_BIND_DOC_GETTER("documentElement", "Document", "margin", "Element | null", DocDocumentElementGetterThunk),
 	CATHODE_BIND_DOC_GETTER("activeElement",   "Document", "margin", "Element | null", DocActiveElementGetterThunk),
-	// 030 S1-P1 — the document EventTarget surface (runtime install of addEventListener/removeEventListener on the document
+	// The document EventTarget surface (runtime install of addEventListener/removeEventListener on the document
 	// object). Tagged "Document" (NOT "EventTarget") so the d.ts emits them under Document — a valid compatible re-declaration
 	// of the members Document already inherits via Node extends EventTarget; tagging "EventTarget" would DUPLICATE the node's
 	// EventTarget entries (the codegen does not dedup) -> a tsc duplicate-identifier error.
@@ -576,7 +575,7 @@ static const FBoundMember GDomDocumentMembers[] =
 #undef CATHODE_BIND_DOC_GETTER
 } // namespace
 
-// --- FDomDocument slice-5 backings ---
+// --- FDomDocument member backings ---
 
 FDomNodeId FDomDocument::FindElementById(const FString& ElementId) const
 {
@@ -644,7 +643,7 @@ FDomNodeId FDomDocument::FindBody() const
 	return INDEX_NONE;
 }
 
-// Focus STATE (012) — single-valued (one FocusedNodeId; LATEST-WINS). blur is ELEMENT-SCOPED: it clears ONLY if the
+// Focus STATE — single-valued (one FocusedNodeId; LATEST-WINS). blur is ELEMENT-SCOPED: it clears ONLY if the
 // given node currently holds focus (el2.blur() while el1 is focused is a no-op). Initial == cleared == INDEX_NONE.
 void FDomDocument::SetFocusedNode(FDomNodeId NodeId)
 {
@@ -668,14 +667,14 @@ void FDomDocument::InstallAsGlobal()
 {
 	// Wrap THIS document via the document JS class (NON-OWNING: the wrapper's opaque is this C++/TUniquePtr-owned
 	// document; the class finalizer is null so GC never deletes it) and set globalThis.document. The production
-	// install method; the per-surface OnInstallDocument seam fires it at surface-load (gap-doc'd follow-on).
+	// install method; the per-surface owner (CathodeComposition) fires it.
 	if (Context == nullptr)
 	{
 		return;
 	}
 	FJsValue DocumentWrapper = Registry.CreateWrappedObject(GDomDocumentClassId, this);
-	// 030 S1-P1 — store a NON-OWNING borrow of THIS wrapper (the global property owns the ref) so e.currentTarget === document
-	// holds. Updated on each (re)install (the M1 per-surface repoint), so the borrow always names the CURRENT globalThis.document.
+	// Store a NON-OWNING borrow of THIS wrapper (the global property owns the ref) so e.currentTarget === document
+	// holds. Updated on each (re)install (the per-surface repoint), so the borrow always names the CURRENT globalThis.document.
 	DocumentWrapperBorrow = DocumentWrapper.GetValue();
 	JSValue Global = JS_GetGlobalObject(Context);
 	JS_SetPropertyStr(Context, Global, "document", DocumentWrapper.Release());
@@ -686,16 +685,15 @@ JSClassID RegisterDomDocumentClass(INativeClassRegistry& Registry, JSContext* Co
 {
 	// The 2nd class via the SAME mechanism. Finalizer is NON-OWNING (nullptr): the FDomDocument is
 	// C++/TUniquePtr-owned; deleting it on GC would double-free. ~FDomDocument (passive, order-safe) handles the
-	// C++ teardown. NO gc_mark (nullptr) — reclaim is Dispose() + the node gc_mark/T4; RootWrapper's C++ refcount
+	// C++ teardown. NO gc_mark (nullptr) — reclaim is Dispose() + the node gc_mark; RootWrapper's C++ refcount
 	// governs survival.
 	FNativeClassDef Def;
 	Def.Name = "CathodeDomDocument";
 	Def.Finalizer = nullptr; // non-owning wrapper — do NOT delete the C++-owned document on GC
-	// 030 S1 — document.gc_mark STAYS nullptr (carry-not-rediscover CLOSED). The event-API binding looked like the carry
-	// trigger, but a listeners-only re-add was ATTEMPTED + CRASHED with the COVERAGE-predicted UAF: the null-finalizer document
-	// OUTLIVES its wrapper, so reclaiming the document<->listener cycle dangles the FDomDocument's listener refs (the node
-	// avoids this via its non-null finalizer). It's also UNNECESSARY — production always keeps globalThis.document rooted
-	// (per-surface InstallAsGlobal), so the cycle is never collected. The trigger is FALSIFIED. See CathodeDom/COVERAGE.md.
+	// document.gc_mark STAYS nullptr even though the document holds listeners. A listeners-only gc_mark is a UAF: the
+	// null-finalizer document OUTLIVES its wrapper, so reclaiming the document<->listener cycle dangles the FDomDocument's
+	// listener refs (the node avoids this via its non-null finalizer). It's also UNNECESSARY — production always keeps
+	// globalThis.document rooted (per-surface InstallAsGlobal), so the cycle is never collected. See CathodeDom/COVERAGE.md.
 	Def.GcMark = nullptr;
 	const JSClassID ClassId = Registry.RegisterClass(Def);
 	GDomDocumentClassId = ClassId; // the member thunks recover the native via this id
@@ -713,7 +711,7 @@ FString GetDomDocumentDescriptorJson()
 	return EnumerateBoundMembersJson(GDomDocumentMembers, UE_ARRAY_COUNT(GDomDocumentMembers));
 }
 
-// 025 S1 — codegen accessor: expose the PRODUCTION document binding table for GenerateAuthoringDts (the same table
+// Codegen accessor: expose the PRODUCTION document binding table for GenerateAuthoringDts (the same table
 // InstallBoundMembers registers).
 void GetDomDocumentBoundMembersForCodegen(const FBoundMember*& OutMembers, int32& OutCount)
 {

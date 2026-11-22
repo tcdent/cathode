@@ -12,15 +12,15 @@ THIRD_PARTY_INCLUDES_END
 
 // Spec for the BESPOKE appendable class-registration round-trip: register a native class, create a wrapped
 // object with an opaque native pointer, recover the SAME pointer via GetOpaque. Drives the REAL engine
-// (like 002 lifecycle) and asserts OUR bookkeeping — that the pointer we attached is the pointer we get
-// back — NEVER quickjs-ng GC internals or vendor output. Authored, not run this sprint.
+// (like the CathodeRuntime lifecycle tests) and asserts OUR bookkeeping — that the pointer we attached is the pointer we get
+// back — NEVER quickjs-ng GC internals or vendor output.
 
 namespace
 {
 using namespace Cathode;
 
 // A finalizer for the test class. No-op: the native object the round-trip uses is a stack sentinel the test
-// owns; the finalizer's real job (free the C++ side) is exercised in the teardown slice, not here.
+// owns; the finalizer's real job (free the C++ side) is exercised in the teardown tests, not here.
 void TestClassFinalizer(JSRuntime* /*Runtime*/, JSValueConst /*Value*/)
 {
 }
@@ -42,7 +42,7 @@ bool FCathodeBindingClassRegistrationTest::RunTest(const FString& Parameters)
 	FNativeClassDef Def;
 	Def.Name = "CathodeTestNative";
 	Def.Finalizer = &TestClassFinalizer;
-	// Def.GcMark stays null -> behaves exactly as today (no cycle-collection policy this slice).
+	// Def.GcMark stays null -> no gc_mark hook (no cycle-collection policy in this test).
 
 	const JSClassID ClassId = Registry->RegisterClass(Def);
 	TestTrue(TEXT("a class id was allocated"), ClassId != 0);

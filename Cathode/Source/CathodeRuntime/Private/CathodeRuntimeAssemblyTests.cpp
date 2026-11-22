@@ -11,7 +11,7 @@
 // STARTUP order. Each drives the EXACT production unit (FGlobalEnvironment::AssembleGlobals /
 // FRuntimeStartup::Startup — the same the worker's Run() uses) and proves the order via a single shared
 // ordered effect-log fed through recording seams (same discipline as the tick's phase order). No JS
-// global is bound and no vendor binding is tested. Authored, not run this sprint.
+// global is bound and no vendor binding is tested.
 
 namespace
 {

@@ -23,7 +23,7 @@ bool FSurface::RenderAndRelay(const FSurfaceReadinessSeam& Egress)
 	}
 
 	// Render the surface's document at its fixed available width, hand the resulting paint batch to the
-	// render target (003's producer), and let it rasterize + swap-if-changed. The batch is carried opaque;
+	// render target (the Rasterizer's producer), and let it rasterize + swap-if-changed. The batch is carried opaque;
 	// Surfaces never interprets it.
 	const FSurfacePaintBatch Batch = Document->RenderFrame(Width);
 	const bool bChanged = Target->ProduceFrame(Batch);
@@ -34,7 +34,7 @@ bool FSurface::RenderAndRelay(const FSurfaceReadinessSeam& Egress)
 		return false;
 	}
 
-	// Relay: stamp the producer's frame with THIS surface's identity (the address 003's per-producer seam
+	// Relay: stamp the producer's frame with THIS surface's identity (the address the Rasterizer's per-producer seam
 	// lacks) and emit to Egress. The engine references the buffer; Egress copies on the event.
 	if (Egress)
 	{

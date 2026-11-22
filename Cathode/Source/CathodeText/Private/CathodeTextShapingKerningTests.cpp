@@ -6,9 +6,9 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
-// 021 slice 1 — the FIRST real HarfBuzz hb_shape execution, proven DIRECTLY on CathodeText's API (a server LEAF — NO
+// Real HarfBuzz hb_shape execution, proven DIRECTLY on CathodeText's API (a server LEAF — NO
 // CathodeLayout dep, NO ITextMeasurer adapter, NO Layout wiring; the adapter + "measurement reaches Layout" are
-// INTEGRATION, not 021). The TAUTOLOGY-FREE discriminator = the KERNING RELATION: measure("AV") < measure("A")+measure("V")
+// INTEGRATION, not this module). The TAUTOLOGY-FREE discriminator = the KERNING RELATION: measure("AV") < measure("A")+measure("V")
 // — a kerning pair shaped as ONE run shrinks below the naive sum; ONLY real hb_shape applying the font's GPOS/kern yields
 // the <; a naive/proportional/fixed path gives ==. PAIRED with a NON-KERNING control (measure("II") == sum EXACTLY) — the
 // two-pair set bites a hardcode-smaller path. + the CORROBORATING trio (non-zero / longer->wider / larger-font->wider,
@@ -87,9 +87,9 @@ bool FCathodeTextShapingKerningTest::RunTest(const FString& Parameters)
 
 	return true;
 #else
-	// WIN64 EXECUTED-NOT-SKIPPED (the anti-vacuous-green gate): HarfBuzz is Win64-only; do NOT trivially pass on a non-Win64
+	// WIN64 EXECUTED-NOT-SKIPPED (the anti-vacuous-green guard): HarfBuzz is Win64-only; do NOT trivially pass on a non-Win64
 	// build (the assertions would be #if'd out -> a meaningless green). Fail explicitly so a non-Win64 run can never report
-	// Success for this proof. (The build box is Win64, so this path is dormant there; it guards a stray non-Win64 run.)
+	// Success for this proof. (This path is dormant on Win64; it guards a stray non-Win64 run.)
 	AddError(TEXT("Cathode.Text.Shaping.KerningRelation requires Win64 (HarfBuzz is Win64-only); the real shaper did not execute on this platform — a non-Win64 pass would be vacuous."));
 	return false;
 #endif

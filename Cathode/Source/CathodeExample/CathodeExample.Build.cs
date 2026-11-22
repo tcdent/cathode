@@ -6,7 +6,7 @@ public class CathodeExample : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// 031 — the REFERENCE EXAMPLE INTEGRATION (host-agnostic; ships with the standalone Cathode library). The canonical
+		// The REFERENCE EXAMPLE INTEGRATION (host-agnostic; ships with the standalone Cathode library). The canonical
 		// "how a game wires into Cathode": a host object implementing ICathodeGameBridge (CathodeDom) registered via the
 		// owner's injecting Install (CathodeComposition). The dependency arrow is game -> Cathode ONLY — this module names
 		// NO host (Uptime*) type and (in production) NO Engine; it is a neutral REGISTRANT, the same inversion as every other
@@ -16,7 +16,7 @@ public class CathodeExample : ModuleRules
 			"Core",
 			"CathodeDom",         // ICathodeGameBridge — the host-registered bridge interface
 			"CathodeComposition", // FCompositionSurfaceOwner::Install (the injecting overload) + DeliverIntent — the registration point
-			"CathodeSurfaces",    // 031 S2 — ECathodeInputIntent / CathodeIntentToKey (the Cathode-owned input vocabulary)
+			"CathodeSurfaces",    // ECathodeInputIntent / CathodeIntentToKey (the Cathode-owned input vocabulary)
 		});
 
 		// TEST-ONLY (non-Shipping): the mutate-and-observe proof drives the real worker + GPU-reads the composed surface.

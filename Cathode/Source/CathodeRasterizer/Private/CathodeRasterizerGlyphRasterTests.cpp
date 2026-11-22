@@ -1,25 +1,25 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "CathodeRaster.h"
-#include "CathodeText.h" // 021's shaper + byte store (TEST-ONLY dep; the production Rasterizer stays a leaf)
+#include "CathodeText.h" // the shaper + byte store (TEST-ONLY dep; the production Rasterizer stays a leaf)
 
 #include "Interfaces/IPluginManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
-// 022 — the LAST engine stub: real shaped text -> real pixels. FBlend2DContext::DrawGlyphRun (FPositionedGlyphRun
+// Real shaped text -> real pixels. FBlend2DContext::DrawGlyphRun (FPositionedGlyphRun
 // -> BLFont via createFromData [cached by font identity; the cache OWNS its bytes] + BLGlyphRun -> fill_glyph_run)
-// rasterizes 021's REAL hb_shape output (over the committed OFL Liberation Sans v2.1.5 — the SAME bytes -> SAME
-// glyph-id space) to correct pixels in a REAL Blend2D bitmap (the first real BLContext + pixel-read).
+// rasterizes CathodeText's REAL hb_shape output (over the committed OFL Liberation Sans v2.1.5 — the SAME bytes -> SAME
+// glyph-id space) to correct pixels in a REAL Blend2D bitmap (a real BLContext + pixel-read).
 //
 // TAUTOLOGY-FREE (Blend2D owns the pixel VALUES): the LOCALIZED-INK relation -- (a) EXISTS a non-background pixel
 // IN the glyph's laid-out box (a dense 'M' -> many; a no-op fill -> blank -> RED), AND (b) ALL pixels in a
 // guaranteed-OUTSIDE margin are background (a fill-everything -> RED). NOT a hand-assert of Blend2D's exact pixels;
 // NOT ALL-ink-in-box (a glyph is strokes + gaps -> EXISTS, not ALL); the position-aware part = the ink is IN the box.
-// SAME-BYTES ANCHOR: ONE FFontHandle drives BOTH 021's shape AND 022's raster (the bytes the shaper shaped).
+// SAME-BYTES ANCHOR: ONE FFontHandle drives BOTH the shape AND the raster (the bytes the shaper shaped).
 // WIN64-EXECUTED-NOT-SKIPPED (Blend2D + HarfBuzz Win64-only): #if PLATFORM_WINDOWS; the #else AddErrors (no vacuous
 // #if'd-out green); the [WIN64-EXECUTED] marker emits the ink pixel COUNT (>0) — evidence only the executed raster emits.
-// LEAF: the bridge (021's FGlyphRun + the byte store -> the neutral FPositionedGlyphRun) is TEST-only; the production
+// LEAF: the bridge (CathodeText's FGlyphRun + the byte store -> the neutral FPositionedGlyphRun) is TEST-only; the production
 // Rasterizer carries NO CathodeText dep (the bytes are IN the seam).
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -32,13 +32,13 @@ bool FCathodeRasterizerGlyphRasterTest::RunTest(const FString& Parameters)
 	using namespace Cathode;
 
 #if PLATFORM_WINDOWS
-	// REUSE 021's committed OFL fixture cross-module (no re-commit).
+	// REUSE CathodeText's committed OFL fixture cross-module (no second copy).
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Cathode"));
 	if (!Plugin.IsValid()) { AddError(TEXT("could not locate the Cathode plugin base dir (IPluginManager)")); return false; }
 	const FString FontPath = Plugin->GetBaseDir() / TEXT("Source/CathodeText/Private/Tests/Fixtures/LiberationSans-Regular.ttf");
 	if (!FPaths::FileExists(FontPath)) { AddError(FString::Printf(TEXT("the committed OFL font fixture is not on disk: %s"), *FontPath)); return false; }
 
-	// 021's shaper over the OFL font -- ONE FFontHandle drives BOTH the shape AND the raster (the same-bytes anchor).
+	// CathodeText's shaper over the OFL font -- ONE FFontHandle drives BOTH the shape AND the raster (the same-bytes anchor).
 	TUniquePtr<IFontRegistry> Registry = CreateFontRegistry();
 	const FFontHandle FontHandle = Registry->RegisterFontFile(FontPath);
 	TUniquePtr<ITextShaper> Shaper = CreateHarfBuzzShaper(*Registry);
@@ -49,16 +49,16 @@ bool FCathodeRasterizerGlyphRasterTest::RunTest(const FString& Parameters)
 	Req.Font = FontHandle;
 	Req.FontSizePixels = SizePx;
 	const FShapedRun Shaped = Shaper->Shape(Req);
-	const FGlyphRun ShapedGlyphs = GetGlyphRun(Shaped); // 021's REAL shaped glyph(s) of 'M'
+	const FGlyphRun ShapedGlyphs = GetGlyphRun(Shaped); // the REAL shaped glyph(s) of 'M'
 
-	// the SAME bytes 021's hb_font used -- a BORROWED view (the Registry holds them alive across the synchronous draw).
+	// the SAME bytes the shaper's hb_font used -- a BORROWED view (the Registry holds them alive across the synchronous draw).
 	TArrayView<const uint8> FontBytes;
 	if (!Registry->GetFontBytes(FontHandle, FontBytes) || FontBytes.Num() == 0)
 	{
 		AddError(TEXT("could not get the font bytes from the registry")); return false;
 	}
 
-	// bridge 021's FGlyphRun -> the Rasterizer's NEUTRAL FPositionedGlyphRun (NO CathodeText type in the seam).
+	// bridge CathodeText's FGlyphRun -> the Rasterizer's NEUTRAL FPositionedGlyphRun (NO CathodeText type in the seam).
 	TArray<FRasterGlyph> RasterGlyphs;
 	for (const FShapedGlyph& G : ShapedGlyphs.Glyphs) { RasterGlyphs.Add({ G.GlyphId, G.X, G.Y }); }
 	if (RasterGlyphs.Num() == 0) { AddError(TEXT("021 shaped no glyphs for 'M'")); return false; }
@@ -69,7 +69,7 @@ bool FCathodeRasterizerGlyphRasterTest::RunTest(const FString& Parameters)
 	Run.FontSizePx = SizePx;
 	Run.Glyphs = RasterGlyphs;  // borrowed (RasterGlyphs alive across the draw)
 
-	// the FIRST real Blend2D bitmap + context + pixel-read.
+	// a real Blend2D bitmap + context + pixel-read.
 	const int32 W = 128, H = 128;
 	TUniquePtr<IRasterBackend> Backend = CreateBlend2DBackend();
 	TUniquePtr<IRasterBitmap> Bitmap = Backend->CreateBitmap(W, H, EPixelFormat::PremultipliedBGRA8);

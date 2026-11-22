@@ -2,17 +2,16 @@
 
 // Blend2D — the CPU paint backend (JIT via AsmJit). Every BL* token is confined to this translation
 // unit; swapping rasterizers means reimplementing this file and the factory, nothing else. The include
-// path is wired by the execution-approval sprint's build (the header is vendored at
-// vendor/lib/cathode/blend2d/blend2d/blend2d.h, built from source then); no build runs this sprint.
+// path is wired in CathodeRasterizer.Build.cs (the headers are vendored under Source/ThirdParty/blend2d/include).
 THIRD_PARTY_INCLUDES_START
 #include "blend2d.h"
 THIRD_PARTY_INCLUDES_END
 
-// TODO-PREBUILD(naming): every BLImage/BLContext method in this file uses the snake_case API
+// NOTE (naming): every BLImage/BLContext method in this file uses the snake_case API
 // (create / is_empty / make_mutable / begin / set_hint / clip_to_rect / restore_clipping / fill_rect /
-// fill_box / blit_image / clear_rect / end). Verify against the VENDORED Blend2D — older releases expose
-// camelCase (isEmpty/makeMutable/fillRect/clipToRect/blitImage/clearRect/setHint). If the vendored API is
-// camelCase, every call site here needs the rename.
+// fill_box / blit_image / clear_rect / end), matching the VENDORED Blend2D — older releases expose
+// camelCase (isEmpty/makeMutable/fillRect/clipToRect/blitImage/clearRect/setHint); against one of those,
+// every call site here needs the rename.
 
 namespace Cathode
 {
@@ -55,8 +54,8 @@ BLBox ToBLBox(const FBox2f& Box)
 
 BLRgba32 ToBLRgba32(const FColor& Color)
 {
-	// TODO-PREBUILD(arg-order): confirm the BLRgba32(r, g, b, a) byte-component constructor exists and
-	// takes that argument order (vs a single packed 0xAARRGGBB value) in the vendored Blend2D.
+	// NOTE (arg-order): the BLRgba32(r, g, b, a) byte-component constructor, in that argument order
+	// (vs a single packed 0xAARRGGBB value).
 	return BLRgba32(Color.R, Color.G, Color.B, Color.A);
 }
 
@@ -85,9 +84,8 @@ public:
 		// A freshly-created BLImage has UNDEFINED pixels (create does not zero them). Define the initial state as
 		// transparent (clear_all -> all pixels 0 = transparent for PRGB32) so the dirty-region accumulation model
 		// has a clean base: FSurfaceRasterizer::RasterizeFrame redraws ONLY the dirty rects, so the area outside
-		// the first frame's dirty rects would otherwise show uninitialized garbage (browse 023 — found in the
-		// first real composed render of a transparent-page surface; the 34->635 non-deterministic-across-builds
-		// ink-outside was the tell). Clearing HERE, at the real bitmap owner, defines every surface buffer's
+		// the first frame's dirty rects would otherwise show uninitialized garbage (visible in a composed render
+		// of a transparent-page surface as non-deterministic ink outside the drawn area). Clearing HERE, at the real bitmap owner, defines every surface buffer's
 		// initial state on creation WITHOUT recording a paint op — the recording-backend tests use a separate
 		// FRecordingBitmap and are untouched (a clear orchestrated from FDoubleBuffer would have to go through the
 		// recorded dispatch API, breaking FrameTests' DispatchedCalls[0]==Clip).
@@ -97,7 +95,7 @@ public:
 		return true;
 	}
 
-	// 029 #4 — decode encoded image bytes (PNG/...) INTO this bitmap's BLImage, ADOPTING the decoded pixels (vs Create()'s
+	// Decode encoded image bytes (PNG/...) INTO this bitmap's BLImage, ADOPTING the decoded pixels (vs Create()'s
 	// blank). The bytes->bitmap path the composition DrawImage seam needs; DecodeImageSize (below) is size-only + discards.
 	bool CreateFromEncoded(const uint8* EncodedData, int32 EncodedSize)
 	{
@@ -121,9 +119,9 @@ public:
 
 	virtual bool GetData(FBitmapData& OutData) override
 	{
-		// TODO-PREBUILD(signature): confirm BLImage::make_mutable(BLImageData*) is the right call for
-		// read/write pixel access (vs get_data for read-only) and the BLImageData field names
-		// (pixel_data / stride / size.w / size.h / format) against the vendored Blend2D.
+		// NOTE (signature): BLImage::make_mutable(BLImageData*) is the call for read/write pixel access
+		// (vs get_data for read-only); the BLImageData field names (pixel_data / stride / size.w / size.h /
+		// format) follow the vendored Blend2D.
 		BLImageData Data;
 		if (Image.make_mutable(&Data) != BL_SUCCESS)
 		{
@@ -154,8 +152,8 @@ public:
 	bool Begin(FBlend2DBitmap& Target, const FRasterConfig& Config)
 	{
 		BLContextCreateInfo CreateInfo{};
-		// TODO-PREBUILD(struct-field): verify BLContextCreateInfo.thread_count field name (vs threadCount)
-		// against the vendored Blend2D.
+		// NOTE (struct-field): BLContextCreateInfo.thread_count (vs threadCount in older releases) follows
+		// the vendored Blend2D.
 		CreateInfo.thread_count = Config.BackendThreadCount; // 0 = synchronous on our worker (decided)
 		if (Context.begin(Target.GetBLImage(), CreateInfo) != BL_SUCCESS)
 		{
@@ -163,8 +161,8 @@ public:
 		}
 		// Rendering config applied once here, not per op. Grayscale analytic AA is the only
 		// BLRenderingQuality; sRGB blending is the Blend2D default (config does not force linear).
-		// TODO-PREBUILD(enum): verify set_hint takes (BLContextHint, uint32) and the enum names
-		// BL_CONTEXT_HINT_RENDERING_QUALITY / BL_RENDERING_QUALITY_ANTIALIAS against the vendored Blend2D.
+		// NOTE (enum): set_hint takes (BLContextHint, uint32); the enum names
+		// BL_CONTEXT_HINT_RENDERING_QUALITY / BL_RENDERING_QUALITY_ANTIALIAS follow the vendored Blend2D.
 		Context.set_hint(BL_CONTEXT_HINT_RENDERING_QUALITY, BL_RENDERING_QUALITY_ANTIALIAS);
 		return true;
 	}
@@ -333,9 +331,9 @@ bool DecodeImageSize(const uint8* EncodedData, int32 EncodedSize, int32& OutWidt
 	return OutWidth > 0 && OutHeight > 0;
 }
 
-// 029 #4 — decode encoded image bytes -> an owned IRasterBitmap (the ADOPTED decoded BLImage), for the composition's
+// Decode encoded image bytes -> an owned IRasterBitmap (the ADOPTED decoded BLImage), for the composition's
 // DrawImage seam (the layout carries the resolved bytes; the composition decodes them here -> FPaintOp.Image -> blit).
-// Returns null on a null/empty/undecodable input (the caller skips the draw, leaving the box blank — the no-op the proof REDs).
+// Returns null on a null/empty/undecodable input (the caller skips the draw, leaving the image's box blank).
 TUniquePtr<IRasterBitmap> DecodeImage(const uint8* EncodedData, int32 EncodedSize)
 {
 	TUniquePtr<FBlend2DBitmap> Bitmap = MakeUnique<FBlend2DBitmap>();

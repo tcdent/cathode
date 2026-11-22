@@ -10,12 +10,12 @@ THIRD_PARTY_INCLUDES_START
 #include "quickjs.h"
 THIRD_PARTY_INCLUDES_END
 
-// Specs for the event system: listener hold + gc_mark visibility (the node<->listener cycle, THE Model-A
+// Specs for the event system: listener hold + gc_mark visibility (the node<->listener cycle
 // hazard) + removeEventListener reference-drop; dispatch bubble ORDER; stopPropagation / preventDefault. Drive
 // the C++ dispatch algorithm directly with a RECORDING invoker (the FDomEvent -> JS Event object marshaling is
-// the deferred generate-from-interface part). Assert OUR bookkeeping (mark count, CurrentTarget order, flags).
+// covered by the JS-binding dispatch tests below). Assert OUR bookkeeping (mark count, CurrentTarget order, flags).
 // gc_mark VISIBILITY (the listener is marked) is proved by FCathodeDomListenerTest. The actual cyclic RECLAIM
-// — a real JS_RunGC freeing a node<->listener reference cycle — is the 011 [c] discharge below
+// — a real JS_RunGC freeing a node<->listener reference cycle — is proved below
 // (FCathodeDomCyclicGcReclaimTest): a measured live-object drop across a real GC, distinct from visibility.
 
 namespace
@@ -67,7 +67,7 @@ bool FCathodeDomListenerTest::RunTest(const FString& Parameters)
 	Parent->AddEventListener(TEXT("click"), MoveTemp(Fn));
 
 	// gc_mark VISITS both the child wrapper AND the listener -> the cycle is GC-VISIBLE (reclaimable). The
-	// actual cyclic reclaim needs a real JS_RunGC -> validation-pass.
+	// actual cyclic reclaim needs a real JS_RunGC -> FCathodeDomCyclicGcReclaimTest.
 	GMarkCount = 0;
 	Parent->MarkHeldRefs(Rt, &CountingMark);
 	TestEqual(TEXT("gc_mark visits child + listener (cycle GC-visible)"), GMarkCount, 2);
@@ -240,15 +240,15 @@ bool FCathodeDomSameNodeStopTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 011 [c] target 4 — CYCLIC JS_RunGC RECLAIM (the come-due discharge).
+// CYCLIC JS_RunGC RECLAIM.
 //
 // Builds a real node<->listener reference CYCLE entirely on the C++/test-seam path (NOT via uninstalled DOM JS
 // globals — the bare runtime has no document): the node's native gc_mark reports the listener (node -> listener
 // edge), and a JS back-edge (listener.node = the node's wrapper) closes it (listener -> node-wrapper). With all
 // external handles dropped, the cycle's refcounts never reach zero, so refcounting ALONE cannot reclaim it.
 //
-// The ORACLE is a MEASURED live-object DROP across a REAL JS_RunGC — distinct from gc_mark VISIBILITY (008,
-// FCathodeDomListenerTest). The non-owning, wrapper-graph-governed node index (FindNode; ~FDomNode ->
+// The ORACLE is a MEASURED live-object DROP across a REAL JS_RunGC — distinct from gc_mark VISIBILITY
+// (FCathodeDomListenerTest). The non-owning, wrapper-graph-governed node index (FindNode; ~FDomNode ->
 // UnregisterNode) is the live-object probe: present before GC (cycle leaks), absent after GC (cycle reclaimed).
 // The contrast (1 -> 0 across the single real GC) is the proof; without the GC it stays 1.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -305,14 +305,14 @@ bool FCathodeDomCyclicGcReclaimTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 slice 1 — the single binding-definition mechanism, criterion 2 (the first members REALLY work) +
-// a criterion-1 structural check (install <-> enumerate from the ONE table).
+// The single binding-definition mechanism: the bound members REALLY work +
+// a structural check (install <-> enumerate from the ONE table).
 //
 // Drives the REAL installed members through JS member access (the wrapper's own/proto bindings) and asserts the
 // marshaled value == FDomNode's OWN return (not a hand-typed constant). getAttribute (method, string->string|null)
 // + tagName (property getter). Then asserts BOTH members are present on the real proto (install side, via
 // JS_GetOwnPropertyNames) AND in the descriptor (enumerate side, GetDomNodeDescriptorJson) — both from the one
-// FBoundMember table. (The full faculty lockstep + the discriminating omit-case is the next step.)
+// FBoundMember table.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomMemberBindingTest,
 	"Cathode.Dom.Binding.MemberRoundTrip",
@@ -382,7 +382,7 @@ bool FCathodeDomMemberBindingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 slice 2 — the FULL node-core surface. Each member exercised through the REAL installed binding
+// The FULL node-core surface. Each member exercised through the REAL installed binding
 // (JS member access -> thunk -> FDomNode) against the primitive's OWN output: === identity on node-returning
 // paths (incl the DETACHED parentNode case the borrowed back-ref makes complete), real-state mutator read-backs
 // (the parent's ACTUAL children / the real attribute), nodeType/nodeName/data, and the childNodes NodeList-typed
@@ -495,7 +495,7 @@ bool FCathodeDomNodeCoreTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Sprint 012 slice 3 — reflected properties id + className (behavioral-contract #1, name-in-dom routing). Each
+// Reflected properties id + className (name-in-dom routing). Each
 // reflects the attribute store live (getter reads / setter writes the attribute, NO backing field) so the JS
 // property can never desync from setAttribute/getAttribute. className reflects the 'class' attribute (the name
 // translation), proven both directions. Reflected-DOMString semantics: an absent attribute reflects as "".
@@ -537,7 +537,7 @@ bool FCathodeDomReflectedPropTest::RunTest(const FString& Parameters)
 	// distinction. Checked on the fresh element BEFORE any id is set.
 	TestTrue(TEXT("absent id reflects as '' (empty string, not null)"), EvalBool("__el.id === '' && typeof __el.id === 'string'"));
 
-	// Name-in-dom precondition (#1) + the translation is REAL: id/className ARE bound JS properties; 'class' is
+	// Name-in-dom precondition + the translation is REAL: id/className ARE bound JS properties; 'class' is
 	// NOT (it is the attribute name, reached only via getAttribute/setAttribute).
 	TestTrue(TEXT("'id' in el === true (name-in-dom routing precondition)"), EvalBool("('id' in __el) === true"));
 	TestTrue(TEXT("'className' in el === true (name-in-dom routing precondition)"), EvalBool("('className' in __el) === true"));
@@ -557,10 +557,10 @@ bool FCathodeDomReflectedPropTest::RunTest(const FString& Parameters)
 }
 
 // =====================================================================================================================
-// Sprint 012 events (the event mechanism) — DISPATCH-CORRECTNESS through the REAL JS bindings.
+// Events (the event mechanism) — DISPATCH-CORRECTNESS through the REAL JS bindings.
 //
-// The 008 tests above drive the C++ DispatchEvent algorithm with a recording INVOKER (the marshaling was deferred).
-// These NEW tests drive the WHOLE path: real JS listeners installed via the bound addEventListener, fired by a
+// The tests above drive the C++ DispatchEvent algorithm with a recording INVOKER (no marshaling).
+// These tests drive the WHOLE path: real JS listeners installed via the bound addEventListener, fired by a
 // C++-synthetic keydown (the production DispatchKeyboardEvent that builds the LIVE shared Event object), asserting
 // the marshaled Event surface (type/target/currentTarget/eventPhase/key/code/isExtensible) and the exact ordering.
 // =====================================================================================================================
@@ -857,9 +857,9 @@ bool FCathodeDomEventJsIdentityTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// PROOF 4a (gc_mark fold-in) — a REAL JS listener installed via addEventListener that CLOSES OVER its own node
+// PROOF 4a (gc_mark) — a REAL JS listener installed via addEventListener that CLOSES OVER its own node
 // wrapper forms the node↔listener cycle ENTIRELY through the bound API (distinct from the C++-seam JS_SetPropertyStr
-// cycle in FCathodeDomCyclicGcReclaimTest — NOT "covered by T4"). The node is standalone (NOT in the document graph),
+// cycle in FCathodeDomCyclicGcReclaimTest). The node is standalone (NOT in the document graph),
 // so once every external handle is dropped only the cycle holds the wrapper; a single real JS_RunGC RECLAIMS it
 // (FindNode 1→0). This is the node gc_mark reporting the listener edge → the cycle collector frees the cycle.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -914,14 +914,14 @@ bool FCathodeDomEventJsClosureReclaimTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// PROOF 4b (gc_mark fold-in) — the SAFE branch that proves document.gc_mark STAYS REMOVED. A node appended to the
+// PROOF 4b (gc_mark) — the SAFE branch that proves document.gc_mark STAYS ABSENT. A node appended to the
 // document graph carries a listener that CLOSES OVER globalThis.document (the listener→document-wrapper cycle the
 // event API makes formable). Dropping globalThis.document while the C++ FDomDocument stays alive does NOT collect
 // the document: the C++-owning RootWrapper (null finalizer, NOT an in-graph gc_mark edge) pins the document graph,
 // so the node SURVIVES the GC (FindNode != null) — benign over-retention, NO premature collection, NO UAF. This is
 // EXACTLY the cycle that, were document.gc_mark (unsafely) re-added, would let the collector free the C++-owned root
-// out from under the live RootWrapper. We assert the safe behavior; we do NOT re-add gc_mark. (COVERAGE.md: the
-// event API INVERTS the S5 prediction — re-add UNSAFE, not needed.)
+// out from under the live RootWrapper. We assert the safe behavior; we do NOT re-add gc_mark. (COVERAGE.md:
+// with the event API bound, re-adding it is UNSAFE and not needed.)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomEventDocOverRetentionTest,
 	"Cathode.Dom.Event.ListenerDocumentOverRetention",
@@ -969,7 +969,7 @@ bool FCathodeDomEventDocOverRetentionTest::RunTest(const FString& Parameters)
 
 	JS_RunGC(Rt);
 
-	// SAFE BRANCH: document.gc_mark is REMOVED → the collector does NOT treat the C++-owned root as collectible →
+	// SAFE BRANCH: document.gc_mark is ABSENT → the collector does NOT treat the C++-owned root as collectible →
 	// the RootWrapper pins the document graph → the node SURVIVES (no premature collection, no UAF).
 	const bool bSurvives = Doc->FindNode(NodeId) != nullptr;
 	TestTrue(TEXT("listener→document cycle is benignly OVER-RETAINED across GC (root survives, no UAF)"), bSurvives);
@@ -977,11 +977,11 @@ bool FCathodeDomEventDocOverRetentionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 030 S1-P1 — THE DOCUMENT-BUBBLE PROOF: the document is an EventTarget at the TOP of the bubble path. A keydown dispatched
-// at a CHILD bubbles UP to document.addEventListener('keydown') (the ratified handshake target). Asserts: bubble order is
+// THE DOCUMENT-BUBBLE PROOF: the document is an EventTarget at the TOP of the bubble path. A keydown dispatched
+// at a CHILD bubbles UP to document.addEventListener('keydown') (the keyboard-input handshake target). Asserts: bubble order is
 // child→document (the document fires LAST, after the tree), e.key reads off the LIVE event ('ArrowUp'), e.type==='keydown',
-// and e.currentTarget === document (the document-as-currentTarget seam). Pre-P1 the document was neither an EventTarget nor in
-// the bubble path, so a document keydown listener could NEVER fire — this is the load-bearing S1-P1 proof.
+// and e.currentTarget === document (the document-as-currentTarget seam). A document that is not an EventTarget or not in
+// the bubble path NEVER fires a document keydown listener -> FAILS.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomDocumentBubbleTargetTest,
 	"Cathode.Dom.Event.DocumentBubbleTarget",
@@ -1063,7 +1063,7 @@ bool FCathodeDomDocumentBubbleTargetTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// 030 S1 — THE SAFE DOCUMENT-LISTENER INVARIANT (replaces a false reclaim-direction proof; document.gc_mark RULED OUT 030 S1).
+// THE SAFE DOCUMENT-LISTENER INVARIANT.
 // document.gc_mark STAYS nullptr — and that is SAFE precisely because the production document is ALWAYS rooted (globalThis
 // .document, the per-surface InstallAsGlobal repoint). This proves THAT production invariant: a CYCLIC listener ON the document
 // (the listener closes over the document wrapper) + a detached node N hung off it, while the document stays globalThis-rooted
@@ -1071,8 +1071,8 @@ bool FCathodeDomDocumentBubbleTargetTest::RunTest(const FString& Parameters)
 // listener (C++ refcount) → the listener holds N → all reachable via the rooted wrapper → benignly retained, not garbage (the
 // listeners are the app's live keydown handlers for the surface's lifetime).
 //   WHY NOT a reclaim-direction test: reclaim would only happen under an artificial `delete globalThis.document` that
-//   production never does — and re-adding a document gc_mark to make THAT reclaimable was ATTEMPTED in S1 and CRASHED with the
-//   COVERAGE-predicted UAF (the null-finalizer document outlives its wrapper → reclaiming the cycle dangles its listener refs).
+//   production never does — and re-adding a document gc_mark to make THAT reclaimable CRASHES with the
+//   UAF COVERAGE.md describes (the null-finalizer document outlives its wrapper → reclaiming the cycle dangles its listener refs).
 //   The node has a non-null finalizer that coordinates listener teardown; the document does not. See CathodeDom/COVERAGE.md.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FCathodeDomDocumentListenerOverRetentionTest,

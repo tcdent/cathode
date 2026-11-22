@@ -3,7 +3,7 @@
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 
-// --- Build-coherence link-ids (sprint 011 + [c]-prep cross-module hardening) ---
+// --- Build-coherence link-ids (per-module + cross-module aggregate) ---
 //
 // A module's link-id is read from its loaded PE image: the linker rewrites the PE TimeDateStamp + CodeView PDB
 // GUID on EVERY link of that DLL. Unlike a per-TU __DATE__/__TIME__ (stale unless that .cpp recompiles), the
